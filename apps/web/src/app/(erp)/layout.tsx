@@ -1,18 +1,40 @@
-import { ApplicationShell } from "@/components/shell/application-shell";
 import { Suspense } from "react";
-import { ApplicationProviders } from "@/components/providers/application-providers";
+import { demoMode } from "@/lib/server/mode";
+import { LiveProviders } from "@/features/auth/session-provider";
+import { LiveContext } from "@/features/live/context";
+import { LiveShell, Protected } from "@/features/live/shell";
+async function Workspace({ children }: { children: React.ReactNode }) {
+  if (await demoMode()) {
+    const [{ ApplicationProviders }, { ApplicationShell }] = await Promise.all([
+      import("@/components/providers/application-providers"),
+      import("@/components/shell/application-shell"),
+    ]);
+    return (
+      <ApplicationProviders>
+        <ApplicationShell>{children}</ApplicationShell>
+      </ApplicationProviders>
+    );
+  }
+  return (
+    <LiveProviders>
+      <Protected>
+        <LiveContext>
+          <LiveShell>{children}</LiveShell>
+        </LiveContext>
+      </Protected>
+    </LiveProviders>
+  );
+}
 export default function ERPLayout({ children }: { children: React.ReactNode }) {
   return (
     <Suspense
       fallback={
         <p className="p-page" role="status">
-          Loading DriveCore mock workspace…
+          Loading DriveCore…
         </p>
       }
     >
-      <ApplicationProviders>
-        <ApplicationShell>{children}</ApplicationShell>
-      </ApplicationProviders>
+      <Workspace>{children}</Workspace>
     </Suspense>
   );
 }

@@ -21,6 +21,7 @@ export default defineConfig({
   ],
   webServer: {
     command: "npm run start -- --port 3100",
+    env: { DRIVECORE_MODE: "demo", DRIVECORE_API_ORIGIN: "" },
     url: "http://127.0.0.1:3100",
     reuseExistingServer: !process.env.CI,
   },

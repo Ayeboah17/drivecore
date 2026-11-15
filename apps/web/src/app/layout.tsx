@@ -10,8 +10,7 @@ const inter = Inter({
 
 export const metadata: Metadata = {
   title: "DriveCore | Operational workspace",
-  description:
-    "DriveCore operational workspace — explicitly labelled mock demonstration",
+  description: "DriveCore authenticated company workspace",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
