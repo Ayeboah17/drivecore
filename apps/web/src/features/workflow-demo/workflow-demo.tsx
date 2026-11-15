@@ -19,6 +19,7 @@ import {
   Settings2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { DriveCoreLogo } from "@/components/brand/drivecore-mark";
 import {
   Dialog,
   DialogContent,
@@ -263,9 +264,9 @@ export function WorkflowDemo() {
     <Link
       href="/companies"
       prefetch={false}
-      className="rounded-sm text-xl font-semibold focus-visible:outline-2 focus-visible:outline-ring"
+      className="rounded-xl focus-visible:outline-2 focus-visible:outline-ring"
     >
-      <span className="text-primary">D</span>riveCore
+      <DriveCoreLogo badge="DEMO" />
     </Link>
   );
   const banner = (
@@ -383,9 +384,9 @@ export function WorkflowDemo() {
       <aside
         className={`sticky top-0 hidden h-dvh shrink-0 flex-col border-r bg-sidebar lg:flex ${collapsed ? "w-sidebar-collapsed" : "w-sidebar"}`}
       >
-        <div className="flex h-topbar items-center border-b px-6">
+        <div className="flex h-topbar items-center border-b px-4">
           {collapsed ? (
-            <span className="text-xl font-semibold text-primary">D</span>
+            <DriveCoreLogo collapsed />
           ) : (
             brand
           )}

@@ -51,7 +51,7 @@ export function RecordDirectory({
         filters, pagination and totals are unavailable until that server
         contract is provided.
       </StatePanel>
-      <section className="max-w-xl space-y-4 rounded-card border bg-surface p-card">
+      <section className="dc-shadow-card max-w-xl space-y-4 rounded-2xl border bg-surface p-card">
         <div className="space-y-2">
           <h2 className="text-section-heading">Open a known record</h2>
           <p className="text-sm text-muted-foreground">

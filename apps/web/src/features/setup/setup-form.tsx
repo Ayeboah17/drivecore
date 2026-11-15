@@ -85,7 +85,7 @@ export function SetupForm({
       className={
         presentation === "dialog"
           ? "space-y-5"
-          : "max-w-xl space-y-4 rounded-card border bg-surface p-card"
+          : "dc-shadow-card max-w-xl space-y-4 rounded-2xl border bg-surface p-card"
       }
       aria-label={`Create ${kind}`}
     >

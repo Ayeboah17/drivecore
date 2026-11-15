@@ -264,7 +264,7 @@ export function CustomerForm({ record }: { record?: Customer }) {
     <form
       noValidate
       aria-busy={save.busy}
-      className="max-w-xl space-y-4 rounded-card border bg-surface p-card"
+      className="dc-shadow-card max-w-xl space-y-4 rounded-2xl border bg-surface p-card"
       onSubmit={handleSubmit(async (values) => {
         try {
           await save.save({
@@ -374,7 +374,7 @@ export function VehicleForm({ record }: { record?: Vehicle }) {
     <form
       noValidate
       aria-busy={save.busy}
-      className="max-w-xl space-y-4 rounded-card border bg-surface p-card"
+      className="dc-shadow-card max-w-xl space-y-4 rounded-2xl border bg-surface p-card"
       onSubmit={handleSubmit(async (values) => {
         try {
           await save.save({

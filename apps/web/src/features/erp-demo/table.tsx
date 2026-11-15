@@ -10,14 +10,14 @@ import {
   TableHead,
   TableCell,
 } from "@/components/ui/table";
-import {
-  valueOf,
-  entities,
-  type Database,
-  type DemoContext,
-  type Entity,
-  type Kind,
+import type {
+  Database,
+  DemoContext,
+  Entity,
+  Kind,
+  Of,
 } from "@/lib/demo/types";
+import { valueOf, entities } from "@/lib/demo/types";
 import {
   label,
   rows,
@@ -101,6 +101,20 @@ export interface TableState {
   sort: string;
   page: number;
 }
+const monoColumns = new Set([
+  "registration",
+  "odometer",
+  "dailyRate",
+  "total",
+  "amount",
+  "unitCost",
+  "labourCost",
+  "partsCost",
+  "sku",
+  "minimum",
+  "quantity",
+]);
+
 export function RecordTable({
   db,
   ctx,
@@ -108,6 +122,7 @@ export function RecordTable({
   state,
   onState,
   onView,
+  onOpen360,
   range,
 }: {
   db: Database;
@@ -116,6 +131,7 @@ export function RecordTable({
   state: TableState;
   onState: (next: Partial<TableState>) => void;
   onView: (id: string) => void;
+  onOpen360?: (vehicle: Of<"vehicle">) => void;
   range: Range;
 }) {
   const spec = screens[kind];
@@ -170,7 +186,7 @@ export function RecordTable({
   return (
     <section
       aria-label={spec.label}
-      className="overflow-hidden rounded-card border bg-surface"
+      className="dc-shadow-card overflow-hidden rounded-2xl border bg-surface"
     >
       <div className="flex flex-col flex-wrap items-end gap-3 border-b p-card lg:flex-row">
         <form
@@ -269,23 +285,29 @@ export function RecordTable({
                     {spec.columns.map((key) => (
                       <TableCell
                         key={key}
-                        className={
+                        className={`${
                           key === spec.columns[0]
                             ? "max-w-64 truncate font-medium"
                             : "max-w-56 truncate"
-                        }
+                        } ${monoColumns.has(key) ? "font-mono tabular-nums" : ""}`}
                       >
                         {["status", "condition"].includes(key) ? (
                           <Status value={cell(db, e, key)} />
+                        ) : key === "registration" ? (
+                          <span className="inline-block rounded-md bg-structural px-2 py-0.5 text-xs font-bold text-structural-foreground">
+                            {cell(db, e, key)}
+                          </span>
                         ) : (
                           cell(db, e, key)
                         )}
                       </TableCell>
                     ))}
                     {e.kind === "part" ? (
-                      <TableCell>{stock(db, e.id)}</TableCell>
+                      <TableCell className="font-mono tabular-nums">
+                        {stock(db, e.id)}
+                      </TableCell>
                     ) : e.kind === "invoice" ? (
-                      <TableCell>
+                      <TableCell className="font-mono tabular-nums">
                         {money(
                           db,
                           e.companyId,
@@ -294,14 +316,25 @@ export function RecordTable({
                       </TableCell>
                     ) : null}
                     <TableCell>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => onView(e.id)}
-                        aria-label={`View ${label(e)}`}
-                      >
-                        View
-                      </Button>
+                      <div className="flex items-center justify-end gap-1">
+                        {e.kind === "vehicle" && onOpen360 ? (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => onOpen360(e)}
+                          >
+                            360° File
+                          </Button>
+                        ) : null}
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => onView(e.id)}
+                          aria-label={`View ${label(e)}`}
+                        >
+                          View
+                        </Button>
+                      </div>
                     </TableCell>
                   </TableRow>
                 ))}

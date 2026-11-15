@@ -43,6 +43,10 @@ import { Detail } from "./detail";
 import { PrototypeShell } from "./shell";
 import { DemoEntry } from "./entry";
 import { ModuleMetrics } from "./metrics";
+import { DomainShowcase } from "./domain-panels";
+import { Vehicle360Modal } from "./vehicle-360-modal";
+import { projectVehicles, type VehicleProjection } from "./projections";
+import { DriveCoreMotionProvider, ViewFadeIn } from "@/components/motion/primitives";
 import "./demo.css";
 function safeCompanies(
   db: Parameters<typeof companyOptions>[0],
@@ -65,13 +69,14 @@ interface Modal {
   token: string;
 }
 function Workspace() {
-  const { db, execute, reset, busy, notice, clearNotice } = useDemo(),
+  const { db, execute, reset, busy, notice, clearNotice, now } = useDemo(),
     params = useSearchParams();
   const [resetOpen, setResetOpen] = useState(false),
     [resetBusy, setResetBusy] = useState(false),
     [modal, setModal] = useState<Modal | null>(null),
     [formBusy, setFormBusy] = useState(false),
-    [resetError, setResetError] = useState("");
+    [resetError, setResetError] = useState(""),
+    [modal360, setModal360] = useState<VehicleProjection | null>(null);
   const dark = params.get("theme") === "dark";
   useEffect(() => {
     document.documentElement.classList.toggle("dark", dark);
@@ -249,14 +254,26 @@ function Workspace() {
       token,
     });
   }
+  function open360ForVehicleId(vehicleId: string) {
+    try {
+      const proj = projectVehicles(db, ctx, now).find(
+        (p) => p.vehicle.id === vehicleId,
+      );
+      if (proj) setModal360(proj);
+    } catch {
+      /* Ignore when context is unavailable */
+    }
+  }
   return (
     <PrototypeShell
       db={db}
       ctx={ctx}
       view={view}
+      range={range}
       busy={busy}
       dark={dark}
       onNavigate={go}
+      onOpenRecord={open}
       onReset={() => setResetOpen(true)}
     >
       <main
@@ -400,13 +417,30 @@ function Workspace() {
               ) : null}
             </div>
             <ModuleMetrics db={db} ctx={ctx} view={view} range={range} />
+            <ViewFadeIn key={`${view}:${tab ?? ""}:${id}`} className="space-y-6">
             {view === "dashboard" || view === "operations" ? (
               <Overview
                 db={db}
                 ctx={ctx}
                 range={range}
                 onOpen={open}
+                onNewQuote={() =>
+                  go({ view: "rentals", tab: "quotation", id: "" })
+                }
                 operational={view === "operations"}
+              />
+            ) : null}
+            {!id &&
+            !["dashboard", "operations", "reports"].includes(view) ? (
+              <DomainShowcase
+                view={view}
+                tab={tab}
+                ledgerMode={params.get("ledger") === "1"}
+                db={db}
+                ctx={ctx}
+                onNavigate={go}
+                onOpenRecord={open}
+                onOpen360={(proj) => setModal360(proj)}
               />
             ) : null}
             {view === "reports" ? (
@@ -482,6 +516,7 @@ function Workspace() {
                         ctx={ctx}
                         entity={record!}
                         onOpen={open}
+                        onOpen360={(v) => open360ForVehicleId(v.id)}
                         onEdit={() =>
                           setModal({
                             title: `Edit ${label(record!)}`,
@@ -545,12 +580,14 @@ function Workspace() {
                           ),
                         )
                       }
+                      onOpen360={(v) => open360ForVehicleId(v.id)}
                       onView={(id) => go({ id })}
                     />
                   </div>
                 ) : null}
               </>
             )}
+            </ViewFadeIn>
           </>
         )}
         <footer className="border-t pt-4 text-label text-muted-foreground">
@@ -654,6 +691,13 @@ function Workspace() {
           ) : null}
         </DialogContent>
       </Dialog>
+      <Vehicle360Modal
+        projection={modal360}
+        db={db}
+        ctx={ctx}
+        onClose={() => setModal360(null)}
+        onOpenRecord={(entity) => open(entity)}
+      />
     </PrototypeShell>
   );
 }
@@ -675,8 +719,10 @@ function InputDate({
 }
 export function ErpDemo() {
   return (
-    <DemoProvider>
-      <Workspace />
-    </DemoProvider>
+    <DriveCoreMotionProvider>
+      <DemoProvider>
+        <Workspace />
+      </DemoProvider>
+    </DriveCoreMotionProvider>
   );
 }

@@ -390,15 +390,29 @@ test("live shell preserves light/dark tokens, keyboard navigation and mobile lay
 }) => {
   await login(page, "admin");
   await page.goto("/companies/1/dashboard?branch=all");
-  await expect(page.getByTestId("sidebar")).toHaveCSS("width", "248px");
-  await page.getByRole("button", { name: "Toggle sidebar" }).click();
-  await expect(page.getByTestId("sidebar")).toHaveCSS("width", "72px");
+  await expect(page.getByTestId("topbar")).toBeVisible();
+  const mainNav = page.getByRole("navigation", {
+    name: "Main navigation",
+    exact: true,
+  });
+  await expect(mainNav).toBeVisible();
   const primary = await page.evaluate(() =>
     getComputedStyle(document.documentElement)
       .getPropertyValue("--primary")
       .trim(),
   );
-  await page.evaluate(() => document.documentElement.classList.add("dark"));
+  await page.getByRole("button", { name: "Switch to dark mode" }).click();
+  await expect
+    .poll(() =>
+      page.evaluate(() => document.documentElement.classList.contains("dark")),
+    )
+    .toBe(true);
+  await page.reload();
+  await expect
+    .poll(() =>
+      page.evaluate(() => document.documentElement.classList.contains("dark")),
+    )
+    .toBe(true);
   expect(
     await page.evaluate(() =>
       getComputedStyle(document.documentElement)

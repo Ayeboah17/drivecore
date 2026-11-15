@@ -1,4 +1,6 @@
 "use client";
+
+import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
   Table,
@@ -20,10 +22,19 @@ import {
   ledger,
   type Range,
 } from "@/lib/demo/selectors";
-import { invoiceBalance, stock } from "@/lib/demo/rules";
+import {
+  invoiceBalance,
+  stock,
+  vehicleStatus as vehicleStatusForReport,
+} from "@/lib/demo/rules";
 import { exportCsv } from "./table";
 import { selectClass } from "./form";
 import { useDemo } from "./provider";
+import { ExecutiveMapSection } from "./executive-map";
+import { InspectionStudio } from "./inspection-studio";
+import { Vehicle360Modal } from "./vehicle-360-modal";
+import type { VehicleProjection } from "./projections";
+
 export function Stat({
   label: caption,
   value,
@@ -34,13 +45,18 @@ export function Stat({
   note?: string;
 }) {
   return (
-    <section className="space-y-2 rounded-card border bg-surface p-card">
-      <h2 className="text-label text-muted-foreground">{caption}</h2>
-      <p className="text-page-title tabular-nums">{value}</p>
+    <section className="dc-shadow-card space-y-1.5 rounded-2xl border bg-surface p-card">
+      <h2 className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
+        {caption}
+      </h2>
+      <p className="font-mono text-2xl font-extrabold tracking-tight text-foreground tabular-nums">
+        {value}
+      </p>
       {note ? <p className="text-label text-muted-foreground">{note}</p> : null}
     </section>
   );
 }
+
 function Trend({
   title,
   points,
@@ -52,8 +68,8 @@ function Trend({
 }) {
   const max = Math.max(1, ...points.map((p) => Math.abs(p.value)));
   return (
-    <section className="min-w-0 space-y-4 rounded-card border bg-surface p-card">
-      <h2 className="text-section-heading">{title}</h2>
+    <section className="dc-shadow-card min-w-0 space-y-4 rounded-2xl border bg-surface p-card">
+      <h2 className="text-section-heading font-extrabold">{title}</h2>
       <svg
         role="img"
         aria-label={`${title}: ${points.map((p) => `${p.label} ${currency ? (p.value / 100).toFixed(2) : p.value}`).join(", ")}`}
@@ -70,7 +86,7 @@ function Trend({
                 y={p.value >= 0 ? 90 - height : 90}
                 width="44"
                 height={height}
-                rx="3"
+                rx="4"
                 fill={
                   p.value < 0
                     ? "var(--danger)"
@@ -105,6 +121,7 @@ function Trend({
     </section>
   );
 }
+
 function Queue({
   title,
   records,
@@ -115,8 +132,13 @@ function Queue({
   onOpen: (e: Entity) => void;
 }) {
   return (
-    <section className="space-y-3 rounded-card border bg-surface p-card">
-      <h2 className="text-section-heading">{title}</h2>
+    <section className="dc-shadow-card space-y-3 rounded-2xl border bg-surface p-card">
+      <div className="flex items-center justify-between gap-2">
+        <h2 className="text-section-heading font-extrabold">{title}</h2>
+        <span className="rounded-md bg-muted px-2 py-0.5 font-mono text-xs font-bold text-muted-foreground">
+          {records.length}
+        </span>
+      </div>
       {!records.length ? (
         <p className="text-sm text-muted-foreground">
           No records in this window.
@@ -126,9 +148,11 @@ function Queue({
           {records.slice(0, 5).map((e) => (
             <li
               key={e.id}
-              className="flex items-center justify-between gap-3 py-3"
+              className="flex items-center justify-between gap-3 py-2.5"
             >
-              <span className="min-w-0 truncate text-sm">{label(e)}</span>
+              <span className="min-w-0 truncate text-sm font-medium">
+                {label(e)}
+              </span>
               <Button variant="ghost" size="sm" onClick={() => onOpen(e)}>
                 Open
               </Button>
@@ -139,20 +163,24 @@ function Queue({
     </section>
   );
 }
+
 export function Overview({
   db,
   ctx,
   range,
   onOpen,
+  onNewQuote,
   operational = false,
 }: {
   db: Database;
   ctx: DemoContext;
   range: Range;
   onOpen: (e: Entity) => void;
+  onNewQuote?: () => void;
   operational?: boolean;
 }) {
   const { now } = useDemo();
+  const [modal360, setModal360] = useState<VehicleProjection | null>(null);
   const s = summary(db, ctx, range);
   const departures = rows(db, ctx, "rental").filter(
     (r) =>
@@ -190,8 +218,23 @@ export function Overview({
       (r) => dayKey(r.createdAt) === date && inRange(r.createdAt, range),
     ).length,
   }));
+
   return (
     <div className="space-y-6">
+      {!operational && allowed(db, ctx, "fleet") ? (
+        <ExecutiveMapSection
+          db={db}
+          ctx={ctx}
+          range={range}
+          now={now}
+          onOpenRecord={onOpen}
+          onOpen360={(proj) => setModal360(proj)}
+          onNewQuote={() => onNewQuote?.()}
+        />
+      ) : null}
+
+      {operational ? <InspectionStudio db={db} ctx={ctx} /> : null}
+
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         {allowed(db, ctx, "rentals") ? (
           <>
@@ -235,6 +278,7 @@ export function Overview({
           </>
         ) : null}
       </div>
+
       {!operational ? (
         <div className="grid gap-6 xl:grid-cols-2">
           {allowed(db, ctx, "finance") ? (
@@ -252,6 +296,7 @@ export function Overview({
           ) : null}
         </div>
       ) : null}
+
       <div className="grid gap-6 xl:grid-cols-2">
         {allowed(db, ctx, "rentals") ? (
           <>
@@ -276,6 +321,7 @@ export function Overview({
           <Queue title="Maintenance alerts" records={work} onOpen={onOpen} />
         ) : null}
       </div>
+
       {!operational && allowed(db, ctx, "administration") ? (
         <Queue
           title="Recent activity"
@@ -285,14 +331,24 @@ export function Overview({
           onOpen={onOpen}
         />
       ) : null}
+
       <p className="text-label text-muted-foreground">
         Date filters apply to revenue, receipts, expenses and trend records.
         Current availability and operational queues reflect the current demo
         state. All business and accounting behavior is a prototype simulation.
       </p>
+
+      <Vehicle360Modal
+        projection={modal360}
+        db={db}
+        ctx={ctx}
+        onClose={() => setModal360(null)}
+        onOpenRecord={onOpen}
+      />
     </div>
   );
 }
+
 const reportTypes = [
   { id: "revenue", label: "Revenue", module: "finance" },
   { id: "rentals", label: "Rental performance", module: "rentals" },
@@ -304,6 +360,7 @@ const reportTypes = [
   { id: "expenses", label: "Expenses", module: "finance" },
   { id: "outstanding", label: "Outstanding invoices", module: "finance" },
 ] as const;
+
 export function Reports({
   db,
   ctx,
@@ -321,10 +378,11 @@ export function Reports({
 }) {
   const reports = reportTypes.filter((r) => allowed(db, ctx, r.module));
   const current = reports.find((r) => r.id === selected) ?? reports[0];
-  let headers: string[] = [],
-    data: (string | number)[][] = [];
+  let headers: string[] = [];
+  let data: (string | number)[][] = [];
   const name = (id: string) => db.entities.find((e) => e.id === id);
   const m = (n: number) => money(db, ctx.companyId, n);
+
   if (ledgerOnly) {
     headers = ["Date", "Account", "Debit", "Credit", "Reference"];
     data = ledger(db, ctx)
@@ -364,17 +422,17 @@ export function Reports({
         .filter((r) => r.vehicleId === v.id && r.status !== "cancelled")
         .reduce((n, r) => {
           const start = Math.max(
-              Date.parse(r.startsAt),
-              range.from
-                ? new Date(`${range.from}T00:00:00`).getTime()
-                : Date.parse(r.startsAt),
-            ),
-            end = Math.min(
-              Date.parse(r.returnedAt || r.endsAt),
-              range.to
-                ? new Date(`${range.to}T23:59:59.999`).getTime()
-                : Date.parse(r.returnedAt || r.endsAt),
-            );
+            Date.parse(r.startsAt),
+            range.from
+              ? new Date(`${range.from}T00:00:00`).getTime()
+              : Date.parse(r.startsAt),
+          );
+          const end = Math.min(
+            Date.parse(r.returnedAt || r.endsAt),
+            range.to
+              ? new Date(`${range.to}T23:59:59.999`).getTime()
+              : Date.parse(r.returnedAt || r.endsAt),
+          );
           return n + Math.max(0, (end - start) / 86400000);
         }, 0);
       return [
@@ -446,6 +504,7 @@ export function Reports({
         m(invoiceBalance(db, i.id).outstanding),
       ]);
   }
+
   const s = summary(db, ctx, range);
   return (
     <div className="space-y-5">
@@ -454,7 +513,7 @@ export function Reports({
           <label className="w-full max-w-sm space-y-2 text-label">
             Report
             <select
-              className={selectClass}
+              className={`${selectClass} rounded-xl`}
               value={current?.id ?? ""}
               onChange={(e) => onSelect(e.target.value)}
             >
@@ -466,10 +525,13 @@ export function Reports({
             </select>
           </label>
         ) : (
-          <h2 className="text-section-heading">Demo accounting ledger</h2>
+          <h2 className="text-section-heading font-extrabold">
+            Demo accounting ledger
+          </h2>
         )}
         <Button
           variant="outline"
+          className="rounded-xl"
           onClick={() =>
             exportCsv(
               ledgerOnly ? "demo-ledger" : `demo-${current?.id}`,
@@ -489,7 +551,7 @@ export function Reports({
           <Stat label="Outstanding" value={m(s.outstanding)} />
         </div>
       ) : null}
-      <section className="overflow-hidden rounded-card border bg-surface">
+      <section className="dc-shadow-card overflow-hidden rounded-2xl border bg-surface">
         <Table>
           <TableHeader>
             <TableRow>
@@ -502,7 +564,9 @@ export function Reports({
             {data.map((row, i) => (
               <TableRow key={i}>
                 {row.map((c, j) => (
-                  <TableCell key={j}>{c}</TableCell>
+                  <TableCell key={j} className="font-mono tabular-nums">
+                    {c}
+                  </TableCell>
                 ))}
               </TableRow>
             ))}
@@ -523,4 +587,3 @@ export function Reports({
     </div>
   );
 }
-import { vehicleStatus as vehicleStatusForReport } from "@/lib/demo/rules";

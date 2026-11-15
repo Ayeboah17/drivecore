@@ -94,7 +94,7 @@ export function RecordPage({ domain }: { domain: Domain }) {
           </p>
           <div
             aria-hidden="true"
-            className="space-y-5 rounded-card border bg-surface p-card"
+            className="dc-shadow-card space-y-5 rounded-2xl border bg-surface p-card"
           >
             <Skeleton className="h-7 w-56" />
             <Skeleton className="h-4 w-2/3" />
@@ -134,7 +134,7 @@ export function RecordPage({ domain }: { domain: Domain }) {
       {back}
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div className="min-w-0 space-y-2">
-          <h1 className="break-words text-page-title">
+          <h1 className="break-words text-page-title font-extrabold tracking-tight">
             {editing
               ? `Edit ${title.toLowerCase()}`
               : "name" in value
@@ -142,18 +142,21 @@ export function RecordPage({ domain }: { domain: Domain }) {
                 : value.registration}
           </h1>
           <div className="flex flex-wrap items-center gap-3 text-sm text-muted-foreground">
-            <span>
+            <span className="font-mono text-xs font-semibold tabular-nums">
               {title} #{value.id}
             </span>
             {"registration" in value ? (
               <>
+                <span className="rounded-md bg-structural px-2 py-0.5 font-mono text-xs font-bold text-structural-foreground">
+                  {value.registration}
+                </span>
                 <span>
                   {value.make} {value.model}
                 </span>
                 <VehicleStatus status={value.status} />
               </>
             ) : (
-              <span>
+              <span className="rounded-md bg-structural px-2 py-0.5 font-mono text-xs font-semibold text-structural-foreground">
                 {value.type === "individual" ? "Individual" : "Corporate"}
               </span>
             )}

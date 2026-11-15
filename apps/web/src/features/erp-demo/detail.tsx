@@ -42,6 +42,7 @@ export function Detail({
   onAction,
   onDelete,
   onOpen,
+  onOpen360,
 }: {
   db: Database;
   ctx: DemoContext;
@@ -50,6 +51,7 @@ export function Detail({
   onAction: (action: WorkflowAction) => void;
   onDelete: () => void;
   onOpen: (e: Entity) => void;
+  onOpen360?: (vehicle: Extract<Entity, { kind: "vehicle" }>) => void;
 }) {
   const linked = related(db, ctx, entity),
     ids = new Set([entity.id, ...linked.map((e) => e.id)]),
@@ -91,13 +93,22 @@ export function Detail({
     <div className="space-y-6">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div className="min-w-0 space-y-2">
-          <h2 className="break-words text-page-title">{label(entity)}</h2>
-          <Status value={displayStatus(db, entity)} />
-          <p className="break-all text-label text-muted-foreground">
-            Demo record · {entity.id}
-          </p>
+          <h2 className="break-words text-page-title font-extrabold tracking-tight">
+            {label(entity)}
+          </h2>
+          <div className="flex flex-wrap items-center gap-2">
+            <Status value={displayStatus(db, entity)} />
+            <span className="rounded-md bg-muted px-2 py-0.5 font-mono text-xs text-muted-foreground">
+              Demo record · {entity.id}
+            </span>
+          </div>
         </div>
         <div className="flex flex-wrap gap-2">
+          {entity.kind === "vehicle" && onOpen360 ? (
+            <Button variant="outline" onClick={() => onOpen360(entity)}>
+              360° File
+            </Button>
+          ) : null}
           {manage && editable(entity, db) ? (
             <Button variant="outline" onClick={onEdit}>
               Edit record
@@ -111,7 +122,7 @@ export function Detail({
         </div>
       </div>
       <div className="grid items-start gap-6 xl:grid-cols-3">
-        <section className="space-y-5 rounded-card border bg-surface p-card xl:col-span-2">
+        <section className="dc-shadow-card space-y-5 rounded-2xl border bg-surface p-card xl:col-span-2">
           <h3 className="text-section-heading">Record information</h3>
           <dl className="grid gap-5 sm:grid-cols-2">
             {fields.map((key) => (
@@ -134,7 +145,7 @@ export function Detail({
             </div>
           ) : null}
         </section>
-        <section className="space-y-4 rounded-card border bg-surface p-card">
+        <section className="dc-shadow-card space-y-4 rounded-2xl border bg-surface p-card">
           <h3 className="text-section-heading">Workflow actions</h3>
           {manage && workflow.length ? (
             <div className="flex flex-col items-start gap-3">
@@ -208,7 +219,7 @@ export function Detail({
           </p>
         </section>
       </div>
-      <section className="space-y-4 rounded-card border bg-surface p-card">
+      <section className="dc-shadow-card space-y-4 rounded-2xl border bg-surface p-card">
         <h3 className="text-section-heading">Related records & history</h3>
         {linked.length ? (
           <ul className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">

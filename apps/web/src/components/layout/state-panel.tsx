@@ -16,14 +16,16 @@ export function StatePanel({
 }) {
   return (
     <section
-      className="rounded-card border bg-surface p-card"
+      className="dc-shadow-card rounded-2xl border bg-surface p-card"
       aria-label={title}
     >
-      <div className="flex items-start gap-3">
-        <AlertCircle
-          className="mt-1 size-4 shrink-0 text-muted-foreground"
+      <div className="flex items-start gap-3.5">
+        <span
           aria-hidden="true"
-        />
+          className="flex size-9 shrink-0 items-center justify-center rounded-xl border bg-muted text-muted-foreground"
+        >
+          <AlertCircle className="size-4" aria-hidden="true" />
+        </span>
         <div className="min-w-0 space-y-2">
           <h2 className="text-card-heading">{title}</h2>
           <div className="text-sm text-muted-foreground">{children}</div>

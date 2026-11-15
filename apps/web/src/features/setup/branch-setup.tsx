@@ -22,7 +22,9 @@ export function BranchSetup() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-page-title">Set up branches</h1>
+        <h1 className="text-page-title font-extrabold tracking-tight">
+          Set up branches
+        </h1>
         <p className="mt-2 text-sm text-muted-foreground">
           Create a branch for {scope.company?.name}, then open the workspace to
           add customers and vehicles.
@@ -30,13 +32,16 @@ export function BranchSetup() {
       </div>
       <section
         aria-label="Company setup"
-        className="max-w-xl space-y-2 rounded-card border bg-surface p-card"
+        className="dc-shadow-card max-w-xl space-y-2 rounded-2xl border bg-surface p-card"
       >
         <h2 className="text-section-heading">Company</h2>
-        <p className="font-medium">{scope.company?.name}</p>
+        <p className="font-semibold">{scope.company?.name}</p>
         {scope.company?.currency ? (
           <p className="text-sm text-muted-foreground">
-            Currency: {scope.company.currency}
+            Currency:{" "}
+            <span className="ml-1 rounded-md bg-structural px-1.5 py-0.5 font-mono text-xs font-semibold text-structural-foreground">
+              {scope.company.currency}
+            </span>
           </p>
         ) : null}
         <p className="text-sm text-muted-foreground">
@@ -53,12 +58,20 @@ export function BranchSetup() {
       ) : branches.length ? (
         <section
           aria-label="Existing branches"
-          className="max-w-xl rounded-card border bg-surface p-card"
+          className="dc-shadow-card max-w-xl rounded-2xl border bg-surface p-card"
         >
           <h2 className="text-section-heading">Existing branches</h2>
           <ul className="mt-3 space-y-2">
             {branches.map((branch) => (
-              <li key={branch.id}>{branch.name}</li>
+              <li
+                key={branch.id}
+                className="flex items-center justify-between rounded-xl border bg-muted/40 px-3 py-2 text-sm font-medium"
+              >
+                <span>{branch.name}</span>
+                <span className="font-mono text-xs text-muted-foreground tabular-nums">
+                  #{branch.id}
+                </span>
+              </li>
             ))}
           </ul>
         </section>
