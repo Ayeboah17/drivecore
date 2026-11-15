@@ -148,19 +148,12 @@ export function CompaniesPage() {
 
       <footer className="dc-shadow-card flex flex-col items-start justify-between gap-4 rounded-2xl border bg-surface p-card sm:flex-row sm:items-center">
         <div>
-          <p className="text-sm font-semibold">Explore the workflow</p>
+          <p className="text-sm font-semibold">Explore the interactive ERP demo</p>
           <p className="mt-1 text-sm text-muted-foreground">
-            Try the setup demo with fictional data. Live records stay separate.
+            Try the interactive workspace with synthetic data. Live records stay separate.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-4">
-          <Link
-            href="/demo/workflow"
-            prefetch={false}
-            className="shrink-0 rounded-sm text-sm font-medium text-link hover:text-link-hover hover:underline focus-visible:outline-2 focus-visible:outline-ring"
-          >
-            Try workflow demo
-          </Link>
           <Link
             href="/demo/erp"
             prefetch={false}

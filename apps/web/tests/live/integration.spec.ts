@@ -47,8 +47,8 @@ test("anonymous protection, login rotation, restoration, no mock data and cross-
   await expect(page).toHaveURL(/\/login\?next=/);
   await login(page);
   await expect(
-    page.getByRole("link", { name: "Try workflow demo", exact: true }),
-  ).toHaveAttribute("href", "/demo/workflow");
+    page.getByRole("link", { name: "Explore full ERP demo", exact: true }),
+  ).toHaveAttribute("href", "/demo/erp");
   await page
     .getByRole("link", { name: "Open workspace: Synthetic One" })
     .click();
@@ -432,4 +432,30 @@ test("live shell preserves light/dark tokens, keyboard navigation and mobile lay
     ),
   ).toBe(true);
   await page.screenshot({ path: "test-results/live-shell-dark-mobile.png" });
+});
+
+test("post-login 401 on auth/me surfaces an explicit session cookie notice", async ({
+  page,
+}) => {
+  let rejectPostLoginMe = false;
+  await page.route("**/api/backend/api/v1/auth/me", async (route) => {
+    if (rejectPostLoginMe) {
+      await route.fulfill({
+        status: 401,
+        contentType: "application/json",
+        json: { message: "API request failed.", errors: {} },
+      });
+      return;
+    }
+    await route.continue();
+  });
+  await page.goto("/login");
+  rejectPostLoginMe = true;
+  await page.getByLabel("Email", { exact: true }).fill("admin@example.test");
+  await page.getByLabel("Password", { exact: true }).fill("synthetic");
+  await page.getByRole("button", { name: "Sign in", exact: true }).click();
+  await expect(page).toHaveURL(/\/login/);
+  await expect(
+    page.getByRole("alert").filter({ hasText: "SANCTUM_STATEFUL_DOMAINS" }),
+  ).toBeVisible();
 });

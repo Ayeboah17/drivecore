@@ -2,8 +2,27 @@
 export interface ProxyConfig {
   backend: string;
   app: string;
+  apps?: readonly string[];
   cookie: string;
   timeout: number;
+}
+function appOrigins(config: ProxyConfig): readonly string[] {
+  return config.apps?.length ? config.apps : [config.app];
+}
+function resolvedAppOrigin(request: Request, config: ProxyConfig): string {
+  const allowed = appOrigins(config);
+  const requestOrigin = request.headers.get("origin");
+  if (requestOrigin && allowed.includes(requestOrigin)) return requestOrigin;
+  const referer = request.headers.get("referer");
+  if (referer) {
+    try {
+      const refererOrigin = new URL(referer).origin;
+      if (allowed.includes(refererOrigin)) return refererOrigin;
+    } catch {
+      // Ignore malformed referer headers.
+    }
+  }
+  return allowed[0];
 }
 const privateHeaders = {
   "Cache-Control": "private, no-store, max-age=0",
@@ -46,7 +65,9 @@ export function browserCookie(raw: string, config: ProxyConfig): string | null {
     ...retained,
     "Path=/",
     "SameSite=Lax",
-    ...(new URL(config.app).protocol === "https:" ? ["Secure"] : []),
+    ...(appOrigins(config).some((item) => new URL(item).protocol === "https:")
+      ? ["Secure"]
+      : []),
     ...(name === config.cookie ? ["HttpOnly"] : []),
   ].join("; ");
 }
@@ -109,7 +130,9 @@ export async function proxy(
   )
     return failure(400, "Unsupported query parameters.");
   const mutation = request.method !== "GET";
-  if (mutation && request.headers.get("origin") !== config.app)
+  const allowed = appOrigins(config);
+  const requestOrigin = request.headers.get("origin");
+  if (mutation && (!requestOrigin || !allowed.includes(requestOrigin)))
     return failure(403, "Invalid request origin.");
   if (mutation && !request.headers.get("x-xsrf-token"))
     return failure(419, "CSRF verification required.");
@@ -146,10 +169,11 @@ export async function proxy(
         );
       }
     }
+    const activeOrigin = resolvedAppOrigin(request, config);
     const headers = new Headers({
       Accept: "application/json",
-      Origin: config.app,
-      Referer: `${config.app}/`,
+      Origin: activeOrigin,
+      Referer: `${activeOrigin}/`,
       "X-Requested-With": "XMLHttpRequest",
     });
     const cookies = forwardedCookies(

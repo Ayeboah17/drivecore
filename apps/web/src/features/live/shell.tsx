@@ -58,8 +58,8 @@ export function Protected({ children }: { children: React.ReactNode }) {
         <StatePanel
           title="Session unavailable"
           onRetry={session.refresh}
-          href="/demo/workflow"
-          linkLabel="Try workflow demo"
+          href="/demo/erp"
+          linkLabel="Explore full ERP demo"
         >
           {errorText(session.error)}
         </StatePanel>

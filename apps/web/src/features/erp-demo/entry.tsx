@@ -120,14 +120,7 @@ export function DemoEntry({
               <ArrowRight className="ml-2 size-4" aria-hidden="true" />
             </Button>
 
-            <div className="flex flex-wrap items-center justify-between gap-3 border-t pt-4">
-              <Link
-                href="/demo/workflow"
-                prefetch={false}
-                className="text-sm font-medium text-link hover:underline"
-              >
-                Use the setup walkthrough
-              </Link>
+            <div className="flex flex-wrap items-center justify-end gap-3 border-t pt-4">
               <Button variant="ghost" size="sm" onClick={onReset} className="gap-1.5">
                 <RotateCcw className="size-3.5" aria-hidden="true" />
                 Reset demo data

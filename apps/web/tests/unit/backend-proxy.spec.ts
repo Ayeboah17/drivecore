@@ -236,3 +236,41 @@ test("collection paging, search and proposed scope parameters cannot bypass the 
   }
   expect(calls).toBe(0);
 });
+
+test("multi-origin config accepts all allowlisted origins on mutations and rejects others", async () => {
+  const multiConfig: ProxyConfig = {
+    backend: "https://api.example.test",
+    app: "https://www.example.test",
+    apps: ["https://www.example.test", "https://example.test"],
+    cookie: "drivecore-session",
+    timeout: 100,
+  };
+  let seenHeaders: Headers | null = null;
+  const ok = await proxy(
+    new Request("https://example.test/api/backend/api/v1/auth/login", {
+      method: "POST",
+      headers: {
+        origin: "https://example.test",
+        "content-type": "application/json",
+        "x-xsrf-token": "synthetic",
+      },
+      body: "{}",
+    }),
+    "api/v1/auth/login",
+    multiConfig,
+    async (_url, init) => {
+      seenHeaders = new Headers(init?.headers);
+      return Response.json({ data: { ok: true } });
+    },
+  );
+  expect(ok.status).toBe(200);
+  expect(seenHeaders!.get("origin")).toBe("https://example.test");
+  expect(seenHeaders!.get("referer")).toBe("https://example.test/");
+
+  const rejected = await proxy(
+    make("api/v1/auth/login", "POST", { origin: "https://evil.example.test" }),
+    "api/v1/auth/login",
+    multiConfig,
+  );
+  expect(rejected.status).toBe(403);
+});

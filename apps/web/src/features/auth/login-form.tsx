@@ -113,6 +113,14 @@ export function LoginForm() {
                 {errors.password?.message}
               </p>
             </div>
+            {session.notice && !error ? (
+              <div
+                role="alert"
+                className="rounded-xl border border-danger/30 bg-danger-surface p-3 text-sm text-danger-foreground"
+              >
+                <p>{session.notice}</p>
+              </div>
+            ) : null}
             {error ? (
               <div role="alert" className="text-sm text-danger-foreground">
                 <p>{errorText(error)}</p>
@@ -147,16 +155,9 @@ export function LoginForm() {
           </form>
         )}
         <Link
-          href="/demo/workflow"
-          prefetch={false}
-          className="inline-block text-sm text-link"
-        >
-          Try workflow demo — no login needed
-        </Link>
-        <Link
           href="/demo/erp"
           prefetch={false}
-          className="block text-sm font-medium text-link"
+          className="block text-sm font-medium text-link hover:text-link-hover hover:underline"
         >
           Explore the full ERP demo
         </Link>
