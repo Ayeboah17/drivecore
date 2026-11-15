@@ -105,7 +105,9 @@ function SessionState({ children }: { children: React.ReactNode }) {
     <Context
       value={{
         user: identity.data ?? null,
-        pending: identity.isPending,
+        // A cached anonymous result is not a completed verification of the current session.
+        pending:
+          identity.isPending || (identity.data === null && identity.isFetching),
         error: identity.error,
         epoch,
         expire,

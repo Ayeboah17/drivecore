@@ -22,7 +22,9 @@ export function allowedPath(method: string, path: string) {
       path,
     );
   if (method === "POST")
-    return /^api\/v1\/(auth\/(login|logout)|customers|vehicles)$/.test(path);
+    return /^api\/v1\/(auth\/(login|logout)|companies|branches|customers|vehicles)$/.test(
+      path,
+    );
   return (
     method === "PATCH" && /^api\/v1\/(customers|vehicles)\/[1-9]\d*$/.test(path)
   );

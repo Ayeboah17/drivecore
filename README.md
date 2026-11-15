@@ -6,6 +6,7 @@ Next.js web ERP foundation with Laravel Sanctum session integration. The fronten
 
 - Real login, CSRF initialization, profile restoration, logout and cross-tab logout.
 - Permission-aware company workspace and branch selection where the authenticated contract supplies enough information.
+- Platform-administrator company creation and authorized branch setup using the existing Laravel endpoints.
 - Customer and vehicle creation, authorized detail lookup and editing.
 - Customer/vehicle collection pages deliberately unavailable: the current backend cannot filter by selected company/branch before pagination. No unscoped collection is downloaded, no fake totals are displayed, and there are no delete controls.
 - Dashboard operations, search and notifications show honest unavailable states in live mode. Documents and other ERP workflows are deferred.
@@ -27,6 +28,22 @@ npm run dev
 Edit `.env.local` with your disposable local API origin and actual Laravel session-cookie name. Open `http://localhost:3000`. `/` opens `/companies`; anonymous visitors are sent to `/login`.
 
 Do not point automated tests at production. No administrator credentials or API tokens are needed in frontend configuration. The user enters their credentials interactively into the login page; do not put them into files, logs, screenshots or environment variables.
+
+## Try the workflow demo
+
+Select **Try workflow demo** on sign-in, company selection or the session-unavailable screen, or open `/demo/workflow` directly. No login or environment change is required. The interactive walkthrough simulates company → branch → customer → vehicle creation, reusing the live field validators with fictional example values.
+
+Demo records persist across refresh in this browser under the versioned `drivecore.workflow-demo.v1` local-storage key. **Reset demo** asks for confirmation and removes only those demo records; other open demo tabs update too. Use fictional details only: this is browser storage, not a secure place for personal data. Unreadable or unavailable storage produces an explicit recovery message. The demo has no API client/session provider, sends no records to Laravel, and does not change live permissions, companies or caches. After loading, setup, navigation and record creation work offline; a first load or offline reload still depends on browser caching. This is separate from the environment-selected Milestone 2 operational dashboard demo below. See [workflow screenshots](documentation/screenshots/workflow-dashboard/README.md).
+
+## Set up a company and branch
+
+1. Sign in and open `/companies`. Choose **Open workspace** on an accessible company card. Verified platform administrators can also select the secondary **Create company** action to open its dialog, including when no companies exist. Enter a name and select USD, EUR, GHC or ZMW; GHC is selected by default. These frontend choices do not imply a currency-conversion service.
+2. After saving, the application refreshes the directory and opens **Set up branches**, showing the saved company and branch creation on the setup screen. Create at least one branch before entering the workspace. A reliably verified branchless company also returns here when opened through a direct dashboard URL.
+3. After creating a branch, use **Create another branch** to stay in setup, or **Continue to dashboard** / **Open workspace** when ready. Customer/vehicle actions retain their permission checks. Dashboard company and branch creation remain available to authorized users.
+
+Existing accessible companies have a **Set up branches** link when permitted. Branch creation requires `branches.manage` plus a membership with `branch_id: null`, or platform-administrator access. A company-admin role alone does not permit company creation. Empty non-admin accounts receive membership guidance; this flow does not assign memberships or create administrator accounts.
+
+Automated setup tests use synthetic records in the loopback fixture. No live records are created automatically. Customer/vehicle lists remain unavailable until the backend adds scope filtering; creation does not remove that dependency. Users who can create branches but cannot read the branch directory still need the backend owner to resolve directory access. Only a complete directory for a platform administrator or whole-company membership can prove that a company has zero branches. A restricted/unknown directory is never treated as proof of an empty company; the UI displays that limitation. This setup rule is frontend navigation behavior, not a new backend business constraint.
 
 ## Environment
 
@@ -82,6 +99,7 @@ If `.env.local` configures an API origin, remove that setting for this isolated 
 ## Code map
 
 - `apps/web/src/app`: App Router pages and allowlisted proxy Route Handler.
+- `src/app/(session)/layout.tsx`: one persistent live session/cache owner for sign-in and ERP routes. Route groups keep the public URLs unchanged; `/demo/workflow` stays outside this boundary.
 - `src/features/auth`: live session lifecycle and login.
 - `src/features/live`: real organization context and shell.
 - `src/features/records`: customer/vehicle services, schemas, forms and pages.

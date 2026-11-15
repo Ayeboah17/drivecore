@@ -1,6 +1,6 @@
 import { Suspense } from "react";
 import { demoMode } from "@/lib/server/mode";
-import { LiveProviders } from "@/features/auth/session-provider";
+
 import { LiveContext } from "@/features/live/context";
 import { LiveShell, Protected } from "@/features/live/shell";
 async function Workspace({ children }: { children: React.ReactNode }) {
@@ -16,13 +16,11 @@ async function Workspace({ children }: { children: React.ReactNode }) {
     );
   }
   return (
-    <LiveProviders>
-      <Protected>
-        <LiveContext>
-          <LiveShell>{children}</LiveShell>
-        </LiveContext>
-      </Protected>
-    </LiveProviders>
+    <Protected>
+      <LiveContext>
+        <LiveShell>{children}</LiveShell>
+      </LiveContext>
+    </Protected>
   );
 }
 export default function ERPLayout({ children }: { children: React.ReactNode }) {

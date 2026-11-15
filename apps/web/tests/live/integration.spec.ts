@@ -1,3 +1,4 @@
+import { signOut } from "./helpers";
 import {
   test,
   expect,
@@ -27,7 +28,7 @@ async function login(page: Page, role = "operations") {
   );
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
   await expect(
-    page.getByRole("heading", { name: "Choose a company" }),
+    page.getByRole("heading", { name: "Your workspace" }),
   ).toBeVisible();
   const after =
     (await page.context().cookies()).find(
@@ -45,7 +46,12 @@ test("anonymous protection, login rotation, restoration, no mock data and cross-
   await page.goto("/companies/1/dashboard?branch=all");
   await expect(page).toHaveURL(/\/login\?next=/);
   await login(page);
-  await page.getByRole("link", { name: "Synthetic One" }).click();
+  await expect(
+    page.getByRole("link", { name: "Try workflow demo", exact: true }),
+  ).toHaveAttribute("href", "/demo/workflow");
+  await page
+    .getByRole("link", { name: "Open workspace: Synthetic One" })
+    .click();
   await expect(
     page.getByRole("heading", { name: "Live data unavailable" }),
   ).toBeVisible();
@@ -67,7 +73,7 @@ test("anonymous protection, login rotation, restoration, no mock data and cross-
   await expect(
     other.getByText("Synthetic operator", { exact: true }),
   ).toBeVisible();
-  await page.getByRole("button", { name: "Sign out", exact: true }).click();
+  await signOut(page);
   await expect(page).toHaveURL(/\/login/);
   await expect(other).toHaveURL(/\/login/);
 });
@@ -193,10 +199,13 @@ test("viewer cannot write, inaccessible detail does not display, admin directory
   await expect(
     page.getByText("Other company customer", { exact: true }),
   ).toHaveCount(0);
-  await page.getByRole("button", { name: "Sign out" }).click();
+  await signOut(page);
   await login(page, "admin");
   await expect(
-    page.getByRole("link", { name: "Synthetic Three" }),
+    page.getByRole("link", {
+      name: "Open workspace: Synthetic Three",
+      exact: true,
+    }),
   ).toBeVisible();
   expect(
     (await (await request.get(`${fixture}/__test/stats`)).json())
@@ -227,7 +236,7 @@ test("directory blocker, empty membership, revoked membership and history do not
   await expect(
     page.getByRole("heading", { name: "Context unavailable" }),
   ).toBeVisible();
-  await page.getByRole("button", { name: "Sign out" }).click();
+  await signOut(page);
   await control(request, { revoked: false });
   await login(page, "driver");
   await expect(
@@ -241,7 +250,7 @@ test("session expiry and failed logout are explicit", async ({
   await login(page);
   await page.goto("/companies/1/dashboard?branch=all");
   await control(request, { logoutFailure: true });
-  await page.getByRole("button", { name: "Sign out" }).click();
+  await signOut(page);
   await expect(
     page.getByRole("alert").filter({ hasText: "unavailable" }),
   ).toBeVisible();

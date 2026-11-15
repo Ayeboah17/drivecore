@@ -4,6 +4,8 @@ import { randomUUID } from "node:crypto";
 let sessions = new Map();
 let customers = new Map();
 let vehicles = new Map();
+let companies = new Map();
+let branches = new Map();
 let control = {};
 let nextId = 20;
 let collectionReads = 0;
@@ -16,6 +18,14 @@ const base = {
   updated_at: stamp,
 };
 function reset() {
+  companies = new Map([
+    [1, { id: 1, name: "Synthetic One", currency: "ZMW" }],
+    [3, { id: 3, name: "Synthetic Three", currency: "EUR" }],
+  ]);
+  branches = new Map([
+    [2, { id: 2, company_id: 1, name: "Synthetic branch" }],
+    [4, { id: 4, company_id: 3, name: "Other branch" }],
+  ]);
   sessions = new Map();
   control = {};
   collectionReads = 0;
@@ -107,6 +117,10 @@ createServer(async (req, res) => {
   }
   if (url.pathname === "/__test/control") {
     Object.assign(control, input);
+    if (input.emptyDirectory) {
+      companies.clear();
+      branches.clear();
+    }
     if (input.expire) sessions.clear();
     json(200, {});
     return;
@@ -155,7 +169,9 @@ createServer(async (req, res) => {
               "customers.manage",
               "vehicles.view",
               "vehicles.manage",
-              ...(role === "admin" ? ["branches.view"] : []),
+              ...(["admin", "companyadmin", "restrictedadmin"].includes(role)
+                ? ["branches.view", "branches.manage", "companies.manage"]
+                : []),
             ];
     const user = {
       id: 1,
@@ -173,7 +189,9 @@ createServer(async (req, res) => {
                 {
                   id: 1,
                   name: "Synthetic One",
-                  branch_id: role === "unrestricted" ? null : 2,
+                  branch_id: ["unrestricted", "companyadmin"].includes(role)
+                    ? null
+                    : 2,
                 },
                 { id: 3, name: "Synthetic Three", branch_id: 4 },
               ],
@@ -227,19 +245,84 @@ createServer(async (req, res) => {
       },
     });
   if (url.pathname === "/api/v1/companies") {
+    if (req.method === "POST") {
+      if (!user.is_platform_admin) {
+        fail(403);
+        return;
+      }
+      if (control.setupValidation) {
+        fail(422, { name: ["Synthetic company rejection."] });
+        return;
+      }
+      if (
+        !input.name ||
+        input.name.length > 255 ||
+        !/^[A-Z]{3}$/.test(input.currency)
+      ) {
+        fail(422, { currency: ["Enter three uppercase letters."] });
+        return;
+      }
+      const created = {
+        id: nextId++,
+        name: input.name,
+        currency: input.currency,
+      };
+      companies.set(created.id, created);
+      completedWrites++;
+      json(201, { data: created });
+      return;
+    }
+    const records = [...companies.values()];
     paginate(
-      page === 1
-        ? [{ id: 1, name: "Synthetic One", currency: "ZMW" }]
-        : [{ id: 3, name: "Synthetic Three", currency: "EUR" }],
-      2,
+      records.length > 1
+        ? page === 1
+          ? records.slice(0, 1)
+          : records.slice(1)
+        : records,
+      records.length > 1 ? 2 : 1,
     );
     return;
   }
   if (url.pathname === "/api/v1/branches") {
-    paginate([
-      { id: 2, company_id: 1, name: "Synthetic branch" },
-      { id: 4, company_id: 3, name: "Other branch" },
-    ]);
+    if (req.method === "POST") {
+      if (
+        !user.is_platform_admin &&
+        (!user.permissions.includes("branches.manage") ||
+          !user.companies.some(
+            (c) => c.id === input.company_id && c.branch_id === null,
+          ))
+      ) {
+        fail(403);
+        return;
+      }
+      if (!companies.has(input.company_id)) {
+        fail(404);
+        return;
+      }
+      if (
+        control.setupValidation ||
+        [...branches.values()].some(
+          (b) => b.company_id === input.company_id && b.name === input.name,
+        )
+      ) {
+        fail(422, { name: ["The name has already been taken."] });
+        return;
+      }
+      const created = {
+        id: nextId++,
+        company_id: input.company_id,
+        name: input.name,
+      };
+      branches.set(created.id, created);
+      completedWrites++;
+      json(201, { data: created });
+      return;
+    }
+    if (control.directoryFailure) {
+      fail(503);
+      return;
+    }
+    paginate([...branches.values()]);
     return;
   }
   const match = url.pathname.match(

@@ -4,7 +4,9 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import { Menu, PanelLeftClose, PanelLeftOpen } from "lucide-react";
 import { useSession } from "@/features/auth/session-provider";
-import { can } from "@/lib/api/contracts";
+import { LiveNavigation } from "./navigation";
+import { WorkspaceHeader } from "./workspace-header";
+import { hasWholeCompanyDirectory } from "@/features/setup/contracts";
 import { errorText, initializeCsrf } from "@/lib/api/client";
 import { useLiveContext } from "./context";
 import { Button } from "@/components/ui/button";
@@ -44,7 +46,12 @@ export function Protected({ children }: { children: React.ReactNode }) {
   if (session.error)
     return (
       <main className="p-page">
-        <StatePanel title="Session unavailable" onRetry={session.refresh}>
+        <StatePanel
+          title="Session unavailable"
+          onRetry={session.refresh}
+          href="/demo/workflow"
+          linkLabel="Try workflow demo"
+        >
           {errorText(session.error)}
         </StatePanel>
       </main>
@@ -56,47 +63,6 @@ export function Protected({ children }: { children: React.ReactNode }) {
       </p>
     );
   return children;
-}
-const destinations = [
-  ["dashboard", "Dashboard", null],
-  ["customers", "Customers", "customers.view"],
-  ["vehicles", "Fleet", "vehicles.view"],
-  ["operations", "Operations", "reservations.view"],
-  ["rentals", "Rentals", "rentals.view"],
-] as const;
-function Navigation({
-  collapsed = false,
-  close,
-}: {
-  collapsed?: boolean;
-  close?: () => void;
-}) {
-  const { user } = useSession();
-  const scope = useLiveContext();
-  const path = usePathname();
-  return (
-    <nav aria-label="Main navigation" className="space-y-1 p-3">
-      {destinations
-        .filter(([, , permission]) => !permission || can(user!, permission))
-        .map(([key, label]) => {
-          const target =
-            key === "operations" || key === "rentals" ? `modules/${key}` : key;
-          const href = `/companies/${scope.companyId}/${target}?branch=${scope.branch}`;
-          return (
-            <Link
-              key={key}
-              onClick={close}
-              href={href}
-              title={collapsed ? label : undefined}
-              aria-current={path.endsWith(`/${target}`) ? "page" : undefined}
-              className="flex min-h-control items-center rounded-control px-3 text-sm text-sidebar-foreground hover:bg-muted focus-visible:outline-2 focus-visible:outline-ring aria-[current=page]:bg-accent aria-[current=page]:text-accent-foreground"
-            >
-              {collapsed ? label.slice(0, 1) : label}
-            </Link>
-          );
-        })}
-    </nav>
-  );
 }
 function Selectors() {
   const { user } = useSession();
@@ -225,17 +191,41 @@ export function LiveShell({ children }: { children: React.ReactNode }) {
   const path = usePathname();
   const [collapsed, setCollapsed] = useState(false);
   const [open, setOpen] = useState(false);
+  const router = useRouter();
+  const needsSetup = !!(
+    session.user &&
+    scope.company &&
+    !scope.pending &&
+    !scope.error &&
+    scope.directory?.branchesAvailable &&
+    hasWholeCompanyDirectory(session.user, scope.companyId) &&
+    !scope.directory.branches.some(
+      (branch) => String(branch.company_id) === scope.companyId,
+    ) &&
+    path !== `/companies/${scope.companyId}/setup`
+  );
+  useEffect(() => {
+    if (needsSetup)
+      router.replace(`/companies/${scope.companyId}/setup?branch=all`);
+  }, [needsSetup, router, scope.companyId]);
+  if (needsSetup)
+    return (
+      <p role="status" className="p-page">
+        Opening branch setup…
+      </p>
+    );
   if (path === "/companies")
     return (
-      <main className="p-page">
-        <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
-          <h1 className="text-page-title">
-            <span className="text-primary">D</span>riveCore
-          </h1>
-          <Account />
-        </div>
-        {children}
-      </main>
+      <div className="min-h-dvh">
+        <WorkspaceHeader />
+        <main
+          id="workspace-content"
+          tabIndex={-1}
+          className="mx-auto w-full max-w-6xl px-page py-8 outline-none sm:py-12"
+        >
+          {children}
+        </main>
+      </div>
     );
   if (scope.pending)
     return (
@@ -273,7 +263,7 @@ export function LiveShell({ children }: { children: React.ReactNode }) {
           {!collapsed && "riveCore"}
         </div>
         <div className="flex-1">
-          <Navigation collapsed={collapsed} />
+          <LiveNavigation collapsed={collapsed} />
         </div>
         <Button
           variant="ghost"
@@ -307,7 +297,7 @@ export function LiveShell({ children }: { children: React.ReactNode }) {
                 <SheetContent side="left" className="w-sidebar">
                   <SheetTitle>DriveCore</SheetTitle>
                   <SheetDescription>Company workspace</SheetDescription>
-                  <Navigation close={() => setOpen(false)} />
+                  <LiveNavigation close={() => setOpen(false)} />
                 </SheetContent>
               </Sheet>
             </div>

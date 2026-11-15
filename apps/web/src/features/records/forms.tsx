@@ -24,33 +24,8 @@ import { saveRecord } from "./service";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 
-export const customerFormSchema = z.object({
-  name: z.string().trim().min(1, "Enter a name.").max(255),
-  type: z.enum(["individual", "corporate"]),
-  email: z
-    .union([z.literal(""), z.email()])
-    .refine((value) => value.length <= 255, "Maximum 255 characters."),
-  phone: z.string().max(50),
-});
-const whole = (value: string) =>
-  /^\d+$/.test(value) && Number.isSafeInteger(Number(value));
-export const vehicleFormSchema = z.object({
-  registration: z.string().trim().min(1).max(40),
-  make: z.string().trim().min(1).max(100),
-  model: z.string().trim().min(1).max(100),
-  year: z
-    .string()
-    .refine(
-      (value) =>
-        value === "" ||
-        (whole(value) && Number(value) >= 1900 && Number(value) <= 2100),
-      "Enter a whole year from 1900 to 2100.",
-    ),
-  odometer: z
-    .string()
-    .refine((value) => whole(value), "Enter a nonnegative whole number."),
-  status: z.enum(["available", "maintenance", "damaged"]),
-});
+import { customerFormSchema, vehicleFormSchema } from "./schemas";
+export { customerFormSchema, vehicleFormSchema } from "./schemas";
 const selectClass =
   "h-control w-full rounded-control border border-input bg-surface px-3 text-sm focus-visible:outline-2 focus-visible:outline-ring";
 function Field({

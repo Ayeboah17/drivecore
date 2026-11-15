@@ -1,4 +1,5 @@
 "use client";
+import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useForm } from "react-hook-form";
@@ -27,8 +28,9 @@ export function LoginForm() {
   } = useForm<z.infer<typeof schema>>({ resolver: zodResolver(schema) });
   const target = safeLoginReturn(search.get("next"));
   useEffect(() => {
-    if (session.user) router.replace(target);
-  }, [session.user, router, target]);
+    if (!session.pending && !session.error && session.user)
+      router.replace(target);
+  }, [session.pending, session.error, session.user, router, target]);
   return (
     <main className="flex min-h-dvh items-center justify-center p-page">
       <section className="w-full max-w-md space-y-6 rounded-card border bg-surface p-card">
@@ -43,8 +45,6 @@ export function LoginForm() {
         </div>
         {session.pending ? (
           <p role="status">Checking your session…</p>
-        ) : session.user ? (
-          <p role="status">Opening workspace…</p>
         ) : session.error ? (
           <div role="alert">
             <p>{errorText(session.error)}</p>
@@ -52,6 +52,8 @@ export function LoginForm() {
               Check connection again
             </Button>
           </div>
+        ) : session.user ? (
+          <p role="status">Opening workspace…</p>
         ) : (
           <form
             className="space-y-4"
@@ -131,6 +133,13 @@ export function LoginForm() {
             </Button>
           </form>
         )}
+        <Link
+          href="/demo/workflow"
+          prefetch={false}
+          className="inline-block text-sm text-link"
+        >
+          Try workflow demo — no login needed
+        </Link>
       </section>
     </main>
   );
