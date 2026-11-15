@@ -211,3 +211,28 @@ test("cookie policy strips domain and enforces host-only Secure/HttpOnly/SameSit
     ),
   ).not.toContain("other");
 });
+
+test("collection paging, search and proposed scope parameters cannot bypass the closed allowlist", async () => {
+  let calls = 0;
+  for (const domain of ["customers", "vehicles"]) {
+    for (const query of [
+      "page=2",
+      "search=synthetic",
+      "company_id=1&branch_id=2&page=1",
+      "company_id=1&branch=all",
+    ]) {
+      const response = await proxy(
+        make(`api/v1/${domain}?${query}`),
+        `api/v1/${domain}`,
+        config,
+        async () => {
+          calls++;
+          return Response.json({ data: [] });
+        },
+      );
+      expect(response.status).toBe(404);
+      expect(response.headers.get("cache-control")).toContain("no-store");
+    }
+  }
+  expect(calls).toBe(0);
+});

@@ -139,6 +139,13 @@ export function CompaniesPage() {
         >
           Try workflow demo
         </Link>
+        <Link
+          href="/demo/erp"
+          prefetch={false}
+          className="text-sm font-medium text-link"
+        >
+          Explore full ERP demo
+        </Link>
       </footer>
     </div>
   );

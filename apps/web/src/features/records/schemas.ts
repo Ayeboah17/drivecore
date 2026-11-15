@@ -27,3 +27,7 @@ export const vehicleFormSchema = z.object({
     .refine((value) => whole(value), "Enter a nonnegative whole number."),
   status: z.enum(["available", "maintenance", "damaged"]),
 });
+
+// Laravel permits omission. Never solicit/send a distance before its unit is
+// agreed with the backend owner. The isolated demo retains its existing schema.
+export const liveVehicleFormSchema = vehicleFormSchema.omit({ odometer: true });

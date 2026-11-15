@@ -1,0 +1,26 @@
+/* Feedback only: data tables and keyboard navigation never move for decoration. */
+[data-erp-demo] .demo-feedback {
+  transition:
+    opacity 160ms cubic-bezier(0.23, 1, 0.32, 1),
+    transform 160ms cubic-bezier(0.23, 1, 0.32, 1);
+}
+@media (hover: hover) and (pointer: fine) and (prefers-reduced-motion: no-preference) {
+  [data-erp-demo] button:not(:disabled):not(:focus-visible) {
+    transition: transform 120ms cubic-bezier(0.23, 1, 0.32, 1);
+  }
+  [data-erp-demo] button:not(:disabled):not(:focus-visible):active {
+    transform: scale(0.98);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  [data-erp-demo] *,
+  [data-erp-demo] *::before,
+  [data-erp-demo] *::after {
+    transition-duration: 0ms !important;
+    animation-duration: 0ms !important;
+  }
+}
+
+[data-erp-demo]:has(:focus-visible) .demo-feedback {
+  transition: none;
+}

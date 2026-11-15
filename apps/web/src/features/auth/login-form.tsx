@@ -140,6 +140,13 @@ export function LoginForm() {
         >
           Try workflow demo — no login needed
         </Link>
+        <Link
+          href="/demo/erp"
+          prefetch={false}
+          className="block text-sm font-medium text-link"
+        >
+          Explore the full ERP demo
+        </Link>
       </section>
     </main>
   );

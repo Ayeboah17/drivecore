@@ -294,6 +294,13 @@ export function WorkflowDemo() {
         </header>
         <main className="mx-auto max-w-lg space-y-6 px-page py-12">
           <h1 className="text-page-title">Explore DriveCore</h1>
+          <Link
+            href="/demo/erp"
+            prefetch={false}
+            className="inline-block text-sm font-medium text-link"
+          >
+            Explore the full interactive ERP demo
+          </Link>
           <p className="text-sm text-muted-foreground">
             Enter as Demo administrator. Set up a company and branches, then
             explore customers and vehicles in your own demo workspace.

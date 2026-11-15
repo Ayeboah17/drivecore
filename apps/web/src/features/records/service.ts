@@ -11,10 +11,12 @@ export function assertRecordScope(
   record: Customer | Vehicle,
   company: string,
   branch: string,
+  expectedId?: string,
 ) {
   if (
     String(record.company_id) !== company ||
-    (branch !== "all" && String(record.branch_id) !== branch)
+    (branch !== "all" && String(record.branch_id) !== branch) ||
+    (expectedId !== undefined && String(record.id) !== expectedId)
   )
     throw new ApiError(
       404,
@@ -35,7 +37,7 @@ export async function getRecord(
     z.object({ data: schema }),
     signal,
   );
-  return assertRecordScope(payload.data, company, branch);
+  return assertRecordScope(payload.data, company, branch, id);
 }
 export async function saveRecord(
   domain: Domain,
@@ -57,5 +59,5 @@ export async function saveRecord(
       502,
       "Unexpected save response. Refresh before submitting again.",
     );
-  return assertRecordScope(parsed.data.data, company, branch);
+  return assertRecordScope(parsed.data.data, company, branch, id);
 }
