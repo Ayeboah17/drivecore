@@ -46,12 +46,14 @@ overrides when changing component styles.
 
 ### Colors and theme
 
-The default light palette is primary `#2563EB`, primary hover `#1D4ED8`, navy
-`#1E293B`, background `#F8FAFC`, surface `#FFFFFF`, border `#E2E8F0`, foreground
-`#0F172A`, muted foreground `#64748B`, success `#16A34A`, warning `#D97706`, and
-danger `#DC2626`. Existing card, popover, sidebar, chart, and destructive tokens
-remain available. Use semantic classes such as `bg-surface`, `text-foreground`,
-`text-muted-foreground`, `border-border`, and `hover:bg-primary-hover`.
+The authoritative brand reference is the SRS PDF. Primary red is `#D71920` in
+both themes, with white button text and `#B8141A` hover. Charcoal is `#28323A`,
+muted grey `#65727A`, and white `#FFFFFF`. Light workspace is `#F7F7F8` with
+`#DADDE0` dividers. See [the design system](../../documentation/DESIGN_SYSTEM.md)
+for all light/dark tokens and semantic status recipes. Use `text-link` for links,
+`bg-accent text-accent-foreground` for selected states, and `ring-ring` for focus.
+`navy` is retained only as a deprecated charcoal compatibility alias. Existing
+card, popover, sidebar, chart and destructive tokens remain available.
 
 Use `text-success-foreground` and `text-warning-foreground` for small status text
 on neutral light surfaces, and `text-danger-foreground` on lightly tinted danger
@@ -72,16 +74,16 @@ portalled Base UI content. There is no theme provider or theme-switching UI.
 
 Apply roles explicitly; global heading elements are not restyled.
 
-| Utility | Size / line height | Weight |
-| --- | --- | --- |
-| `text-page-title` | 24 / 32px | 600 |
-| `text-page-title-lg` | 28 / 36px | 600 |
-| `text-section-heading` | 18 / 28px | 600 |
-| `text-card-heading` | 16 / 24px | 600 |
-| `text-card-heading-sm` | 15 / 22px | 600 |
-| `text-body` | 14 / 24px | inherited (body defaults to 400) |
-| `text-table` | 14 / 20px | inherited |
-| `text-label` | 13 / 18px | inherited (Label uses 500) |
+| Utility                | Size / line height | Weight                           |
+| ---------------------- | ------------------ | -------------------------------- |
+| `text-page-title`      | 24 / 32px          | 600                              |
+| `text-page-title-lg`   | 28 / 36px          | 600                              |
+| `text-section-heading` | 18 / 28px          | 600                              |
+| `text-card-heading`    | 16 / 24px          | 600                              |
+| `text-card-heading-sm` | 15 / 22px          | 600                              |
+| `text-body`            | 14 / 24px          | inherited (body defaults to 400) |
+| `text-table`           | 14 / 20px          | inherited                        |
+| `text-label`           | 13 / 18px          | inherited (Label uses 500)       |
 
 For example: `className="text-page-title lg:text-page-title-lg"`.
 Inputs and textareas retain 16px text on small viewports to avoid mobile browser
@@ -92,17 +94,17 @@ focus zoom, and use 14px from the existing desktop breakpoint.
 Dimensions use rem units (values below assume the default 16px root size), while
 Tailwind's existing 4px spacing basis remains unchanged.
 
-| CSS variable | Value | Tailwind usage |
-| --- | --- | --- |
-| `--page-padding` | 24px | `p-page` |
-| `--card-padding` | 20px | `p-card` |
-| `--control-height` | 40px | `h-control`, `size-control` |
-| `--control-radius` | 7px | `rounded-control` |
-| `--card-radius` | 10px | `rounded-card` |
-| `--table-row-height` | 48px | `h-table-row` |
-| `--sidebar-width` | 248px | `w-sidebar` |
-| `--sidebar-width-collapsed` | 72px | `w-sidebar-collapsed` |
-| `--topbar-height` | 64px | `h-topbar` |
+| CSS variable                | Value | Tailwind usage              |
+| --------------------------- | ----- | --------------------------- |
+| `--page-padding`            | 24px  | `p-page`                    |
+| `--card-padding`            | 20px  | `p-card`                    |
+| `--control-height`          | 40px  | `h-control`, `size-control` |
+| `--control-radius`          | 7px   | `rounded-control`           |
+| `--card-radius`             | 10px  | `rounded-card`              |
+| `--table-row-height`        | 48px  | `h-table-row`               |
+| `--sidebar-width`           | 248px | `w-sidebar`                 |
+| `--sidebar-width-collapsed` | 72px  | `w-sidebar-collapsed`       |
+| `--topbar-height`           | 64px  | `h-topbar`                  |
 
 Standard buttons, inputs, select triggers, and single-line input groups use the
 40px control height. Button `xs`/`sm` sizes remain 24px/28px; `lg` is 44px.
@@ -126,3 +128,43 @@ For component checks, inspect computed styles and keyboard interactions in a
 browser, including compact variants, grouped controls, font loading, and manual
 dark mode with portalled content. Do not infer component dimensions from the
 starter page.
+
+## Milestone 2 mock application
+
+Open `/companies` to enter the operational workspace. The starter `/` page is unchanged.
+This is explicitly a mock demonstration, including when built with `next build`;
+it implements no real authentication, authorization, company isolation or Laravel integration.
+
+Use the **Development controls** panel below the workspace to switch access profiles
+and deterministic scenarios. Profile/scenario selection is memory-only and resets
+on a full reload. Company/branch scope and queue controls live in the URL.
+All authorized branches means only the simulated user's accessible branches in
+one selected company. Data never aggregates across companies.
+
+Fixtures use a fixed demo clock (13 November 2026, 09:00 UTC), displayed in the
+selected company's timezone. Retrieval timestamps are real and separate. Severity,
+status and urgency are provisional mock annotations, not business or safety rules.
+
+Available scenarios include empty queues, slow requests, partial failures, refresh
+failure with stale same-scope data, search failure, unavailable records and access
+removal. Departures/blockers have read-only details; other modules show Planned
+explanations. No transaction, fake account setting, approval or vehicle release exists.
+
+Install test browsers once with `npx playwright install chromium firefox webkit`.
+Run `npm run test:unit`, `npm run lint`, `npm run build`, `npm run typecheck`, and
+`npm run test:e2e`. Browser tests start the production server on port 3100;
+Chromium covers the full suite and Firefox/WebKit cover the milestone smoke test.
+
+See [approved specification](../../documentation/MILESTONE_2_SPECIFICATION.md),
+[architecture](../../documentation/MILESTONE_2_ARCHITECTURE.md), and
+[backend dependencies](../../documentation/MILESTONE_2_BACKEND_DEPENDENCIES.md).
+
+### Ghana demo setting
+
+All demo organizations, branches and identities are fictional Ghana-based examples:
+Akwaaba Vehicle Rental (Accra Airport and Kumasi Central) and Sankofa Mobility
+(Tema Harbour and Takoradi Depot). Both companies use `Africa/Accra`, with English
+Ghana (`en-GH`) date/time formatting. Development users are Kwame Mensah, Ama Owusu
+and Kofi Asante. Booking references use AKW/SNK prefixes; vehicles use explicitly
+synthetic `DEMO-GH` identifiers rather than real registrations. No financial data
+or currency calculations are introduced.

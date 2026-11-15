@@ -94,17 +94,26 @@ The interface must feel premium, clear, professional and operationally efficient
 
 ### Colour tokens
 
-- Primary: #2563EB
-- Primary hover: #1D4ED8
-- Navy: #1E293B
-- Background: #F8FAFC
-- Surface: #FFFFFF
-- Border: #E2E8F0
-- Main text: #0F172A
-- Secondary text: #64748B
-- Success: #16A34A
-- Warning: #D97706
-- Danger: #DC2626
+The authoritative visual reference is `documentation/Drivecore_Vehicle_Rental_ERP_SRS.pdf`.
+See `documentation/DESIGN_SYSTEM.md` for the complete approved light/dark mapping.
+
+- Primary red: #D71920 (both themes; filled primary controls use white text)
+- Primary hover: #B8141A
+- Charcoal: #28323A
+- Muted grey: #65727A
+- White/surface: #FFFFFF
+- Light background: #F7F7F8
+- Light divider border: #DADDE0
+- Light main text: #28323A
+- Success: #16A34A; readable light text: #166534
+- Warning: #D97706; readable light text: #92400E
+- Danger: #B42318; readable light text: #8F1D14
+
+Use red for brand actions, active navigation, selection and focus. Keep semantic
+status tokens independent, with explicit text/icons; brand red does not imply an
+error. Use `text-link` for links (lighter red in dark mode), not `text-primary`.
+Light mode remains the default; manual `.dark` support is preserved. Do not
+reintroduce blue application accents. Preserve typography, dimensions and Base UI.
 
 ### Typography
 
