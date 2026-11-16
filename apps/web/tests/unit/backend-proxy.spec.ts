@@ -274,3 +274,27 @@ test("multi-origin config accepts all allowlisted origins on mutations and rejec
   );
   expect(rejected.status).toBe(403);
 });
+
+test("session reads without Origin or Referer use their trusted request host", async () => {
+  const production = "https://drivecore.innovize-tech.com";
+  const multiOrigin = {
+    ...config,
+    app: "https://drivecore-zeta.vercel.app",
+    apps: ["https://drivecore-zeta.vercel.app", production],
+  };
+  const response = await proxy(
+    new Request(`${production}/api/backend/api/v1/auth/me`, {
+      headers: { cookie: "test_session=rotated" },
+    }),
+    "api/v1/auth/me",
+    multiOrigin,
+    async (_url, init) => {
+      const headers = new Headers(init?.headers);
+      expect(headers.get("origin")).toBe(production);
+      expect(headers.get("referer")).toBe(`${production}/`);
+      expect(headers.get("cookie")).toBe("test_session=rotated");
+      return Response.json({ data: {} });
+    },
+  );
+  expect(response.status).toBe(200);
+});
