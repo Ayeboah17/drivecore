@@ -22,6 +22,8 @@ function resolvedAppOrigin(request: Request, config: ProxyConfig): string {
       // Ignore malformed referer headers.
     }
   }
+  const urlOrigin = new URL(request.url).origin;
+  if (allowed.includes(urlOrigin)) return urlOrigin;
   return allowed[0];
 }
 const privateHeaders = {
