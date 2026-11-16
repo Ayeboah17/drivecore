@@ -21,6 +21,7 @@ interface Session {
   user: User | null;
   pending: boolean;
   error: Error | null;
+  notice: string | null;
   epoch: number;
   login: (email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
@@ -31,17 +32,31 @@ const Context = createContext<Session | null>(null);
 function SessionState({ children }: { children: React.ReactNode }) {
   const client = useQueryClient();
   const [epoch, setEpoch] = useState(0);
+  const [notice, setNotice] = useState<string | null>(null);
   const channel = useRef<BroadcastChannel | null>(null);
   const generation = useRef(0);
+  const justSignedInEpoch = useRef<number | null>(null);
   const identity = useQuery({
     queryKey: ["identity", epoch],
     queryFn: async ({ signal }) => {
       try {
-        return (
+        const user = (
           await read("api/v1/auth/me", z.object({ data: userSchema }), signal)
         ).data;
+        if (justSignedInEpoch.current === epoch)
+          justSignedInEpoch.current = null;
+        setNotice(null);
+        return user;
       } catch (error) {
-        if (error instanceof ApiError && error.status === 401) return null;
+        if (error instanceof ApiError && error.status === 401) {
+          if (justSignedInEpoch.current === epoch) {
+            justSignedInEpoch.current = null;
+            setNotice(
+              "Sign-in succeeded, but the API did not recognize your session cookie (/api/v1/auth/me returned 401). Confirm SANCTUM_STATEFUL_DOMAINS on the API includes this domain and DRIVECORE_SESSION_COOKIE_NAME matches Laravel SESSION_COOKIE.",
+            );
+          }
+          return null;
+        }
         throw error;
       }
     },
@@ -109,6 +124,7 @@ function SessionState({ children }: { children: React.ReactNode }) {
         pending:
           identity.isPending || (identity.data === null && identity.isFetching),
         error: identity.error,
+        notice,
         epoch,
         expire,
         refresh: () => {
@@ -116,6 +132,7 @@ function SessionState({ children }: { children: React.ReactNode }) {
         },
         login: async (email, password) => {
           const active = ++generation.current;
+          setNotice(null);
           await initializeCsrf();
           const payload = await request("api/v1/auth/login", {
             method: "POST",
@@ -128,12 +145,16 @@ function SessionState({ children }: { children: React.ReactNode }) {
               "Unexpected sign-in response. Reload to verify your session.",
             );
           if (active !== generation.current) return;
+          const nextEpoch = epoch + 1;
+          justSignedInEpoch.current = nextEpoch;
           await client.cancelQueries();
           client.clear();
-          client.setQueryData(["identity", epoch + 1], parsed.data.data);
-          setEpoch(epoch + 1);
+          client.setQueryData(["identity", nextEpoch], parsed.data.data);
+          setEpoch(nextEpoch);
         },
         logout: async () => {
+          justSignedInEpoch.current = null;
+          setNotice(null);
           try {
             await request("api/v1/auth/logout", { method: "POST", body: {} });
           } catch (error) {

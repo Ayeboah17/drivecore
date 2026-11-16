@@ -24,7 +24,7 @@ import { saveRecord } from "./service";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 
-import { customerFormSchema, vehicleFormSchema } from "./schemas";
+import { customerFormSchema, liveVehicleFormSchema } from "./schemas";
 export { customerFormSchema, vehicleFormSchema } from "./schemas";
 const selectClass =
   "h-control w-full rounded-control border border-input bg-surface px-3 text-sm focus-visible:outline-2 focus-visible:outline-ring";
@@ -148,6 +148,7 @@ function useSave(domain: Domain, record?: Customer | Vehicle) {
       setBusy(true);
       setError(null);
       controller.current = new AbortController();
+      let committed = false;
       try {
         const body = record
           ? values
@@ -164,8 +165,12 @@ function useSave(domain: Domain, record?: Customer | Vehicle) {
           record ? scope.branch : selected,
           controller.current.signal,
         );
-        if (!active.current) return;
+        committed = true;
+        if (!active.current || controller.current.signal.aborted) return;
         await client.invalidateQueries({
+          // Mark stale without replacing a mounted edit form during its save.
+          // Navigation then fetches the authoritative detail in the same scope.
+          refetchType: "none",
           queryKey: [
             "live",
             session.epoch,
@@ -173,7 +178,9 @@ function useSave(domain: Domain, record?: Customer | Vehicle) {
             "scope",
             scope.companyId,
           ],
+          predicate: (query) => query.queryKey[7] === domain,
         });
+        if (!active.current || controller.current.signal.aborted) return;
         scope.navigate(
           `/companies/${scope.companyId}/${domain}/${saved.id}?branch=${scope.branch}`,
         );
@@ -184,8 +191,8 @@ function useSave(domain: Domain, record?: Customer | Vehicle) {
         setError(failure);
         throw failure;
       } finally {
-        lock.current = false;
-        if (active.current) setBusy(false);
+        if (!committed) lock.current = false;
+        if (active.current) setBusy(committed);
       }
     },
     feedback: error ? (
@@ -255,7 +262,9 @@ export function CustomerForm({ record }: { record?: Customer }) {
   });
   return (
     <form
-      className="max-w-xl space-y-4 rounded-card border bg-surface p-card"
+      noValidate
+      aria-busy={save.busy}
+      className="dc-shadow-card max-w-xl space-y-4 rounded-2xl border bg-surface p-card"
       onSubmit={handleSubmit(async (values) => {
         try {
           await save.save({
@@ -268,51 +277,58 @@ export function CustomerForm({ record }: { record?: Customer }) {
         }
       })}
     >
-      <Field name="name" label="Name" error={errors.name?.message}>
-        <Input
-          id="name"
-          autoComplete="off"
-          maxLength={255}
-          {...register("name")}
-          aria-invalid={!!errors.name}
-          aria-describedby="name-error"
-        />
-      </Field>
-      <Field name="type" label="Customer type" error={errors.type?.message}>
-        <select id="type" className={selectClass} {...register("type")}>
-          <option value="individual">Individual</option>
-          <option value="corporate">Corporate</option>
-        </select>
-      </Field>
-      <Field
-        name="email"
-        label="Email (optional)"
-        error={errors.email?.message}
-      >
-        <Input
-          id="email"
-          type="email"
-          maxLength={255}
-          {...register("email")}
-          aria-invalid={!!errors.email}
-          aria-describedby="email-error"
-        />
-      </Field>
-      <Field
-        name="phone"
-        label="Phone (optional)"
-        error={errors.phone?.message}
-      >
-        <Input
-          id="phone"
-          type="tel"
-          maxLength={50}
-          {...register("phone")}
-          aria-invalid={!!errors.phone}
-          aria-describedby="phone-error"
-        />
-      </Field>
-      {save.branchControl}
+      <fieldset disabled={isSubmitting || save.busy} className="space-y-4">
+        <Field name="name" label="Name" error={errors.name?.message}>
+          <Input
+            id="name"
+            autoComplete="off"
+            maxLength={255}
+            {...register("name")}
+            aria-invalid={!!errors.name}
+            aria-describedby="name-error"
+          />
+        </Field>
+        <Field name="type" label="Customer type" error={errors.type?.message}>
+          <select
+            id="type"
+            className={selectClass}
+            {...register("type")}
+            aria-invalid={!!errors.type}
+          >
+            <option value="individual">Individual</option>
+            <option value="corporate">Corporate</option>
+          </select>
+        </Field>
+        <Field
+          name="email"
+          label="Email (optional)"
+          error={errors.email?.message}
+        >
+          <Input
+            id="email"
+            type="email"
+            maxLength={255}
+            {...register("email")}
+            aria-invalid={!!errors.email}
+            aria-describedby="email-error"
+          />
+        </Field>
+        <Field
+          name="phone"
+          label="Phone (optional)"
+          error={errors.phone?.message}
+        >
+          <Input
+            id="phone"
+            type="tel"
+            maxLength={50}
+            {...register("phone")}
+            aria-invalid={!!errors.phone}
+            aria-describedby="phone-error"
+          />
+        </Field>
+        {save.branchControl}
+      </fieldset>
       {save.feedback}
       {!record && !save.canCreate ? (
         <p role="status">
@@ -336,15 +352,14 @@ export function VehicleForm({ record }: { record?: Vehicle }) {
     handleSubmit,
     setError,
     formState: { errors, isSubmitting },
-  } = useForm<z.infer<typeof vehicleFormSchema>>({
-    resolver: zodResolver(vehicleFormSchema),
+  } = useForm<z.infer<typeof liveVehicleFormSchema>>({
+    resolver: zodResolver(liveVehicleFormSchema),
     defaultValues: record
       ? {
           registration: record.registration,
           make: record.make,
           model: record.model,
           year: record.year === null ? "" : String(record.year),
-          odometer: String(record.odometer),
           status: record.status === "rented" ? "available" : record.status,
         }
       : {
@@ -352,19 +367,19 @@ export function VehicleForm({ record }: { record?: Vehicle }) {
           make: "",
           model: "",
           year: "",
-          odometer: "0",
           status: "available",
         },
   });
   return (
     <form
-      className="max-w-xl space-y-4 rounded-card border bg-surface p-card"
+      noValidate
+      aria-busy={save.busy}
+      className="dc-shadow-card max-w-xl space-y-4 rounded-2xl border bg-surface p-card"
       onSubmit={handleSubmit(async (values) => {
         try {
           await save.save({
             ...values,
             year: values.year === "" ? null : Number(values.year),
-            odometer: Number(values.odometer),
           });
         } catch (error) {
           applyFieldErrors(
@@ -375,8 +390,11 @@ export function VehicleForm({ record }: { record?: Vehicle }) {
         }
       })}
     >
-      {(["registration", "make", "model", "year", "odometer"] as const).map(
-        (name) => (
+      <fieldset
+        disabled={isSubmitting || save.busy || record?.status === "rented"}
+        className="space-y-4"
+      >
+        {(["registration", "make", "model", "year"] as const).map((name) => (
           <Field
             key={name}
             name={name}
@@ -389,24 +407,32 @@ export function VehicleForm({ record }: { record?: Vehicle }) {
           >
             <Input
               id={name}
-              inputMode={
-                name === "year" || name === "odometer" ? "numeric" : "text"
-              }
+              inputMode={name === "year" ? "numeric" : "text"}
               {...register(name)}
               aria-invalid={!!errors[name]}
               aria-describedby={`${name}-error`}
             />
           </Field>
-        ),
-      )}
-      <Field name="status" label="Status" error={errors.status?.message}>
-        <select id="status" className={selectClass} {...register("status")}>
-          <option value="available">Available</option>
-          <option value="maintenance">Maintenance</option>
-          <option value="damaged">Damaged</option>
-        </select>
-      </Field>
-      {save.branchControl}
+        ))}
+        <p className="text-sm text-muted-foreground">
+          Odometer entry is unavailable until the distance unit is confirmed.
+          Existing readings are preserved when editing; new vehicles use the
+          API’s default reading.
+        </p>
+        <Field name="status" label="Status" error={errors.status?.message}>
+          <select
+            id="status"
+            className={selectClass}
+            {...register("status")}
+            aria-invalid={!!errors.status}
+          >
+            <option value="available">Available</option>
+            <option value="maintenance">Maintenance</option>
+            <option value="damaged">Damaged</option>
+          </select>
+        </Field>
+        {save.branchControl}
+      </fieldset>
       {save.feedback}
       {!record && !save.canCreate ? (
         <p role="status">

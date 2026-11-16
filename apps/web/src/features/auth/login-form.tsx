@@ -10,6 +10,9 @@ import { safeLoginReturn } from "@/lib/api/contracts";
 import { ApiError, errorText, initializeCsrf } from "@/lib/api/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { DriveCoreLogo } from "@/components/brand/drivecore-mark";
+import { DriveCoreMotionProvider, ViewFadeIn } from "@/components/motion/primitives";
+import { ThemeToggle } from "@/components/theme/theme-toggle";
 const schema = z.object({
   email: z.email("Enter a valid email address."),
   password: z.string().min(1, "Enter your password."),
@@ -32,17 +35,27 @@ export function LoginForm() {
       router.replace(target);
   }, [session.pending, session.error, session.user, router, target]);
   return (
-    <main className="flex min-h-dvh items-center justify-center p-page">
-      <section className="w-full max-w-md space-y-6 rounded-card border bg-surface p-card">
-        <div>
-          <p className="mb-6 text-xl font-semibold">
-            <span className="text-primary">D</span>riveCore
-          </p>
-          <h1 className="text-page-title">Sign in</h1>
-          <p className="mt-2 text-sm text-muted-foreground">
-            Access your company workspace.
-          </p>
+    <DriveCoreMotionProvider>
+      <main className="relative flex min-h-dvh items-center justify-center bg-background p-page">
+        <div className="fixed top-4 right-4 z-20">
+          <ThemeToggle />
         </div>
+        <ViewFadeIn className="w-full max-w-md">
+          <section className="dc-shadow-float w-full space-y-6 rounded-3xl border bg-surface p-7">
+            <div>
+              <div className="mb-6">
+                <DriveCoreLogo
+                  badge="LIVE"
+                  subtitle="Fleet Rental · Maintenance · Finance"
+                />
+              </div>
+              <h1 className="text-page-title font-extrabold tracking-tight">
+                Sign in
+              </h1>
+              <p className="mt-2 text-sm text-muted-foreground">
+                Access your company workspace.
+              </p>
+            </div>
         {session.pending ? (
           <p role="status">Checking your session…</p>
         ) : session.error ? (
@@ -100,6 +113,14 @@ export function LoginForm() {
                 {errors.password?.message}
               </p>
             </div>
+            {session.notice && !error ? (
+              <div
+                role="alert"
+                className="rounded-xl border border-danger/30 bg-danger-surface p-3 text-sm text-danger-foreground"
+              >
+                <p>{session.notice}</p>
+              </div>
+            ) : null}
             {error ? (
               <div role="alert" className="text-sm text-danger-foreground">
                 <p>{errorText(error)}</p>
@@ -134,13 +155,15 @@ export function LoginForm() {
           </form>
         )}
         <Link
-          href="/demo/workflow"
+          href="/demo/erp"
           prefetch={false}
-          className="inline-block text-sm text-link"
+          className="block text-sm font-medium text-link hover:text-link-hover hover:underline"
         >
-          Try workflow demo — no login needed
+          Explore the full ERP demo
         </Link>
-      </section>
-    </main>
+          </section>
+        </ViewFadeIn>
+      </main>
+    </DriveCoreMotionProvider>
   );
 }

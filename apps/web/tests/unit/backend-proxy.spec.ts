@@ -211,3 +211,90 @@ test("cookie policy strips domain and enforces host-only Secure/HttpOnly/SameSit
     ),
   ).not.toContain("other");
 });
+
+test("collection paging, search and proposed scope parameters cannot bypass the closed allowlist", async () => {
+  let calls = 0;
+  for (const domain of ["customers", "vehicles"]) {
+    for (const query of [
+      "page=2",
+      "search=synthetic",
+      "company_id=1&branch_id=2&page=1",
+      "company_id=1&branch=all",
+    ]) {
+      const response = await proxy(
+        make(`api/v1/${domain}?${query}`),
+        `api/v1/${domain}`,
+        config,
+        async () => {
+          calls++;
+          return Response.json({ data: [] });
+        },
+      );
+      expect(response.status).toBe(404);
+      expect(response.headers.get("cache-control")).toContain("no-store");
+    }
+  }
+  expect(calls).toBe(0);
+});
+
+test("multi-origin config accepts all allowlisted origins on mutations and rejects others", async () => {
+  const multiConfig: ProxyConfig = {
+    backend: "https://api.example.test",
+    app: "https://www.example.test",
+    apps: ["https://www.example.test", "https://example.test"],
+    cookie: "drivecore-session",
+    timeout: 100,
+  };
+  let seenHeaders: Headers | null = null;
+  const ok = await proxy(
+    new Request("https://example.test/api/backend/api/v1/auth/login", {
+      method: "POST",
+      headers: {
+        origin: "https://example.test",
+        "content-type": "application/json",
+        "x-xsrf-token": "synthetic",
+      },
+      body: "{}",
+    }),
+    "api/v1/auth/login",
+    multiConfig,
+    async (_url, init) => {
+      seenHeaders = new Headers(init?.headers);
+      return Response.json({ data: { ok: true } });
+    },
+  );
+  expect(ok.status).toBe(200);
+  expect(seenHeaders!.get("origin")).toBe("https://example.test");
+  expect(seenHeaders!.get("referer")).toBe("https://example.test/");
+
+  const rejected = await proxy(
+    make("api/v1/auth/login", "POST", { origin: "https://evil.example.test" }),
+    "api/v1/auth/login",
+    multiConfig,
+  );
+  expect(rejected.status).toBe(403);
+});
+
+test("session reads without Origin or Referer use their trusted request host", async () => {
+  const production = "https://drivecore.innovize-tech.com";
+  const multiOrigin = {
+    ...config,
+    app: "https://drivecore-zeta.vercel.app",
+    apps: ["https://drivecore-zeta.vercel.app", production],
+  };
+  const response = await proxy(
+    new Request(`${production}/api/backend/api/v1/auth/me`, {
+      headers: { cookie: "test_session=rotated" },
+    }),
+    "api/v1/auth/me",
+    multiOrigin,
+    async (_url, init) => {
+      const headers = new Headers(init?.headers);
+      expect(headers.get("origin")).toBe(production);
+      expect(headers.get("referer")).toBe(`${production}/`);
+      expect(headers.get("cookie")).toBe("test_session=rotated");
+      return Response.json({ data: {} });
+    },
+  );
+  expect(response.status).toBe(200);
+});

@@ -1,6 +1,8 @@
 "use client";
+
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { motion } from "motion/react";
 import {
   LayoutDashboard,
   ClipboardList,
@@ -18,6 +20,7 @@ import { navigation } from "@/lib/navigation/definitions";
 import { can } from "@/lib/api/contracts";
 import { useSession } from "@/features/auth/session-provider";
 import { useLiveContext } from "./context";
+
 const icons = {
   dashboard: LayoutDashboard,
   operations: ClipboardList,
@@ -31,18 +34,26 @@ const icons = {
   reports: ChartNoAxesCombined,
   administration: Settings2,
 };
+
 export function LiveNavigation({
-  collapsed = false,
+  variant = "horizontal",
   close,
 }: {
-  collapsed?: boolean;
+  variant?: "horizontal" | "vertical";
   close?: () => void;
 }) {
   const { user } = useSession();
   const scope = useLiveContext();
   const path = usePathname();
+  const horizontal = variant === "horizontal";
+
   return (
-    <nav aria-label="Main navigation" className="space-y-1 p-3">
+    <nav
+      aria-label="Main navigation"
+      className={
+        horizontal ? "flex flex-wrap items-center gap-1" : "space-y-1 p-3"
+      }
+    >
       {navigation.map((item) => {
         const Icon = icons[item.icon];
         const permission =
@@ -64,43 +75,74 @@ export function LiveNavigation({
               : item.key === "customers"
                 ? "customers"
                 : `modules/${item.key}`;
+        const basePath = `/companies/${scope.companyId}/${target}`;
+        const active =
+          !restricted && (path === basePath || path.startsWith(`${basePath}/`));
         const title = `${item.label}${restricted ? " · Restricted" : planned ? " · Planned" : ""}`;
-        const content = (
+
+        const badge =
+          restricted || planned ? (
+            <span className="relative z-10 rounded-md border bg-muted/60 px-1.5 py-0.5 font-mono text-[9px] leading-none font-semibold uppercase tracking-wide text-muted-foreground">
+              {restricted ? "Restricted" : "Planned"}
+            </span>
+          ) : null;
+
+        const inner = (
           <>
-            <Icon aria-hidden="true" className="size-4 shrink-0" />
-            <span className={collapsed ? "sr-only" : "min-w-0 flex-1"}>
+            {horizontal && active ? (
+              <motion.span
+                layoutId="live-erp-nav-pill"
+                transition={{ type: "spring", stiffness: 380, damping: 34 }}
+                className="dc-shadow-card absolute inset-0 rounded-xl border bg-surface"
+              />
+            ) : null}
+            <Icon
+              aria-hidden="true"
+              className={`relative z-10 shrink-0 ${horizontal ? "size-3.5" : "size-4"}`}
+            />
+            <span
+              className={`relative z-10 ${horizontal ? "whitespace-nowrap" : "min-w-0 flex-1"}`}
+            >
               {item.label}
             </span>
-            {!collapsed && (restricted || planned) ? (
-              <span className="rounded-sm border px-1.5 py-0.5 text-[10px] leading-none text-muted-foreground">
-                {restricted ? "Restricted" : "Planned"}
-              </span>
-            ) : null}
+            {badge}
           </>
         );
-        const classes =
-          "flex min-h-control items-center gap-3 rounded-control px-3 text-sm";
-        return restricted ? (
-          <div
-            key={item.key}
-            aria-disabled="true"
-            aria-label={title}
-            title={title}
-            className={`${classes} text-muted-foreground`}
-          >
-            {content}
-          </div>
-        ) : (
+
+        const baseClasses = horizontal
+          ? "relative flex h-8 items-center gap-1.5 rounded-xl px-2.5 text-xs transition-colors focus-visible:outline-2 focus-visible:outline-ring"
+          : "flex min-h-control items-center gap-3 rounded-xl px-3 text-sm transition-colors focus-visible:outline-2 focus-visible:outline-ring";
+
+        if (restricted) {
+          return (
+            <div
+              key={item.key}
+              aria-disabled="true"
+              aria-label={title}
+              title={title}
+              className={`${baseClasses} cursor-not-allowed text-muted-foreground`}
+            >
+              {inner}
+            </div>
+          );
+        }
+
+        return (
           <Link
             key={item.key}
-            href={`/companies/${scope.companyId}/${target}?branch=${scope.branch}`}
+            href={`${basePath}?branch=${scope.branch}`}
             onClick={close}
             aria-label={title}
-            title={collapsed ? title : undefined}
-            aria-current={path.endsWith(`/${target}`) ? "page" : undefined}
-            className={`${classes} text-sidebar-foreground hover:bg-muted focus-visible:outline-2 focus-visible:outline-ring aria-[current=page]:bg-accent aria-[current=page]:text-accent-foreground`}
+            aria-current={active ? "page" : undefined}
+            className={`${baseClasses} ${
+              active
+                ? horizontal
+                  ? "font-semibold text-foreground"
+                  : "bg-accent font-semibold text-accent-foreground"
+                : "text-muted-foreground hover:bg-muted/80 hover:text-foreground"
+            }`}
           >
-            {content}
+            {inner}
           </Link>
         );
       })}
