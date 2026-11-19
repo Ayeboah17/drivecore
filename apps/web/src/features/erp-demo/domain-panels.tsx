@@ -132,6 +132,12 @@ export function DomainShowcase({
 
   if (view === "rentals") {
     const stages = projectRentalPipeline(db, ctx);
+    const pendingDiscounts = rows(db, ctx, "quotation").filter(
+      (q) => q.status === "pending_approval",
+    );
+    const canApproveDiscount =
+      allowed(db, ctx, "finance", true) ||
+      allowed(db, ctx, "administration", true);
     return (
       <>
         <section
@@ -198,6 +204,69 @@ export function DomainShowcase({
               </button>
             ))}
           </div>
+          {pendingDiscounts.length > 0 ? (
+            <div className="mt-4 space-y-2 border-t pt-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className="flex items-center gap-1.5 text-xs font-extrabold text-warning-foreground">
+                  <ShieldAlert className="size-3.5" aria-hidden="true" />
+                  Pending Discount Approvals ({pendingDiscounts.length})
+                </p>
+                <span className="text-[11px] text-muted-foreground">
+                  Quotations exceeding company threshold require approval before
+                  conversion
+                </span>
+              </div>
+              <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                {pendingDiscounts.map((q) => (
+                  <div
+                    key={q.id}
+                    className="flex items-center justify-between gap-2 rounded-xl border bg-muted/25 px-3 py-2 text-xs"
+                  >
+                    <div className="min-w-0">
+                      <p className="truncate font-semibold">
+                        Quote #{q.id.slice(0, 8)} · {q.discountPct}% discount
+                      </p>
+                      <p className="font-mono text-[11px] text-muted-foreground">
+                        {money(db, ctx.companyId, q.total)}
+                      </p>
+                    </div>
+                    <div className="flex shrink-0 items-center gap-1">
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-7 rounded-lg text-xs"
+                        onClick={() => onOpenRecord(q)}
+                      >
+                        View
+                      </Button>
+                      {canApproveDiscount ? (
+                        <Button
+                          size="sm"
+                          className="h-7 rounded-lg text-xs"
+                          disabled={approvingId === q.id}
+                          onClick={async () => {
+                            setApprovingId(q.id);
+                            try {
+                              await execute(ctx, {
+                                type: "action",
+                                id: q.id,
+                                action: "approve_discount",
+                                values: {},
+                              });
+                            } finally {
+                              setApprovingId("");
+                            }
+                          }}
+                        >
+                          Approve
+                        </Button>
+                      ) : null}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : null}
         </section>
         <SignatureDialog
           open={sigOpen}

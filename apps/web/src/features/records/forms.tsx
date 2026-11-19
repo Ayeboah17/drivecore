@@ -9,6 +9,7 @@ import {
 } from "react";
 import {
   useForm,
+  useWatch,
   type FieldValues,
   type Path,
   type UseFormSetError,
@@ -23,11 +24,10 @@ import { type Customer, type Vehicle, type Domain } from "@/lib/api/contracts";
 import { saveRecord } from "./service";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import { DriveCoreSelect } from "@/components/ui/drivecore-select";
 
 import { customerFormSchema, liveVehicleFormSchema } from "./schemas";
 export { customerFormSchema, vehicleFormSchema } from "./schemas";
-const selectClass =
-  "h-control w-full rounded-control border border-input bg-surface px-3 text-sm focus-visible:outline-2 focus-visible:outline-ring";
 function Field({
   name,
   label,
@@ -118,20 +118,16 @@ function useSave(domain: Domain, record?: Customer | Vehicle) {
       </p>
     ) : (
       <Field name="branch_id" label="Branch">
-        <select
+        <DriveCoreSelect
           id="branch_id"
-          className={selectClass}
           value={selected}
-          onChange={(event) => setBranch(event.target.value)}
-          required
-        >
-          <option value="">Select a branch</option>
-          {options.map((b) => (
-            <option key={b.id} value={b.id}>
-              {b.label}
-            </option>
-          ))}
-        </select>
+          onValueChange={setBranch}
+          placeholder="Select a branch"
+          options={[
+            { value: "", label: "Select a branch" },
+            ...options.map((b) => ({ value: b.id, label: b.label })),
+          ]}
+        />
       </Field>
     ),
     save: async (values: unknown) => {
@@ -248,6 +244,8 @@ export function CustomerForm({ record }: { record?: Customer }) {
     register,
     handleSubmit,
     setError,
+    setValue,
+    control,
     formState: { errors, isSubmitting },
   } = useForm<z.infer<typeof customerFormSchema>>({
     resolver: zodResolver(customerFormSchema),
@@ -260,6 +258,7 @@ export function CustomerForm({ record }: { record?: Customer }) {
         }
       : { name: "", type: "individual", email: "", phone: "" },
   });
+  const customerType = useWatch({ control, name: "type" });
   return (
     <form
       noValidate
@@ -289,15 +288,20 @@ export function CustomerForm({ record }: { record?: Customer }) {
           />
         </Field>
         <Field name="type" label="Customer type" error={errors.type?.message}>
-          <select
+          <DriveCoreSelect
             id="type"
-            className={selectClass}
-            {...register("type")}
-            aria-invalid={!!errors.type}
-          >
-            <option value="individual">Individual</option>
-            <option value="corporate">Corporate</option>
-          </select>
+            value={customerType}
+            onValueChange={(val) =>
+              setValue("type", val as "individual" | "corporate", {
+                shouldValidate: true,
+              })
+            }
+            ariaInvalid={!!errors.type}
+            options={[
+              { value: "individual", label: "Individual" },
+              { value: "corporate", label: "Corporate" },
+            ]}
+          />
         </Field>
         <Field
           name="email"
@@ -351,6 +355,8 @@ export function VehicleForm({ record }: { record?: Vehicle }) {
     register,
     handleSubmit,
     setError,
+    setValue,
+    control,
     formState: { errors, isSubmitting },
   } = useForm<z.infer<typeof liveVehicleFormSchema>>({
     resolver: zodResolver(liveVehicleFormSchema),
@@ -370,6 +376,7 @@ export function VehicleForm({ record }: { record?: Vehicle }) {
           status: "available",
         },
   });
+  const vehicleStatus = useWatch({ control, name: "status" });
   return (
     <form
       noValidate
@@ -420,16 +427,23 @@ export function VehicleForm({ record }: { record?: Vehicle }) {
           API’s default reading.
         </p>
         <Field name="status" label="Status" error={errors.status?.message}>
-          <select
+          <DriveCoreSelect
             id="status"
-            className={selectClass}
-            {...register("status")}
-            aria-invalid={!!errors.status}
-          >
-            <option value="available">Available</option>
-            <option value="maintenance">Maintenance</option>
-            <option value="damaged">Damaged</option>
-          </select>
+            value={vehicleStatus}
+            onValueChange={(val) =>
+              setValue(
+                "status",
+                val as "available" | "maintenance" | "damaged",
+                { shouldValidate: true },
+              )
+            }
+            ariaInvalid={!!errors.status}
+            options={[
+              { value: "available", label: "Available" },
+              { value: "maintenance", label: "Maintenance" },
+              { value: "damaged", label: "Damaged" },
+            ]}
+          />
         </Field>
         {save.branchControl}
       </fieldset>

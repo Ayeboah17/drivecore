@@ -14,12 +14,48 @@ import {
 } from "./types";
 import {
   assertWrite,
+  authorizedContext,
   inScope,
   capabilities,
   kindModule,
   allowed,
   branchOptions,
 } from "./permissions";
+export function companyVatRate(db: Database, companyId: string) {
+  const raw = Number(
+    entities(db, "setting").find(
+      (s) => s.companyId === companyId && s.name === "VAT rate (%)",
+    )?.value ?? "15",
+  );
+  return Number.isFinite(raw) && raw >= 0 && raw <= 50 ? raw : 15;
+}
+export function companyDiscountThreshold(db: Database, companyId: string) {
+  const raw = Number(
+    entities(db, "setting").find(
+      (s) =>
+        s.companyId === companyId &&
+        s.name === "Discount approval threshold (%)",
+    )?.value ?? "10",
+  );
+  return Number.isFinite(raw) && raw >= 0 && raw <= 100 ? raw : 10;
+}
+export function computeFinancialTotals(
+  subtotal: number,
+  discountPct: number,
+  vatRate: number,
+) {
+  const discountAmount = Math.round((subtotal * discountPct) / 100);
+  const taxable = Math.max(0, subtotal - discountAmount);
+  const vatAmount = Math.round((taxable * vatRate) / 100);
+  return {
+    subtotal,
+    discountPct,
+    discountAmount,
+    vatRate,
+    vatAmount,
+    total: taxable + vatAmount,
+  };
+}
 export const day = 86400000;
 export function rentalPrice(starts: string, ends: string, rate: number) {
   const length = Date.parse(ends) - Date.parse(starts);
@@ -233,6 +269,8 @@ function touchEvent(
         pay: "payment recorded",
         refund: "refunded and credited",
         read: "marked read",
+        approve_discount: "discount approved",
+        reject_discount: "discount rejected",
         cancel: "cancelled",
         deleted: "deleted",
       } as Record<string, string>
@@ -255,7 +293,7 @@ function touchEvent(
     },
     now,
   );
-  if (!["audit", "notification"].includes(entity.kind))
+  if (!["audit", "notification", "message"].includes(entity.kind))
     add(
       db,
       "notification",
@@ -318,7 +356,11 @@ function save(
     find(db, "user", ctx.userId).branchIds.length
   )
     throw new DemoError("Whole-company administration is required.");
-  if (old && "status" in old && !["draft", "open"].includes(old.status))
+  if (
+    old &&
+    "status" in old &&
+    !["draft", "open", "pending_approval"].includes(old.status)
+  )
     throw new DemoError(
       "Posted or active records are immutable. Use a workflow action instead.",
     );
@@ -486,10 +528,83 @@ function save(
         ownership: values.ownership ?? "owned",
         seats: integer(values.seats, "seats", 1),
         fuel: values.fuel ?? "Petrol",
+        functions: (values.functions ?? "")
+          .split(",")
+          .map((item) => item.trim())
+          .filter(Boolean),
       };
       break;
     }
-    case "quotation":
+    case "quotation": {
+      const customer = relation(db, base, "customer", values.customerId);
+      if (!customer.active) throw new DemoError("This customer is inactive.");
+      const vehicleIds = [
+        ...new Set(
+          (values.vehicleIds || values.vehicleId || "")
+            .split(",")
+            .map((vId) => vId.trim())
+            .filter(Boolean),
+        ),
+      ];
+      if (!vehicleIds.length)
+        throw new DemoError("Select at least one vehicle for the quotation.", {
+          vehicleIds: "Choose one or more vehicles.",
+        });
+      const selectedVehicles = vehicleIds.map((vId) =>
+        relation(db, base, "vehicle", vId),
+      );
+      let startsAt = iso(values.startsAt, "startsAt");
+      const endsAt = iso(values.endsAt, "endsAt");
+      if (Date.parse(startsAt) < Date.parse(now) - 300000)
+        throw new DemoError("Departure cannot be in the past.", {
+          startsAt: "Choose now or a future departure.",
+        });
+      if (Date.parse(startsAt) < Date.parse(now)) startsAt = now;
+      const discountRaw = (values.discountPct ?? "0").trim() || "0";
+      if (!/^\d+(\.\d{1,2})?$/.test(discountRaw) || Number(discountRaw) > 100)
+        throw new DemoError("Discount must be between 0% and 100%.", {
+          discountPct: "Enter a percentage from 0 to 100.",
+        });
+      const discountPct = Number(discountRaw);
+      const combinedRate = selectedVehicles.reduce(
+        (sum, veh) => sum + veh.dailyRate,
+        0,
+      );
+      const subtotal = selectedVehicles.reduce(
+        (sum, veh) => sum + rentalPrice(startsAt, endsAt, veh.dailyRate),
+        0,
+      );
+      const totals = computeFinancialTotals(
+        subtotal,
+        discountPct,
+        companyVatRate(db, base.companyId),
+      );
+      const threshold = companyDiscountThreshold(db, base.companyId);
+      const needsApproval = discountPct > threshold;
+      data = {
+        ...data,
+        customerId: customer.id,
+        vehicleId: selectedVehicles[0].id,
+        vehicleIds,
+        startsAt,
+        endsAt,
+        dailyRate: combinedRate,
+        subtotal: totals.subtotal,
+        discountPct,
+        discountAmount: totals.discountAmount,
+        discountStatus: needsApproval
+          ? "pending"
+          : discountPct > 0
+            ? "approved"
+            : "none",
+        discountApprovedBy: "",
+        vatRate: totals.vatRate,
+        vatAmount: totals.vatAmount,
+        total: totals.total,
+        status: needsApproval ? "pending_approval" : "draft",
+      };
+      break;
+    }
     case "reservation": {
       const customer = relation(db, base, "customer", values.customerId);
       if (!customer.active) throw new DemoError("This customer is inactive.");
@@ -501,6 +616,11 @@ function save(
           startsAt: "Choose now or a future departure.",
         });
       if (Date.parse(startsAt) < Date.parse(now)) startsAt = now;
+      const totals = computeFinancialTotals(
+        rentalPrice(startsAt, endsAt, vehicle.dailyRate),
+        0,
+        companyVatRate(db, base.companyId),
+      );
       data = {
         ...data,
         customerId: customer.id,
@@ -508,7 +628,11 @@ function save(
         startsAt,
         endsAt,
         dailyRate: vehicle.dailyRate,
-        total: rentalPrice(startsAt, endsAt, vehicle.dailyRate),
+        subtotal: totals.subtotal,
+        discountAmount: totals.discountAmount,
+        vatRate: totals.vatRate,
+        vatAmount: totals.vatAmount,
+        total: totals.total,
         status: "draft",
       };
       break;
@@ -598,18 +722,27 @@ function save(
       };
       break;
     }
-    case "invoice":
+    case "invoice": {
       relation(db, base, "customer", values.customerId);
+      const total = amount(values.total, "total");
+      const vatRate = companyVatRate(db, base.companyId);
+      const subtotal = Math.round((total * 100) / (100 + vatRate));
+      const vatAmount = total - subtotal;
       data = {
         ...data,
         customerId: values.customerId,
         rentalId: "",
         description: values.description,
-        total: amount(values.total, "total"),
+        subtotal,
+        discountAmount: 0,
+        vatRate,
+        vatAmount,
+        total,
         dueAt: iso(values.dueAt, "dueAt"),
         status: "draft",
       };
       break;
+    }
     case "expense":
       data = {
         ...data,
@@ -644,7 +777,14 @@ function save(
       break;
     }
     case "setting":
-      if (!["Workspace note", "Rows per page"].includes(name))
+      if (
+        ![
+          "Workspace note",
+          "Rows per page",
+          "VAT rate (%)",
+          "Discount approval threshold (%)",
+        ].includes(name)
+      )
         throw new DemoError("Choose a supported application setting.");
       if (
         name === "Rows per page" &&
@@ -652,6 +792,24 @@ function save(
       )
         throw new DemoError("Rows per page must be 10, 25 or 50.", {
           value: "Use 10, 25 or 50.",
+        });
+      if (
+        name === "VAT rate (%)" &&
+        (!/^\d+(\.\d{1,2})?$/.test(values.value ?? "") ||
+          Number(values.value) < 0 ||
+          Number(values.value) > 50)
+      )
+        throw new DemoError("VAT rate must be between 0% and 50%.", {
+          value: "Enter a percentage from 0 to 50.",
+        });
+      if (
+        name === "Discount approval threshold (%)" &&
+        (!/^\d+(\.\d{1,2})?$/.test(values.value ?? "") ||
+          Number(values.value) < 0 ||
+          Number(values.value) > 100)
+      )
+        throw new DemoError("Discount threshold must be between 0% and 100%.", {
+          value: "Enter a percentage from 0 to 100.",
         });
       if (
         entities(db, "setting").some(
@@ -664,6 +822,24 @@ function save(
         );
       data = { ...data, name, value: values.value ?? "" };
       break;
+    case "message": {
+      const currentActor = find(db, "user", ctx.userId);
+      const body = (values.body ?? "").trim();
+      if (!body || body.length > 1000)
+        throw new DemoError("Enter a message between 1 and 1000 characters.", {
+          body: "Message body is required.",
+        });
+      data = {
+        ...data,
+        channel: values.channel || "dispatch",
+        senderId: currentActor.id,
+        senderName: currentActor.name,
+        body,
+        relatedEntityId: values.relatedEntityId ?? "",
+        readBy: [currentActor.id],
+      };
+      break;
+    }
     default:
       throw new DemoError("Use the appropriate workflow action.");
   }
@@ -681,15 +857,27 @@ function save(
 function billCharge(
   db: Database,
   r: Of<"rental">,
-  charge: number,
+  netCharge: number,
+  vatAdd: number,
   description: string,
   now: string,
 ) {
-  if (!charge) return;
+  const gross = netCharge + vatAdd;
+  if (!gross) return;
   const draft = entities(db, "invoice").find(
     (i) => i.rentalId === r.id && i.status === "draft",
   );
-  if (draft) patch(db, draft, { total: draft.total + charge }, now);
+  if (draft)
+    patch(
+      db,
+      draft,
+      {
+        subtotal: draft.subtotal + netCharge,
+        vatAmount: draft.vatAmount + vatAdd,
+        total: draft.total + gross,
+      },
+      now,
+    );
   else
     add(
       db,
@@ -699,7 +887,11 @@ function billCharge(
         customerId: r.customerId,
         rentalId: r.id,
         description,
-        total: charge,
+        subtotal: netCharge,
+        discountAmount: 0,
+        vatRate: r.vatRate,
+        vatAmount: vatAdd,
+        total: gross,
         dueAt: r.endsAt,
         status: "draft",
       },
@@ -716,7 +908,18 @@ function act(
 ) {
   const e = db.entities.find((e) => e.id === id);
   if (!e) throw new DemoError("This record no longer exists.");
-  assertWrite(db, ctx, e.kind, e);
+  if (
+    e.kind === "quotation" &&
+    ["approve_discount", "reject_discount"].includes(action)
+  ) {
+    authorizedContext(db, ctx);
+    if (!inScope(db, ctx, e))
+      throw new DemoError(
+        "Your demo role cannot perform this action in this workspace.",
+      );
+  } else {
+    assertWrite(db, ctx, e.kind, e);
+  }
   const blocked = actionBlockReason(db, e, action);
   if (blocked) throw new DemoError(blocked);
   const ensure = (
@@ -725,23 +928,96 @@ function act(
   ) => {
     if (!ok) throw new DemoError(message);
   };
-  if (e.kind === "quotation" && action === "convert") {
-    ensure(e.status === "draft");
-    add(
+  if (e.kind === "quotation" && action === "approve_discount") {
+    ensure(
+      e.status === "pending_approval" && e.discountStatus === "pending",
+      "Only pending-approval quotations can have their discount approved.",
+    );
+    ensure(
+      allowed(db, ctx, "finance", true) ||
+        allowed(db, ctx, "administration", true),
+      "Discount approval requires administrator or finance capability.",
+    );
+    const currentActor = find(db, "user", ctx.userId);
+    patch(
       db,
-      "reservation",
       e,
       {
-        customerId: e.customerId,
-        vehicleId: e.vehicleId,
-        startsAt: e.startsAt,
-        endsAt: e.endsAt,
-        dailyRate: e.dailyRate,
-        total: e.total,
         status: "draft",
+        discountStatus: "approved",
+        discountApprovedBy: currentActor.name,
       },
       now,
     );
+  } else if (e.kind === "quotation" && action === "reject_discount") {
+    ensure(e.status === "pending_approval" && e.discountStatus === "pending");
+    ensure(
+      allowed(db, ctx, "finance", true) ||
+        allowed(db, ctx, "administration", true),
+      "Discount approval requires administrator or finance capability.",
+    );
+    const currentActor = find(db, "user", ctx.userId);
+    patch(
+      db,
+      e,
+      {
+        status: "cancelled",
+        discountStatus: "rejected",
+        discountApprovedBy: currentActor.name,
+      },
+      now,
+    );
+  } else if (e.kind === "quotation" && action === "convert") {
+    ensure(
+      e.status !== "pending_approval" && e.discountStatus !== "pending",
+      "Discount approval is required before converting this quotation.",
+    );
+    ensure(e.status === "draft");
+    const ids = e.vehicleIds.length ? e.vehicleIds : [e.vehicleId];
+    const vehicles = ids.map((vId) => find(db, "vehicle", vId));
+    vehicles.forEach((veh) =>
+      assertAvailable(db, veh.id, e.startsAt, e.endsAt),
+    );
+    const totalSubtotal = Math.max(
+      1,
+      vehicles.reduce(
+        (sum, veh) => sum + rentalPrice(e.startsAt, e.endsAt, veh.dailyRate),
+        0,
+      ),
+    );
+    let remDiscount = e.discountAmount;
+    let remVat = e.vatAmount;
+    vehicles.forEach((veh, index) => {
+      const lineSub = rentalPrice(e.startsAt, e.endsAt, veh.dailyRate);
+      const last = index === vehicles.length - 1;
+      const lineDiscount = last
+        ? remDiscount
+        : Math.round((e.discountAmount * lineSub) / totalSubtotal);
+      remDiscount -= lineDiscount;
+      const lineVat = last
+        ? remVat
+        : Math.round((e.vatAmount * lineSub) / totalSubtotal);
+      remVat -= lineVat;
+      add(
+        db,
+        "reservation",
+        e,
+        {
+          customerId: e.customerId,
+          vehicleId: veh.id,
+          startsAt: e.startsAt,
+          endsAt: e.endsAt,
+          dailyRate: veh.dailyRate,
+          subtotal: lineSub,
+          discountAmount: lineDiscount,
+          vatRate: e.vatRate,
+          vatAmount: lineVat,
+          total: Math.max(0, lineSub - lineDiscount) + lineVat,
+          status: "draft",
+        },
+        now,
+      );
+    });
     patch(db, e, { status: "converted" }, now);
   } else if (e.kind === "reservation" && action === "confirm") {
     ensure(e.status === "draft");
@@ -777,6 +1053,10 @@ function act(
         startsAt: e.startsAt,
         endsAt: e.endsAt,
         dailyRate: e.dailyRate,
+        subtotal: e.subtotal,
+        discountAmount: e.discountAmount,
+        vatRate: e.vatRate,
+        vatAmount: e.vatAmount,
         total: e.total,
         status: "draft",
         handoverAt: "",
@@ -795,6 +1075,10 @@ function act(
         customerId: e.customerId,
         rentalId: r.id,
         description: `Rental contract ${r.id.slice(0, 8)}`,
+        subtotal: r.subtotal,
+        discountAmount: r.discountAmount,
+        vatRate: r.vatRate,
+        vatAmount: r.vatAmount,
         total: r.total,
         dueAt: r.endsAt,
         status: "draft",
@@ -846,12 +1130,23 @@ function act(
       "Choose a return later than the current expected return.",
     );
     assertAvailable(db, e.vehicleId, e.startsAt, endsAt, e.reservationId);
-    const charge =
+    const netCharge =
       rentalPrice(e.startsAt, endsAt, e.dailyRate) -
       rentalPrice(e.startsAt, e.endsAt, e.dailyRate);
-    patch(db, e, { endsAt, total: e.total + charge }, now);
+    const vatAdd = Math.round((netCharge * e.vatRate) / 100);
+    patch(
+      db,
+      e,
+      {
+        endsAt,
+        subtotal: e.subtotal + netCharge,
+        vatAmount: e.vatAmount + vatAdd,
+        total: e.total + netCharge + vatAdd,
+      },
+      now,
+    );
     patch(db, find(db, "reservation", e.reservationId), { endsAt }, now);
-    billCharge(db, e, charge, "Rental extension", now);
+    billCharge(db, e, netCharge, vatAdd, "Rental extension", now);
   } else if (e.kind === "rental" && action === "return") {
     ensure(e.status === "active");
     const vehicle = find(db, "vehicle", e.vehicleId),
@@ -866,7 +1161,9 @@ function act(
         Math.max(0, Math.ceil((Date.parse(now) - Date.parse(e.endsAt)) / day)) *
         e.dailyRate,
       extra = amount(v.additionalCharge || "0", "additionalCharge"),
-      charge = late + extra;
+      netCharge = late + extra,
+      vatAdd = Math.round((netCharge * e.vatRate) / 100),
+      grossCharge = netCharge + vatAdd;
     patch(
       db,
       e,
@@ -874,7 +1171,9 @@ function act(
         status: "completed",
         returnedAt: now,
         returnOdometer: odometer,
-        total: e.total + charge,
+        subtotal: e.subtotal + netCharge,
+        vatAmount: e.vatAmount + vatAdd,
+        total: e.total + grossCharge,
         notes: `${e.notes}\nReturn: ${v.notes}`,
       },
       now,
@@ -903,7 +1202,8 @@ function act(
     billCharge(
       db,
       e,
-      charge,
+      netCharge,
+      vatAdd,
       "Return: late days and recorded additional charges",
       now,
     );
@@ -1072,6 +1372,9 @@ function act(
     );
   } else if (e.kind === "notification" && action === "read") {
     patch(db, e, { read: true }, now);
+  } else if (e.kind === "message" && action === "read") {
+    if (!e.readBy.includes(ctx.userId))
+      patch(db, e, { readBy: [...e.readBy, ctx.userId] }, now);
   } else if (
     action === "cancel" &&
     [
@@ -1084,7 +1387,8 @@ function act(
     ].includes(e.kind)
   ) {
     ensure("status" in e);
-    if (e.kind === "quotation") ensure(e.status === "draft");
+    if (e.kind === "quotation")
+      ensure(["draft", "pending_approval"].includes(e.status));
     if (e.kind === "reservation")
       ensure(
         ["draft", "confirmed"].includes(e.status) &&
@@ -1161,13 +1465,16 @@ export function applyCommand(
         other.id !== e.id &&
         Object.entries(other).some(
           ([key, value]) =>
-            key.endsWith("Id") &&
-            !(
-              key === "actorId" ||
-              (key === "entityId" &&
-                ["audit", "notification"].includes(other.kind))
-            ) &&
-            value === e.id,
+            (key.endsWith("Id") &&
+              !(
+                key === "actorId" ||
+                (key === "entityId" &&
+                  ["audit", "notification"].includes(other.kind))
+              ) &&
+              value === e.id) ||
+            (key === "vehicleIds" &&
+              Array.isArray(value) &&
+              value.includes(e.id)),
         ),
     );
     if (referenced)

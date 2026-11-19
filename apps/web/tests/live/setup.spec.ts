@@ -39,14 +39,16 @@ test("empty platform admin creates company, branch and customer with refreshed c
     name: "Currency",
     exact: true,
   });
-  await expect(currency).toHaveValue("GHC");
-  await expect(currency.getByRole("option")).toHaveText([
+  await expect(currency).toHaveText(/^GHC/);
+  await currency.click();
+  await expect(page.getByRole("option")).toHaveText([
     "USD",
     "EUR",
     "GHC",
     "ZMW",
   ]);
-  await currency.selectOption("ZMW");
+  await page.getByRole("option", { name: "ZMW", exact: true }).click();
+  await expect(currency).toHaveText(/^ZMW/);
   await request.post(`${fixture}/__test/control`, {
     data: { setupValidation: true },
   });
@@ -193,7 +195,7 @@ test("successful creation followed by a directory outage cannot be resubmitted",
     .fill("Saved synthetic company");
   await expect(
     form.getByRole("combobox", { name: "Currency", exact: true }),
-  ).toHaveValue("GHC");
+  ).toHaveText(/^GHC/);
   await request.post(`${fixture}/__test/control`, {
     data: { directoryFailure: true },
   });

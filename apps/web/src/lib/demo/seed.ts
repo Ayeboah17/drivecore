@@ -1,6 +1,7 @@
 import {
   databaseSchema,
   entitySchema,
+  VEHICLE_FUNCTIONS,
   type Database,
   type Kind,
   type Of,
@@ -59,7 +60,7 @@ export function createSeed(at = new Date()): Database {
       name: "Operations staff",
       permissions: perms(
         ["dashboard", "operations", "fleet", "customers", "rentals", "reports"],
-        ["operations", "rentals", "customers"],
+        ["dashboard", "operations", "rentals", "customers"],
       ),
     },
     {
@@ -75,7 +76,14 @@ export function createSeed(at = new Date()): Database {
           "procurement",
           "reports",
         ],
-        ["fleet", "operations", "maintenance", "inventory", "procurement"],
+        [
+          "dashboard",
+          "fleet",
+          "operations",
+          "maintenance",
+          "inventory",
+          "procurement",
+        ],
       ),
     },
     {
@@ -90,10 +98,18 @@ export function createSeed(at = new Date()): Database {
           "procurement",
           "reports",
         ],
-        ["finance", "procurement"],
+        ["dashboard", "finance", "procurement"],
       ),
     },
     { id: "viewer", name: "Viewer", permissions: perms([...modules], []) },
+    {
+      id: "driver",
+      name: "Driver",
+      permissions: perms(
+        ["dashboard", "operations", "fleet", "customers", "rentals"],
+        ["operations", "dashboard"],
+      ),
+    },
   ];
   roles.forEach((r) =>
     add("role", `role-${r.id}`, "", "", {
@@ -120,7 +136,7 @@ export function createSeed(at = new Date()): Database {
       name: names[i],
     });
   roles.forEach((r, i) =>
-    add("user", `user-${r.id}`, "co-1", i === 2 ? "br-1" : "", {
+    add("user", `user-${r.id}`, "co-1", i === 2 || i === 7 ? "br-1" : "", {
       name: [
         "Demo platform admin",
         "Demo company admin",
@@ -129,11 +145,12 @@ export function createSeed(at = new Date()): Database {
         "Demo fleet manager",
         "Demo finance",
         "Demo viewer",
+        "Demo driver",
       ][i],
       email: `${r.id}@drivecore.example.test`,
       roleId: `role-${r.id}`,
       companyIds: r.id === "platform" ? [] : ["co-1"],
-      branchIds: i === 2 ? ["br-1"] : [],
+      branchIds: i === 2 || i === 7 ? ["br-1"] : [],
       active: true,
     }),
   );
@@ -203,6 +220,12 @@ export function createSeed(at = new Date()): Database {
           ownership: i % 3 ? "owned" : "leased",
           seats: category === "Van" ? 8 : 5,
           fuel: i % 2 ? "Diesel" : "Petrol",
+          functions: [
+            VEHICLE_FUNCTIONS[0],
+            VEHICLE_FUNCTIONS[3],
+            ...(i % 2 === 0 ? [VEHICLE_FUNCTIONS[1], VEHICLE_FUNCTIONS[5]] : [VEHICLE_FUNCTIONS[2]]),
+            ...(category === "Executive" ? [VEHICLE_FUNCTIONS[4]] : []),
+          ],
         },
         date(-40 + i),
       ),
@@ -216,6 +239,8 @@ export function createSeed(at = new Date()): Database {
       hours = 0,
     ) => {
       const rate = 45000 + vehicle * 7500;
+      const subtotal = rentalPrice(date(start, hours), date(end), rate);
+      const vatAmount = Math.round((subtotal * 15) / 100);
       add(
         "reservation",
         ref("reservation", i),
@@ -227,7 +252,11 @@ export function createSeed(at = new Date()): Database {
           startsAt: date(start, hours),
           endsAt: date(end),
           dailyRate: rate,
-          total: rentalPrice(date(start, hours), date(end), rate),
+          subtotal,
+          discountAmount: 0,
+          vatRate: 15,
+          vatAmount,
+          total: subtotal + vatAmount,
           status,
         },
         date(start - 2),
@@ -256,6 +285,10 @@ export function createSeed(at = new Date()): Database {
           startsAt: reservation.startsAt,
           endsAt: reservation.endsAt,
           dailyRate: reservation.dailyRate,
+          subtotal: reservation.subtotal,
+          discountAmount: reservation.discountAmount,
+          vatRate: reservation.vatRate,
+          vatAmount: reservation.vatAmount,
           total: reservation.total,
           status:
             i === 2
@@ -283,6 +316,10 @@ export function createSeed(at = new Date()): Database {
             customerId: reservation.customerId,
             rentalId: ref("rental", i),
             description: `Demo rental ${b}-${i}`,
+            subtotal: reservation.subtotal,
+            discountAmount: reservation.discountAmount,
+            vatRate: reservation.vatRate,
+            vatAmount: reservation.vatAmount,
             total: reservation.total,
             dueAt: reservation.endsAt,
             status: i === 3 ? "draft" : "issued",
@@ -357,7 +394,15 @@ export function createSeed(at = new Date()): Database {
     completedVehicle.odometer = 21900;
     for (let i = 0; i < 4; i++) {
       const vehicle = ref("vehicle", i % 2 ? 2 : 4);
+      const extraVehicle = ref("vehicle", 0);
+      const vehicleIds = i === 1 ? [vehicle, extraVehicle] : [vehicle];
       const rate = 45000 + (i % 2 ? 2 : 4) * 7500;
+      const combinedRate = i === 1 ? rate + 45000 : rate;
+      const subtotal = combinedRate * 2;
+      const discountPct = i === 2 ? 15 : i === 1 ? 5 : 0;
+      const discountAmount = Math.round((subtotal * discountPct) / 100);
+      const taxable = subtotal - discountAmount;
+      const vatAmount = Math.round((taxable * 15) / 100);
       add(
         "quotation",
         ref("quote", i),
@@ -366,11 +411,25 @@ export function createSeed(at = new Date()): Database {
         {
           customerId: ref("customer", i + 3),
           vehicleId: vehicle,
+          vehicleIds,
           startsAt: date(3 + i),
           endsAt: date(5 + i),
-          dailyRate: rate,
-          total: rate * 2,
-          status: i === 3 ? "cancelled" : "draft",
+          dailyRate: combinedRate,
+          subtotal,
+          discountPct,
+          discountAmount,
+          discountStatus:
+            discountPct > 10 ? "pending" : discountPct > 0 ? "approved" : "none",
+          discountApprovedBy: "",
+          vatRate: 15,
+          vatAmount,
+          total: taxable + vatAmount,
+          status:
+            i === 3
+              ? "cancelled"
+              : i === 2
+                ? "pending_approval"
+                : "draft",
         },
         date(-3 + i),
       );
@@ -589,16 +648,71 @@ export function createSeed(at = new Date()): Database {
       },
       date(-1),
     );
+    add(
+      "message",
+      ref("msg", 0),
+      companyId,
+      branchId,
+      {
+        channel: "dispatch",
+        senderId: "user-operations",
+        senderName: "Demo operations",
+        body: `Branch ${b}: Vehicle ${ref("vehicle", 3)} cleared pre-dispatch inspection and is staged at bay 2.`,
+        relatedEntityId: ref("vehicle", 3),
+        readBy: ["user-operations"],
+      },
+      date(-1, 2),
+    );
+    add(
+      "message",
+      ref("msg", 1),
+      companyId,
+      branchId,
+      {
+        channel: "drivers",
+        senderId: "user-driver",
+        senderName: "Demo driver",
+        body: `En route to Airport pickup with ${ref("vehicle", 0)}; fuel level verified at 85%.`,
+        relatedEntityId: ref("rental", 0),
+        readBy: ["user-driver"],
+      },
+      date(-1, 4),
+    );
+    add(
+      "message",
+      ref("msg", 2),
+      companyId,
+      branchId,
+      {
+        channel: "customers",
+        senderId: "user-finance",
+        senderName: "Demo finance",
+        body: `Quotation ${ref("quote", 2)} carries a 15% requested discount and awaits approval before conversion.`,
+        relatedEntityId: ref("quote", 2),
+        readBy: ["user-finance"],
+      },
+      date(0, -1),
+    );
   }
   for (const co of ["co-1", "co-2"])
     add("setting", `setting-${co}`, co, "", {
       name: "Workspace note",
       value:
-        "Daily billing in started 24-hour blocks. No tax. Demo distance unit: km. Not production accounting.",
+        "Daily billing in started 24-hour blocks. Mandatory 15% VAT applied. Demo distance unit: km. Not production accounting.",
     });
   for (const co of ["co-1", "co-2"])
     add("setting", `setting-rows-${co}`, co, "", {
       name: "Rows per page",
+      value: "10",
+    });
+  for (const co of ["co-1", "co-2"])
+    add("setting", `setting-vat-${co}`, co, "", {
+      name: "VAT rate (%)",
+      value: "15",
+    });
+  for (const co of ["co-1", "co-2"])
+    add("setting", `setting-discount-threshold-${co}`, co, "", {
+      name: "Discount approval threshold (%)",
       value: "10",
     });
   return databaseSchema.parse(result);

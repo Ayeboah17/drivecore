@@ -27,12 +27,13 @@ import {
   stock,
   vehicleStatus as vehicleStatusForReport,
 } from "@/lib/demo/rules";
+import { DriveCoreSelect } from "@/components/ui/drivecore-select";
 import { exportCsv } from "./table";
-import { selectClass } from "./form";
 import { useDemo } from "./provider";
 import { ExecutiveMapSection } from "./executive-map";
 import { InspectionStudio } from "./inspection-studio";
 import { Vehicle360Modal } from "./vehicle-360-modal";
+import { KpiInfographicsBand } from "./infographics";
 import type { VehicleProjection } from "./projections";
 
 export function Stat({
@@ -280,6 +281,10 @@ export function Overview({
       </div>
 
       {!operational ? (
+        <KpiInfographicsBand db={db} ctx={ctx} range={range} />
+      ) : null}
+
+      {!operational ? (
         <div className="grid gap-6 xl:grid-cols-2">
           {allowed(db, ctx, "finance") ? (
             <Trend
@@ -510,20 +515,15 @@ export function Reports({
     <div className="space-y-5">
       <div className="flex flex-wrap items-end justify-between gap-3">
         {!ledgerOnly ? (
-          <label className="w-full max-w-sm space-y-2 text-label">
-            Report
-            <select
-              className={`${selectClass} rounded-xl`}
+          <div className="w-full max-w-sm space-y-2 text-label font-semibold">
+            <span>Report</span>
+            <DriveCoreSelect
+              ariaLabel="Report"
               value={current?.id ?? ""}
-              onChange={(e) => onSelect(e.target.value)}
-            >
-              {reports.map((r) => (
-                <option key={r.id} value={r.id}>
-                  {r.label}
-                </option>
-              ))}
-            </select>
-          </label>
+              onValueChange={onSelect}
+              options={reports.map((r) => ({ value: r.id, label: r.label }))}
+            />
+          </div>
         ) : (
           <h2 className="text-section-heading font-extrabold">
             Demo accounting ledger

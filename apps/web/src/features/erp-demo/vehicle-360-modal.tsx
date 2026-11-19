@@ -138,6 +138,22 @@ export function Vehicle360Modal({
           </div>
         </div>
 
+        {v.functions.length > 0 ? (
+          <div className="flex flex-wrap items-center gap-1.5 rounded-2xl border bg-muted/20 p-3">
+            <span className="mr-1 font-mono text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+              Vehicle Functions:
+            </span>
+            {v.functions.map((fn) => (
+              <span
+                key={fn}
+                className="rounded-md bg-structural px-2 py-0.5 font-mono text-[11px] font-semibold text-structural-foreground"
+              >
+                {fn}
+              </span>
+            ))}
+          </div>
+        ) : null}
+
         {/* Disposal & Replacement Simulator */}
         <section className="space-y-4 rounded-2xl bg-structural p-5 text-structural-foreground">
           <div className="flex items-center justify-between gap-2">

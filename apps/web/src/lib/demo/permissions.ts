@@ -45,6 +45,7 @@ export const kindModule: Record<Kind, Module> = {
   expense: "finance",
   document: "fleet",
   notification: "dashboard",
+  message: "dashboard",
 };
 export function actor(db: Database, ctx: DemoContext) {
   const user = find(db, "user", ctx.userId);

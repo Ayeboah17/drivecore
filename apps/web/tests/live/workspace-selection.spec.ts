@@ -53,7 +53,7 @@ test("workspace cards and create dialog support keyboard focus and escape", asyn
   ).toBeFocused();
   await expect(
     dialog.getByRole("combobox", { name: "Currency", exact: true }),
-  ).toHaveValue("GHC");
+  ).toHaveText(/^GHC/);
   for (let index = 0; index < 6; index++) {
     await page.keyboard.press("Tab");
     await expect

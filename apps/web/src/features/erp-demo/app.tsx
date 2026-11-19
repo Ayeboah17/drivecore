@@ -30,7 +30,13 @@ import {
 } from "@/lib/demo/permissions";
 import { label } from "@/lib/demo/selectors";
 import { DemoProvider, useDemo } from "./provider";
-import { DemoForm, selectClass } from "./form";
+import { DemoForm } from "./form";
+import { DriveCoreDateRangePicker } from "@/components/ui/drivecore-calendar";
+import {
+  DocumentPdfModal,
+  isPrintableEntity,
+  type PrintableEntity,
+} from "./pdf-modal";
 import {
   screens,
   moduleScreens,
@@ -76,7 +82,9 @@ function Workspace() {
     [modal, setModal] = useState<Modal | null>(null),
     [formBusy, setFormBusy] = useState(false),
     [resetError, setResetError] = useState(""),
-    [modal360, setModal360] = useState<VehicleProjection | null>(null);
+    [modal360, setModal360] = useState<VehicleProjection | null>(null),
+    [pdfEntity, setPdfEntity] = useState<PrintableEntity | null>(null),
+    [lastPrintableId, setLastPrintableId] = useState<string>("");
   const dark = params.get("theme") === "dark";
   useEffect(() => {
     document.documentElement.classList.toggle("dark", dark);
@@ -286,18 +294,40 @@ function Workspace() {
         <div
           role="status"
           aria-live="polite"
-          className={`demo-feedback fixed inset-x-4 bottom-4 z-40 flex min-h-control items-center justify-between gap-3 rounded-control border bg-surface px-3 py-2 text-sm shadow-sm sm:left-auto sm:w-[28rem] ${notice ? "translate-y-0 opacity-100" : "pointer-events-none translate-y-2 opacity-0"}`}
+          className={`demo-feedback fixed inset-x-4 bottom-4 z-40 flex min-h-control flex-wrap items-center justify-between gap-2 rounded-control border bg-surface px-3 py-2 text-sm shadow-sm sm:left-auto sm:w-[28rem] ${notice ? "translate-y-0 opacity-100" : "pointer-events-none translate-y-2 opacity-0"}`}
         >
           <span>{notice}</span>
-          <button
-            aria-label="Dismiss feedback"
-            disabled={!notice}
-            tabIndex={notice ? 0 : -1}
-            className="rounded-sm focus-visible:outline-2 focus-visible:outline-ring"
-            onClick={clearNotice}
-          >
-            <X aria-hidden="true" className="size-4" />
-          </button>
+          <div className="flex items-center gap-2">
+            {lastPrintableId ? (
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                disabled={!notice}
+                tabIndex={notice ? 0 : -1}
+                onClick={() => {
+                  const found = db.entities.find(
+                    (e) => e.id === lastPrintableId,
+                  );
+                  if (found && isPrintableEntity(found)) setPdfEntity(found);
+                }}
+              >
+                Generate PDF
+              </Button>
+            ) : null}
+            <button
+              aria-label="Dismiss feedback"
+              disabled={!notice}
+              tabIndex={notice ? 0 : -1}
+              className="rounded-sm focus-visible:outline-2 focus-visible:outline-ring"
+              onClick={() => {
+                setLastPrintableId("");
+                clearNotice();
+              }}
+            >
+              <X aria-hidden="true" className="size-4" />
+            </button>
+          </div>
         </div>
         {contextError ? (
           <StatePanel title="Demo context unavailable">
@@ -392,29 +422,12 @@ function Workspace() {
                 ) : null}
               </div>
             </div>
-            <div className="flex flex-wrap items-end gap-3">
-              <label className="space-y-2 text-label">
-                From date
-                <InputDate
-                  value={range.from}
-                  onChange={(value) => go({ from: value, page: "1" })}
-                />
-              </label>
-              <label className="space-y-2 text-label">
-                To date
-                <InputDate
-                  value={range.to}
-                  onChange={(value) => go({ to: value, page: "1" })}
-                />
-              </label>
-              {range.from || range.to ? (
-                <Button
-                  variant="ghost"
-                  onClick={() => go({ from: "", to: "", page: "1" })}
-                >
-                  Clear dates
-                </Button>
-              ) : null}
+            <div className="flex flex-wrap items-center gap-3">
+              <DriveCoreDateRangePicker
+                from={range.from}
+                to={range.to}
+                onChange={({ from, to }) => go({ from, to, page: "1" })}
+              />
             </div>
             <ModuleMetrics db={db} ctx={ctx} view={view} range={range} />
             <ViewFadeIn key={`${view}:${tab ?? ""}:${id}`} className="space-y-6">
@@ -517,6 +530,7 @@ function Workspace() {
                         entity={record!}
                         onOpen={open}
                         onOpen360={(v) => open360ForVehicleId(v.id)}
+                        onGeneratePdf={(printable) => setPdfEntity(printable)}
                         onEdit={() =>
                           setModal({
                             title: `Edit ${label(record!)}`,
@@ -581,6 +595,7 @@ function Workspace() {
                         )
                       }
                       onOpen360={(v) => open360ForVehicleId(v.id)}
+                      onGeneratePdf={(printable) => setPdfEntity(printable)}
                       onView={(id) => go({ id })}
                     />
                   </div>
@@ -668,6 +683,8 @@ function Workspace() {
                           !db.entities.some((old) => old.id === e.id),
                       );
                   if (saved) {
+                    if (isPrintableEntity(saved)) setLastPrintableId(saved.id);
+                    else setLastPrintableId("");
                     if (saved.kind === "company")
                       go({
                         company: saved.id,
@@ -698,23 +715,12 @@ function Workspace() {
         onClose={() => setModal360(null)}
         onOpenRecord={(entity) => open(entity)}
       />
+      <DocumentPdfModal
+        db={db}
+        entity={pdfEntity}
+        onClose={() => setPdfEntity(null)}
+      />
     </PrototypeShell>
-  );
-}
-function InputDate({
-  value,
-  onChange,
-}: {
-  value: string;
-  onChange: (value: string) => void;
-}) {
-  return (
-    <input
-      type="date"
-      className={selectClass}
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-    />
   );
 }
 export function ErpDemo() {

@@ -43,7 +43,9 @@ import {
   branchOptions,
 } from "@/lib/demo/permissions";
 import { label, rows, type Range } from "@/lib/demo/selectors";
+import { DriveCoreSelect } from "@/components/ui/drivecore-select";
 import { KpiScorecardModal } from "./kpi-modal";
+import { ChatCenterDrawer } from "./chat-drawer";
 import { useDemo } from "./provider";
 
 const icons = {
@@ -277,17 +279,16 @@ export function PrototypeShell({
 
             {/* Center Context Cluster (Company + Branch) */}
             <div className="flex flex-wrap items-center gap-2">
-              <label className="inline-flex h-9 items-center gap-1.5 rounded-xl border bg-surface px-2.5 text-xs font-medium text-muted-foreground shadow-2xs">
+              <div className="inline-flex items-center gap-1.5 rounded-xl border bg-surface px-2 shadow-2xs">
                 <Building2 className="size-3.5 shrink-0 text-primary" aria-hidden="true" />
-                <span className="sr-only">Company</span>
-                <select
-                  aria-label="Company"
-                  className="max-w-40 bg-transparent text-xs font-semibold text-foreground focus:outline-none"
-                  value={ctx.companyId}
+                <DriveCoreSelect
+                  ariaLabel="Company"
                   disabled={busy}
-                  onChange={(e) =>
+                  value={ctx.companyId}
+                  className="h-9 max-w-44 border-0 bg-transparent px-1 text-xs font-semibold shadow-none dark:bg-transparent"
+                  onValueChange={(value) =>
                     go({
-                      company: e.target.value,
+                      company: value,
                       branch: "all",
                       view: "dashboard",
                       tab: "",
@@ -297,43 +298,32 @@ export function PrototypeShell({
                       page: "1",
                     })
                   }
-                >
-                  {companies.map((c) => (
-                    <option key={c.id} value={c.id} className="bg-surface text-foreground">
-                      {c.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
+                  options={companies.map((c) => ({ value: c.id, label: c.name }))}
+                />
+              </div>
 
-              <label className="inline-flex h-9 items-center gap-1.5 rounded-xl border bg-surface px-2.5 text-xs font-medium text-muted-foreground shadow-2xs">
+              <div className="inline-flex items-center gap-1.5 rounded-xl border bg-surface px-2 shadow-2xs">
                 <MapPin className="size-3.5 shrink-0 text-primary" aria-hidden="true" />
-                <span className="sr-only">Branch</span>
-                <select
-                  aria-label="Branch"
-                  className="max-w-44 bg-transparent text-xs font-semibold text-foreground focus:outline-none"
-                  value={ctx.branchId}
+                <DriveCoreSelect
+                  ariaLabel="Branch"
                   disabled={busy}
-                  onChange={(e) =>
+                  value={ctx.branchId}
+                  className="h-9 max-w-48 border-0 bg-transparent px-1 text-xs font-semibold shadow-none dark:bg-transparent"
+                  onValueChange={(value) =>
                     go({
-                      branch: e.target.value,
+                      branch: value,
                       id: "",
                       q: "",
                       filter: "",
                       page: "1",
                     })
                   }
-                >
-                  <option value="all" className="bg-surface text-foreground">
-                    All accessible branches
-                  </option>
-                  {branches.map((b) => (
-                    <option key={b.id} value={b.id} className="bg-surface text-foreground">
-                      {b.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
+                  options={[
+                    { value: "all", label: "All accessible branches" },
+                    ...branches.map((b) => ({ value: b.id, label: b.name })),
+                  ]}
+                />
+              </div>
             </div>
 
             {/* Right Control Cluster */}
@@ -350,18 +340,17 @@ export function PrototypeShell({
               ) : null}
 
               {/* Dark Charcoal Role Switcher Pill */}
-              <label className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-structural px-2.5 text-xs font-semibold text-structural-foreground shadow-xs">
+              <div className="inline-flex items-center gap-1.5 rounded-xl bg-structural px-2 text-xs font-semibold text-structural-foreground shadow-xs">
                 <ShieldCheck className="size-3.5 shrink-0 text-primary" aria-hidden="true" />
-                <span className="sr-only">Demo account</span>
-                <select
-                  aria-label="Demo account"
-                  className="max-w-40 bg-transparent text-xs font-semibold text-structural-foreground focus:outline-none"
-                  value={ctx.userId}
+                <DriveCoreSelect
+                  ariaLabel="Demo account"
                   disabled={busy}
-                  onChange={(e) => {
-                    const available = companyOptions(db, e.target.value);
+                  value={ctx.userId}
+                  className="h-9 max-w-44 border-0 bg-transparent px-1 text-xs font-semibold text-structural-foreground shadow-none hover:border-0 dark:bg-transparent dark:hover:bg-transparent [&>svg]:text-structural-foreground/75"
+                  onValueChange={(value) => {
+                    const available = companyOptions(db, value);
                     go({
-                      user: e.target.value,
+                      user: value,
                       company:
                         available.find((c) => c.id === ctx.companyId)?.id ??
                         available[0]?.id ??
@@ -375,16 +364,20 @@ export function PrototypeShell({
                       page: "1",
                     });
                   }}
-                >
-                  {entities(db, "user")
+                  options={entities(db, "user")
                     .filter((u) => u.active)
-                    .map((u) => (
-                      <option key={u.id} value={u.id} className="bg-structural text-structural-foreground">
-                        {u.name}
-                      </option>
-                    ))}
-                </select>
-              </label>
+                    .map((u) => ({ value: u.id, label: u.name }))}
+                />
+              </div>
+
+              {contextValid ? (
+                <ChatCenterDrawer
+                  db={db}
+                  ctx={ctx}
+                  busy={busy}
+                  onOpenRecord={onOpenRecord}
+                />
+              ) : null}
 
               {/* Notifications Slide-Over Drawer Trigger */}
               <Sheet open={alertsOpen} onOpenChange={setAlertsOpen}>

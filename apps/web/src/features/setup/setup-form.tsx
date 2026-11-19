@@ -2,7 +2,7 @@
 import { useEffect, useId, useRef, useState } from "react";
 import Link from "next/link";
 import { z } from "zod";
-import { useForm } from "react-hook-form";
+import { useForm, useWatch } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useQueryClient } from "@tanstack/react-query";
 import { useSession } from "@/features/auth/session-provider";
@@ -17,6 +17,7 @@ import {
 } from "@/lib/api/contracts";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { DriveCoreSelect } from "@/components/ui/drivecore-select";
 import {
   branchInput,
   companyInput,
@@ -65,12 +66,15 @@ export function SetupForm({
     register,
     handleSubmit,
     setError: setFieldError,
+    setValue,
+    control,
     reset,
     formState: { errors, isSubmitting },
   } = useForm<{ name: string; currency: string }>({
     resolver: zodResolver(schema),
     defaultValues: { name: "", currency: defaultCurrency },
   });
+  const selectedCurrency = useWatch({ control, name: "currency" });
   if (!allowed)
     return (
       <p role="status">You do not have permission to create this {kind}.</p>
@@ -252,19 +256,19 @@ export function SetupForm({
             {kind === "company" ? (
               <div className="space-y-2">
                 <label htmlFor={`${prefix}-currency`}>Currency</label>
-                <select
+                <DriveCoreSelect
                   id={`${prefix}-currency`}
-                  {...register("currency")}
-                  aria-invalid={!!errors.currency}
-                  aria-describedby={`${prefix}-currency-error`}
-                  className="h-control w-full rounded-control border border-input bg-surface px-3 text-sm focus-visible:outline-2 focus-visible:outline-ring"
-                >
-                  {currencyOptions.map((currency) => (
-                    <option key={currency} value={currency}>
-                      {currency}
-                    </option>
-                  ))}
-                </select>
+                  value={selectedCurrency}
+                  onValueChange={(val) =>
+                    setValue("currency", val, { shouldValidate: true })
+                  }
+                  options={currencyOptions.map((currency) => ({
+                    value: currency,
+                    label: currency,
+                  }))}
+                  ariaInvalid={!!errors.currency}
+                  ariaDescribedBy={`${prefix}-currency-error`}
+                />
                 <p
                   id={`${prefix}-currency-error`}
                   className="text-sm text-danger-foreground"

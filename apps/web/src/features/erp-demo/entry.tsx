@@ -4,10 +4,10 @@ import Link from "next/link";
 import { useState } from "react";
 import { ArrowRight, RotateCcw, ShieldCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { DriveCoreSelect } from "@/components/ui/drivecore-select";
 import { ViewFadeIn } from "@/components/motion/primitives";
 import { entities, type Database } from "@/lib/demo/types";
 import { Brand } from "./shell";
-import { selectClass } from "./form";
 
 export function DemoEntry({
   db,
@@ -89,22 +89,17 @@ export function DemoEntry({
               </div>
             </div>
 
-            <label className="block space-y-2 text-sm font-medium">
-              Demo role
-              <select
-                className={`${selectClass} rounded-xl`}
+            <div className="space-y-2">
+              <span className="block text-sm font-medium">Demo role</span>
+              <DriveCoreSelect
+                ariaLabel="Demo role"
                 value={selected}
-                onChange={(e) => setSelected(e.target.value)}
-              >
-                {entities(db, "user")
+                onValueChange={setSelected}
+                options={entities(db, "user")
                   .filter((u) => u.active)
-                  .map((u) => (
-                    <option key={u.id} value={u.id}>
-                      {u.name}
-                    </option>
-                  ))}
-              </select>
-            </label>
+                  .map((u) => ({ value: u.id, label: u.name }))}
+              />
+            </div>
 
             <p className="text-sm text-muted-foreground">
               Start with the platform administrator to explore every workflow,

@@ -1,6 +1,6 @@
 "use client";
+import { FileText } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import {
   Table,
@@ -10,6 +10,12 @@ import {
   TableHead,
   TableCell,
 } from "@/components/ui/table";
+import { DriveCoreSelect } from "@/components/ui/drivecore-select";
+import {
+  DataSearchForm,
+  DataTableFrame,
+  type ActiveFilterChip,
+} from "@/components/data/data-table";
 import type {
   Database,
   DemoContext,
@@ -28,7 +34,7 @@ import {
 } from "@/lib/demo/selectors";
 import { stock, invoiceBalance } from "@/lib/demo/rules";
 import { fieldLabel, screens } from "./config";
-import { selectClass } from "./form";
+import { isPrintableEntity, type PrintableEntity } from "./pdf-modal";
 export function Status({ value }: { value: string }) {
   const style = [
     "available",
@@ -37,6 +43,7 @@ export function Status({ value }: { value: string }) {
     "received",
     "confirmed",
     "active",
+    "approved",
     "in stock",
   ].includes(value)
     ? "border-success text-success-foreground"
@@ -45,6 +52,7 @@ export function Status({ value }: { value: string }) {
           "damaged",
           "unpaid",
           "cancelled",
+          "rejected",
           "inactive",
           "void",
           "low stock",
@@ -56,7 +64,8 @@ export function Status({ value }: { value: string }) {
             "in_progress",
             "partial",
             "submitted",
-            "approved",
+            "pending",
+            "pending_approval",
             "unread",
           ].includes(value)
         ? "border-warning text-warning-foreground"
@@ -69,6 +78,9 @@ export function Status({ value }: { value: string }) {
 }
 const financial = new Set([
   "dailyRate",
+  "subtotal",
+  "discountAmount",
+  "vatAmount",
   "total",
   "amount",
   "unitCost",
@@ -80,6 +92,15 @@ export function cell(db: Database, entity: Entity, key: string): string {
     return displayStatus(db, entity);
   if (key === "status") return displayStatus(db, entity);
   const value = valueOf(entity, key);
+  if (key === "vehicleIds" && Array.isArray(value)) {
+    const names = value
+      .map((vId) => db.entities.find((e) => e.id === vId))
+      .filter((e): e is Entity => !!e)
+      .map(label);
+    return names.join(", ") || cell(db, entity, "vehicleId");
+  }
+  if (key === "discountPct" && typeof value === "number") return `${value}%`;
+  if (key === "vatRate" && typeof value === "number") return `${value}%`;
   if (key.endsWith("Id")) {
     const related = db.entities.find((e) => e.id === value);
     return related ? label(related) : String(value || "—");
@@ -105,6 +126,10 @@ const monoColumns = new Set([
   "registration",
   "odometer",
   "dailyRate",
+  "subtotal",
+  "discountPct",
+  "discountAmount",
+  "vatAmount",
   "total",
   "amount",
   "unitCost",
@@ -123,6 +148,7 @@ export function RecordTable({
   onState,
   onView,
   onOpen360,
+  onGeneratePdf,
   range,
 }: {
   db: Database;
@@ -132,6 +158,7 @@ export function RecordTable({
   onState: (next: Partial<TableState>) => void;
   onView: (id: string) => void;
   onOpen360?: (vehicle: Of<"vehicle">) => void;
+  onGeneratePdf?: (entity: PrintableEntity) => void;
   range: Range;
 }) {
   const spec = screens[kind];
@@ -183,69 +210,101 @@ export function RecordTable({
   const last = Math.max(1, Math.ceil(source.length / pageSize)),
     page = Math.min(state.page, last),
     visible = source.slice((page - 1) * pageSize, page * pageSize);
+
+  const chips: ActiveFilterChip[] = [
+    ...(state.q
+      ? [
+          {
+            key: "q",
+            label: `Search: "${state.q}"`,
+            onRemove: () => onState({ q: "", page: 1 }),
+          },
+        ]
+      : []),
+    ...(state.filter
+      ? [
+          {
+            key: "filter",
+            label: `Status: ${state.filter.replaceAll("_", " ")}`,
+            onRemove: () => onState({ filter: "", page: 1 }),
+          },
+        ]
+      : []),
+  ];
+
+  const sortOptions = spec.columns.flatMap((key) => [
+    { value: `${key}:asc`, label: `${fieldLabel(key, kind)} ↑` },
+    { value: `${key}:desc`, label: `${fieldLabel(key, kind)} ↓` },
+  ]);
+
   return (
-    <section
-      aria-label={spec.label}
-      className="dc-shadow-card overflow-hidden rounded-2xl border bg-surface"
-    >
-      <div className="flex flex-col flex-wrap items-end gap-3 border-b p-card lg:flex-row">
-        <form
-          key={kind + state.q}
-          className="flex min-w-0 flex-1 items-end gap-2"
-          onSubmit={(event) => {
-            event.preventDefault();
-            const data = new FormData(event.currentTarget);
-            onState({ q: String(data.get("query") ?? ""), page: 1 });
-          }}
-        >
-          <label className="min-w-0 flex-1 space-y-2 text-label">
-            Search {spec.label.toLowerCase()}
-            <Input
-              name="query"
-              type="search"
-              defaultValue={state.q}
-              placeholder="Search all records in this scope"
+    <DataTableFrame
+      ariaLabel={spec.label}
+      chips={chips}
+      onClearAll={() => onState({ q: "", filter: "", page: 1 })}
+      toolbar={
+        <div className="flex flex-col flex-wrap items-end gap-3 lg:flex-row">
+          <DataSearchForm
+            formKey={kind + state.q}
+            label={`Search ${spec.label.toLowerCase()}`}
+            placeholder="Search all records in this scope"
+            defaultValue={state.q}
+            onSubmitQuery={(q) => onState({ q, page: 1 })}
+          />
+          <div className="w-full space-y-1.5 text-label font-semibold lg:w-44">
+            <span>Status</span>
+            <DriveCoreSelect
+              ariaLabel="Filter status"
+              value={state.filter}
+              onValueChange={(value) => onState({ filter: value, page: 1 })}
+              options={[
+                { value: "", label: "All statuses" },
+                ...statuses.map((s) => ({
+                  value: s,
+                  label: s.replaceAll("_", " "),
+                })),
+              ]}
             />
-          </label>
-          <Button type="submit" variant="outline">
-            Search
-          </Button>
-        </form>
-        <label className="w-full space-y-2 text-label lg:w-40">
-          Status
-          <select
-            aria-label="Filter status"
-            className={selectClass}
-            value={state.filter}
-            onChange={(e) => onState({ filter: e.target.value, page: 1 })}
-          >
-            <option value="">All statuses</option>
-            {statuses.map((s) => (
-              <option key={s} value={s}>
-                {s.replaceAll("_", " ")}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="w-full space-y-2 text-label lg:w-48">
-          Sort
-          <select
-            className={selectClass}
-            aria-label="Sort records"
-            value={state.sort}
-            onChange={(e) => onState({ sort: e.target.value, page: 1 })}
-          >
-            {spec.columns.flatMap((key) => [
-              <option key={`${key}-asc`} value={`${key}:asc`}>
-                {fieldLabel(key, kind)} ↑
-              </option>,
-              <option key={`${key}-desc`} value={`${key}:desc`}>
-                {fieldLabel(key, kind)} ↓
-              </option>,
-            ])}
-          </select>
-        </label>
-      </div>
+          </div>
+          <div className="w-full space-y-1.5 text-label font-semibold lg:w-52">
+            <span>Sort</span>
+            <DriveCoreSelect
+              ariaLabel="Sort records"
+              value={state.sort}
+              onValueChange={(value) => onState({ sort: value, page: 1 })}
+              options={sortOptions}
+            />
+          </div>
+        </div>
+      }
+      footer={
+        <>
+          <p className="font-mono text-xs tabular-nums">
+            {source.length} records · Page {page} of {last}
+          </p>
+          <div className="flex gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              className="rounded-xl"
+              disabled={page <= 1}
+              onClick={() => onState({ page: page - 1 })}
+            >
+              Previous
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="rounded-xl"
+              disabled={page >= last}
+              onClick={() => onState({ page: page + 1 })}
+            >
+              Next
+            </Button>
+          </div>
+        </>
+      }
+    >
       {!source.length ? (
         <div className="space-y-2 p-8">
           <h2 className="text-section-heading">No matching records</h2>
@@ -317,6 +376,17 @@ export function RecordTable({
                     ) : null}
                     <TableCell>
                       <div className="flex items-center justify-end gap-1">
+                        {isPrintableEntity(e) && onGeneratePdf ? (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => onGeneratePdf(e)}
+                            aria-label={`Generate PDF for ${label(e)}`}
+                          >
+                            <FileText className="mr-1 size-3.5" aria-hidden="true" />
+                            PDF
+                          </Button>
+                        ) : null}
                         {e.kind === "vehicle" && onOpen360 ? (
                           <Button
                             variant="outline"
@@ -360,42 +430,31 @@ export function RecordTable({
                     </div>
                   ))}
                 </dl>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => onView(e.id)}
-                >
-                  View record
-                </Button>
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => onView(e.id)}
+                  >
+                    View record
+                  </Button>
+                  {isPrintableEntity(e) && onGeneratePdf ? (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => onGeneratePdf(e)}
+                    >
+                      <FileText className="mr-1 size-3.5" aria-hidden="true" />
+                      PDF
+                    </Button>
+                  ) : null}
+                </div>
               </li>
             ))}
           </ul>
         </>
       )}
-      <div className="flex flex-wrap items-center justify-between gap-3 border-t p-4 text-sm">
-        <p>
-          {source.length} records · Page {page} of {last}
-        </p>
-        <div className="flex gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={page <= 1}
-            onClick={() => onState({ page: page - 1 })}
-          >
-            Previous
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={page >= last}
-            onClick={() => onState({ page: page + 1 })}
-          >
-            Next
-          </Button>
-        </div>
-      </div>
-    </section>
+    </DataTableFrame>
   );
 }
 export function exportCsv(

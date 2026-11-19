@@ -81,7 +81,15 @@ export function KpiScorecardModal({
                   {item.metric}
                 </p>
               </div>
-              <div className="border-t pt-2">
+              <div className="space-y-1.5 border-t pt-2">
+                <div className="h-1.5 overflow-hidden rounded-full bg-muted">
+                  <div
+                    className={`h-full rounded-full ${
+                      item.status === "met" ? "bg-success" : "bg-warning"
+                    }`}
+                    style={{ width: item.status === "met" ? "100%" : "45%" }}
+                  />
+                </div>
                 <p className="text-[11px] font-medium text-muted-foreground">
                   {item.target} · {item.detail}
                 </p>

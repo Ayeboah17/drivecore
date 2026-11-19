@@ -1,6 +1,16 @@
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect, type Locator, type Page } from "@playwright/test";
 import type { Database } from "../../src/lib/demo/types";
 import { resolve } from "node:path";
+
+async function choose(
+  scope: Page | Locator,
+  page: Page,
+  name: string | RegExp,
+  option: string | RegExp,
+) {
+  await scope.getByRole("combobox", { name, exact: typeof name === "string" }).click();
+  await page.getByRole("option", { name: option, exact: typeof option === "string" }).click();
+}
 const route = (
   view = "dashboard",
   tab = "",
@@ -121,9 +131,7 @@ test("every module has real demo records, working search/pagination and scoped c
     await capture(page, `${view}-1440-light`);
   }
   await open(page, "fleet");
-  await page
-    .getByRole("combobox", { name: "Company", exact: true })
-    .selectOption("co-2");
+  await choose(page, page, "Company", "Copperline Rentals Demo");
   await expect(
     page.getByRole("heading", { name: "Dashboard", exact: true }),
   ).toBeVisible();
@@ -187,10 +195,14 @@ test("customer and fleet CRUD persists through reload; document metadata is atta
     Seats: "5",
   }))
     await dialog.getByLabel(label, { exact: true }).fill(value);
+  await dialog
+    .getByRole("button", { name: "GPS Tracker", exact: true })
+    .click();
   await save(page);
   await expect(
     page.getByRole("heading", { name: "PROTO-999", exact: true }),
   ).toBeVisible();
+  await expect(page.getByText("GPS Tracker", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Edit record", exact: true }).click();
   await page
     .getByRole("dialog")
@@ -207,9 +219,7 @@ test("customer and fleet CRUD persists through reload; document metadata is atta
   await dialog
     .getByLabel("Name", { exact: true })
     .fill("Synthetic metadata only.pdf");
-  await dialog
-    .getByLabel("Related record", { exact: true })
-    .selectOption(customer.id);
+  await choose(dialog, page, "Related record", "A Fictional Prototype Customer");
   await save(page);
   await expect(
     page.getByRole("heading", {
@@ -246,14 +256,15 @@ test("quotation becomes a reservation and contract, then handover, extension and
     .getByRole("button", { name: "Create quotation", exact: true })
     .click();
   const dialog = page.getByRole("dialog");
-  await dialog
-    .getByLabel("Vehicle", { exact: true })
-    .selectOption("vehicle-1-2");
+  await dialog.getByRole("checkbox", { name: /DEMO-1003/ }).check();
   await save(page);
+  await expect(
+    page.getByRole("button", { name: "Generate PDF", exact: true }).first(),
+  ).toBeVisible();
   await transition(page, "Convert to reservation");
   let db = await data(page);
   const reservation = db.entities
-    .filter((e) => e.kind === "reservation")
+    .filter((e) => e.kind === "reservation" && e.vehicleId === "vehicle-1-2")
     .at(-1)!;
   await open(page, "rentals", "reservation", reservation.id);
   await transition(page, "Confirm reservation");
@@ -268,14 +279,19 @@ test("quotation becomes a reservation and contract, then handover, extension and
   await page
     .getByRole("button", { name: "Extend rental", exact: true })
     .click();
-  const later = new Date(Date.now() + 2 * 86400000);
-  const local = new Date(later.getTime() - later.getTimezoneOffset() * 60000)
-    .toISOString()
-    .slice(0, 16);
   await page
     .getByRole("dialog")
     .getByLabel("New expected return", { exact: true })
-    .fill(local);
+    .click();
+  const pickerDialog = page.getByRole("dialog", {
+    name: "New expected return",
+    exact: true,
+  });
+  await pickerDialog.getByRole("button", { name: "Next month", exact: true }).click();
+  await pickerDialog.getByRole("button", { name: /15, \d{4}/ }).click();
+  await pickerDialog
+    .getByRole("button", { name: "Apply date & time", exact: true })
+    .click();
   await save(page);
   await transition(page, "Record return", {
     "Condition notes": "Synthetic checked return",
@@ -319,7 +335,7 @@ test("maintenance consumption and purchase receipt change actual persisted inven
     .getByRole("button", { name: "Consume parts", exact: true })
     .click();
   const dialog = page.getByRole("dialog");
-  await dialog.getByLabel("Part", { exact: true }).selectOption("part-1-2");
+  await choose(dialog, page, "Part", "Air filter");
   await dialog.getByLabel("Quantity", { exact: true }).fill("9999");
   await dialog
     .getByRole("button", { name: "Save demo change", exact: true })
@@ -512,14 +528,9 @@ test("administration creates a company and branch, changes application settings,
   await dialog
     .getByLabel("Email", { exact: true })
     .fill("observer@example.test");
-  await dialog.getByLabel("Role", { exact: true }).selectOption(role.id);
+  await choose(dialog, page, "Role", role.name);
   await save(page);
-  const user = (await data(page)).entities
-    .filter((e) => e.kind === "user")
-    .at(-1)!;
-  await page
-    .getByRole("combobox", { name: "Demo account", exact: true })
-    .selectOption(user.id);
+  await choose(page, page, "Demo account", /Demo custom observer/);
   await page
     .getByRole("navigation", { name: "Demo navigation", exact: true })
     .getByRole("button", { name: "Customers", exact: true })
@@ -532,9 +543,7 @@ test("administration creates a company and branch, changes application settings,
       .getByRole("navigation", { name: "Demo navigation" })
       .getByRole("button", { name: "Finance", exact: true }),
   ).toHaveCount(0);
-  await page
-    .getByRole("combobox", { name: "Demo account", exact: true })
-    .selectOption("user-platform");
+  await choose(page, page, "Demo account", "Demo platform admin");
   await open(page, "administration", "company");
   await page
     .getByRole("button", { name: "Create company", exact: true })
@@ -543,8 +552,8 @@ test("administration creates a company and branch, changes application settings,
   await dialog
     .getByLabel("Name", { exact: true })
     .fill("New Synthetic Company");
-  await expect(dialog.getByLabel("Currency", { exact: true })).toHaveValue(
-    "GHC",
+  await expect(dialog.getByLabel("Currency", { exact: true })).toHaveText(
+    /^GHC/,
   );
   await save(page);
   await expect(
@@ -564,9 +573,7 @@ test("administration creates a company and branch, changes application settings,
   await page.reload();
   await expect(
     page.getByRole("combobox", { name: "Company", exact: true }),
-  ).toHaveValue(
-    (await data(page)).entities.filter((e) => e.kind === "company").at(-1)!.id,
-  );
+  ).toHaveText(/^New Synthetic Company/);
 });
 
 test("inventory, supplier, procurement and expense forms write linked records; reports export scoped CSV", async ({
@@ -607,10 +614,8 @@ test("inventory, supplier, procurement and expense forms write linked records; r
     .getByRole("button", { name: "Create purchase order", exact: true })
     .click();
   dialog = page.getByRole("dialog");
-  await dialog
-    .getByLabel("Supplier", { exact: true })
-    .selectOption(supplier.id);
-  await dialog.getByLabel("Part", { exact: true }).selectOption(part.id);
+  await choose(dialog, page, "Supplier", supplier.name);
+  await choose(dialog, page, "Part", part.name);
   await dialog.getByLabel("Quantity", { exact: true }).fill("4");
   await dialog.getByLabel("Unit cost", { exact: true }).fill("20");
   await save(page);
@@ -631,9 +636,7 @@ test("inventory, supplier, procurement and expense forms write linked records; r
     page.getByRole("heading", { name: "Synthetic fuel expense", exact: true }),
   ).toBeVisible();
   await open(page, "reports");
-  await page
-    .getByRole("combobox", { name: "Report", exact: true })
-    .selectOption("expenses");
+  await choose(page, page, "Report", /Expenses/);
   await expect(page.getByRole("table")).toContainText("Synthetic fuel expense");
   const downloaded = page.waitForEvent("download");
   await page.getByRole("button", { name: "Export CSV", exact: true }).click();
@@ -679,4 +682,78 @@ test("corrupt persisted data requires an explicit reset and recovers without a b
     page.getByRole("heading", { name: "Dashboard", exact: true }),
   ).toBeVisible();
   expect((await data(page)).version).toBe(1);
+});
+
+test("supports KPI infographics, custom calendar modal filtering, multi-vehicle VAT/discount approval quotes, PDF download, driver role, and chat center", async ({
+  page,
+}) => {
+  await open(page);
+  await expect(page.getByLabel("KPI infographics", { exact: true })).toBeVisible();
+
+  await page.getByRole("button", { name: "Select date range", exact: true }).click();
+  let dialog = page.getByRole("dialog");
+  await dialog.getByRole("button", { name: "Last 7 days", exact: true }).click();
+  await dialog.getByRole("button", { name: "Apply range", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Clear dates", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Clear dates", exact: true }).click();
+
+  await open(page, "administration", "user");
+  await expect(page.getByRole("table")).toContainText("Driver");
+
+  await open(page, "fleet", "vehicle");
+  await page.getByRole("button", { name: "Create vehicle", exact: true }).click();
+  dialog = page.getByRole("dialog");
+  for (const [label, value] of Object.entries({
+    Registration: "MULTI-99",
+    Make: "DriveCore",
+    Model: "Sedan",
+    Year: "2025",
+    "Daily rate": "500",
+    "Odometer (demo km)": "500",
+    Seats: "5",
+  }))
+    await dialog.getByLabel(label, { exact: true }).fill(value);
+  await dialog.getByRole("button", { name: "Automatic", exact: true }).click();
+  await save(page);
+
+  await open(page, "rentals", "quotation");
+  await page.getByRole("button", { name: "Create quotation", exact: true }).click();
+  dialog = page.getByRole("dialog");
+  await dialog.getByRole("checkbox", { name: /DEMO-1003/ }).check();
+  await dialog.getByRole("checkbox", { name: /MULTI-99/ }).check();
+  await dialog.getByLabel("Discount (%) (optional)", { exact: true }).fill("15");
+  await save(page);
+
+  await expect(page.getByText(/pending approval/i).first()).toBeVisible();
+  await expect(page.getByText("15%", { exact: true }).first()).toBeVisible();
+
+  const pdfDownload = page.waitForEvent("download");
+  await page.getByRole("button", { name: "Generate PDF", exact: true }).first().click();
+  dialog = page.getByRole("dialog");
+  await dialog.getByRole("button", { name: "Download PDF", exact: true }).click();
+  expect((await pdfDownload).suggestedFilename()).toMatch(/\.pdf$/);
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+
+  const beforeReservations = (await data(page)).entities.filter(
+    (e) => e.kind === "reservation",
+  ).length;
+  await transition(page, "Approve discount");
+  await transition(page, "Convert to reservation");
+
+  const afterReservations = (await data(page)).entities.filter(
+    (e) => e.kind === "reservation",
+  ).length;
+  expect(afterReservations).toBe(beforeReservations + 2);
+
+  await page
+    .getByRole("button", { name: /Messaging & Chat Center/ })
+    .click();
+  await page
+    .getByPlaceholder("Send a branch dispatch, driver handoff, or customer message…")
+    .fill("Synthetic dispatch note for driver team");
+  await page.getByRole("button", { name: "Send message", exact: true }).click();
+  await expect(
+    page.getByText("Synthetic dispatch note for driver team", { exact: true }),
+  ).toBeVisible();
 });

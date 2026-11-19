@@ -1,4 +1,5 @@
 import { z } from "zod";
+
 export const kinds = [
   "company",
   "branch",
@@ -23,8 +24,21 @@ export const kinds = [
   "notification",
   "audit",
   "setting",
+  "message",
 ] as const;
+
 export type Kind = (typeof kinds)[number];
+
+export const VEHICLE_FUNCTIONS = [
+  "GPS Tracker",
+  "Automatic",
+  "4x4 / AWD",
+  "A/C",
+  "Chauffeur Eligible",
+  "Bluetooth",
+  "Child Seat",
+] as const;
+
 const base = {
   id: z.string().min(1),
   companyId: z.string(),
@@ -36,6 +50,7 @@ const text = z.string().trim().min(1).max(255);
 const money = z.number().int().nonnegative().safe();
 const quantity = z.number().int().nonnegative().safe();
 const period = { startsAt: z.iso.datetime(), endsAt: z.iso.datetime() };
+
 export const entitySchema = z.discriminatedUnion("kind", [
   z.object({
     ...base,
@@ -84,16 +99,27 @@ export const entitySchema = z.discriminatedUnion("kind", [
     ownership: z.enum(["owned", "leased"]),
     seats: z.number().int().min(1).max(60),
     fuel: z.enum(["Petrol", "Diesel", "Electric", "Hybrid"]),
+    functions: z.array(z.string()).default([]),
   }),
   z.object({
     ...base,
     kind: z.literal("quotation"),
     customerId: text,
     vehicleId: text,
+    vehicleIds: z.array(text).default([]),
     ...period,
     dailyRate: money,
+    subtotal: money.default(0),
+    discountPct: z.number().min(0).max(100).default(0),
+    discountAmount: money.default(0),
+    discountStatus: z
+      .enum(["none", "pending", "approved", "rejected"])
+      .default("none"),
+    discountApprovedBy: z.string().default(""),
+    vatRate: z.number().min(0).max(100).default(15),
+    vatAmount: money.default(0),
     total: money,
-    status: z.enum(["draft", "converted", "cancelled"]),
+    status: z.enum(["draft", "pending_approval", "converted", "cancelled"]),
   }),
   z.object({
     ...base,
@@ -102,6 +128,10 @@ export const entitySchema = z.discriminatedUnion("kind", [
     vehicleId: text,
     ...period,
     dailyRate: money,
+    subtotal: money.default(0),
+    discountAmount: money.default(0),
+    vatRate: z.number().min(0).max(100).default(15),
+    vatAmount: money.default(0),
     total: money,
     status: z.enum(["draft", "confirmed", "completed", "cancelled"]),
   }),
@@ -113,6 +143,10 @@ export const entitySchema = z.discriminatedUnion("kind", [
     vehicleId: text,
     ...period,
     dailyRate: money,
+    subtotal: money.default(0),
+    discountAmount: money.default(0),
+    vatRate: z.number().min(0).max(100).default(15),
+    vatAmount: money.default(0),
     total: money,
     status: z.enum(["draft", "active", "completed", "cancelled"]),
     handoverAt: z.string(),
@@ -185,6 +219,10 @@ export const entitySchema = z.discriminatedUnion("kind", [
     customerId: text,
     rentalId: z.string(),
     description: text,
+    subtotal: money.default(0),
+    discountAmount: money.default(0),
+    vatRate: z.number().min(0).max(100).default(15),
+    vatAmount: money.default(0),
     total: money,
     dueAt: z.iso.datetime(),
     status: z.enum(["draft", "issued", "void"]),
@@ -242,9 +280,21 @@ export const entitySchema = z.discriminatedUnion("kind", [
     name: text,
     value: z.string().max(1000),
   }),
+  z.object({
+    ...base,
+    kind: z.literal("message"),
+    channel: z.enum(["dispatch", "drivers", "customers", "support"]),
+    senderId: text,
+    senderName: text,
+    body: z.string().trim().min(1).max(1000),
+    relatedEntityId: z.string().default(""),
+    readBy: z.array(z.string()).default([]),
+  }),
 ]);
+
 export type Entity = z.infer<typeof entitySchema>;
 export type Of<K extends Kind> = Extract<Entity, { kind: K }>;
+
 export const databaseSchema = z.object({
   version: z.literal(1),
   revision: quantity,
@@ -252,14 +302,19 @@ export const databaseSchema = z.object({
   entities: z.array(entitySchema).max(20000),
 });
 export type Database = z.infer<typeof databaseSchema>;
+
 export interface DemoContext {
   userId: string;
   companyId: string;
   branchId: string;
 }
+
 export type Values = Record<string, string>;
+
 export type Action =
   | "convert"
+  | "approve_discount"
+  | "reject_discount"
   | "confirm"
   | "assign"
   | "contract"
@@ -278,10 +333,12 @@ export type Action =
   | "pay"
   | "refund"
   | "read";
+
 export type Command =
   | { type: "save"; kind: Kind; id?: string; values: Values }
   | { type: "action"; id: string; action: Action; values: Values }
   | { type: "delete"; id: string };
+
 export class DemoError extends Error {
   constructor(
     message: string,
@@ -291,14 +348,17 @@ export class DemoError extends Error {
     this.name = "DemoError";
   }
 }
+
 export function entities<K extends Kind>(db: Database, kind: K): Of<K>[] {
   return db.entities.filter((e): e is Of<K> => e.kind === kind);
 }
+
 export function find<K extends Kind>(db: Database, kind: K, id: string): Of<K> {
   const value = entities(db, kind).find((e) => e.id === id);
   if (!value) throw new DemoError(`${kind} record is unavailable.`);
   return value;
 }
+
 export function valueOf(
   entity: Entity,
   key: string,

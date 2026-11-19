@@ -61,10 +61,14 @@ test("seed has unique IDs, valid ownership and references, coherent totals and e
   expect(entities(db, "vehicle").length).toBe(32);
   for (const p of entities(db, "part"))
     expect(stock(db, p.id)).toBeGreaterThanOrEqual(0);
-  for (const r of entities(db, "reservation"))
-    expect(r.total).toBe(rentalPrice(r.startsAt, r.endsAt, r.dailyRate));
-  for (const q of entities(db, "quotation"))
-    expect(q.total).toBe(rentalPrice(q.startsAt, q.endsAt, q.dailyRate));
+  for (const r of entities(db, "reservation")) {
+    expect(r.subtotal).toBe(rentalPrice(r.startsAt, r.endsAt, r.dailyRate));
+    expect(r.total).toBe(r.subtotal - r.discountAmount + r.vatAmount);
+  }
+  for (const q of entities(db, "quotation")) {
+    expect(q.subtotal).toBe(rentalPrice(q.startsAt, q.endsAt, q.dailyRate));
+    expect(q.total).toBe(q.subtotal - q.discountAmount + q.vatAmount);
+  }
   expect(
     new Set(
       entities(db, "vehicle").map((v) => vehicleStatus(db, v, Date.parse(now))),
@@ -150,7 +154,9 @@ test("quotation through return, extension, invoice, payment and refund changes a
     },
   });
   const quote = newest(db, "quotation");
-  expect(quote.total).toBe(120000);
+  expect(quote.subtotal).toBe(120000);
+  expect(quote.vatAmount).toBe(18000);
+  expect(quote.total).toBe(138000);
   db = action(db, quote.id, "convert");
   const reservation = newest(db, "reservation");
   db = action(db, reservation.id, "confirm");
@@ -164,7 +170,7 @@ test("quotation through return, extension, invoice, payment and refund changes a
   });
   expect(vehicleStatus(db, find(db, "vehicle", "vehicle-1-2"))).toBe("rented");
   db = action(db, rental.id, "extend", { endsAt: later(3) });
-  expect(find(db, "rental", rental.id).total).toBe(180000);
+  expect(find(db, "rental", rental.id).total).toBe(207000);
   db = action(
     db,
     rental.id,
@@ -180,7 +186,9 @@ test("quotation through return, extension, invoice, payment and refund changes a
   );
   expect(find(db, "rental", rental.id)).toMatchObject({
     status: "completed",
-    total: 242500,
+    subtotal: 242500,
+    vatAmount: 36375,
+    total: 278875,
     returnOdometer: 22000,
   });
   expect(find(db, "reservation", reservation.id).status).toBe("completed");
@@ -189,23 +197,23 @@ test("quotation through return, extension, invoice, payment and refund changes a
     entities(db, "inspection").filter((i) => i.rentalId === rental.id),
   ).toHaveLength(2);
   const invoice = newest(db, "invoice");
-  expect(invoice.total).toBe(242500);
+  expect(invoice.total).toBe(278875);
   db = action(db, invoice.id, "issue");
-  expect(invoiceBalance(db, invoice.id).outstanding).toBe(242500);
+  expect(invoiceBalance(db, invoice.id).outstanding).toBe(278875);
   db = action(db, invoice.id, "pay", {
-    amount: "2425",
+    amount: "2788.75",
     method: "Transfer",
     reference: "DEMO-PAID",
   });
   expect(invoiceBalance(db, invoice.id).outstanding).toBe(0);
   db = action(db, invoice.id, "refund", {
-    amount: "25",
+    amount: "28.75",
     reason: "Synthetic agreed credit",
   });
   expect(invoiceBalance(db, invoice.id)).toEqual({
-    total: 240000,
-    paid: 240000,
-    credits: 2500,
+    total: 276000,
+    paid: 276000,
+    credits: 2875,
     outstanding: 0,
   });
   const entries = ledger(db, admin);
@@ -509,4 +517,105 @@ test("documents retain linked masters and routine inspections preserve odometer 
     },
   });
   expect(find(db, "vehicle", "vehicle-1-2").odometer).toBe(22000);
+});
+
+test("multi-vehicle quotes, discount threshold approval, VAT, vehicle functions, driver role and messages", () => {
+  let db = createSeed(new Date(now));
+  const beforeResCount = entities(db, "reservation").length;
+  expect(entities(db, "role").some((r) => r.id === "role-driver")).toBe(true);
+
+  db = run(db, {
+    type: "save",
+    kind: "vehicle",
+    values: {
+      branchId: "br-1",
+      registration: "DEMO-FN-99",
+      make: "Aster",
+      model: "Tourer",
+      category: "SUV",
+      year: "2025",
+      dailyRate: "500",
+      odometer: "1200",
+      condition: "available",
+      ownership: "owned",
+      seats: "7",
+      fuel: "Hybrid",
+      functions: "GPS Tracker,Automatic,4x4 / AWD",
+    },
+  });
+  const createdVeh = newest(db, "vehicle");
+  expect(createdVeh.functions).toEqual([
+    "GPS Tracker",
+    "Automatic",
+    "4x4 / AWD",
+  ]);
+
+  db = run(
+    db,
+    {
+      type: "save",
+      kind: "quotation",
+      values: {
+        branchId: "br-1",
+        customerId: "customer-1-3",
+        vehicleIds: `vehicle-1-2,${createdVeh.id}`,
+        startsAt: later(1),
+        endsAt: later(3),
+        discountPct: "20",
+      },
+    },
+    { ...admin, userId: "user-operations" },
+  );
+  const quote = newest(db, "quotation");
+  expect(quote.status).toBe("pending_approval");
+  expect(quote.discountStatus).toBe("pending");
+  expect(quote.vehicleIds).toEqual(["vehicle-1-2", createdVeh.id]);
+  expect(quote.subtotal).toBe(220000);
+  expect(quote.discountAmount).toBe(44000);
+  expect(quote.vatAmount).toBe(26400);
+  expect(quote.total).toBe(202400);
+
+  expect(() =>
+    action(db, quote.id, "convert", {}, { ...admin, userId: "user-operations" }),
+  ).toThrow("Discount approval is required");
+  expect(() =>
+    action(
+      db,
+      quote.id,
+      "approve_discount",
+      {},
+      { ...admin, userId: "user-operations" },
+    ),
+  ).toThrow("administrator or finance");
+
+  db = action(
+    db,
+    quote.id,
+    "approve_discount",
+    {},
+    { ...admin, userId: "user-finance" },
+  );
+  expect(find(db, "quotation", quote.id).status).toBe("draft");
+  db = action(db, quote.id, "convert");
+  expect(entities(db, "reservation")).toHaveLength(beforeResCount + 2);
+
+  db = run(
+    db,
+    {
+      type: "save",
+      kind: "message",
+      values: {
+        branchId: "br-1",
+        channel: "drivers",
+        body: "Deliver DEMO-FN-99 to Airport Bay 1.",
+        relatedEntityId: createdVeh.id,
+      },
+    },
+    { ...admin, userId: "user-driver" },
+  );
+  const msg = newest(db, "message");
+  expect(msg.senderId).toBe("user-driver");
+  expect(msg.channel).toBe("drivers");
+  db = action(db, msg.id, "read", {}, { ...admin, userId: "user-operations" });
+  expect(find(db, "message", msg.id).readBy).toContain("user-operations");
 });

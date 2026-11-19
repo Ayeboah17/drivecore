@@ -1,4 +1,5 @@
 "use client";
+import { FileText } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { allowed, kindModule } from "@/lib/demo/permissions";
 import { related, label, money, displayStatus } from "@/lib/demo/selectors";
@@ -11,6 +12,7 @@ import {
 } from "@/lib/demo/types";
 import { actions, screens, fieldLabel, type WorkflowAction } from "./config";
 import { cell, Status } from "./table";
+import { isPrintableEntity, type PrintableEntity } from "./pdf-modal";
 export function canManage(db: Database, ctx: DemoContext, e: Entity) {
   if (!allowed(db, ctx, kindModule[e.kind], true)) return false;
   if (
@@ -29,9 +31,10 @@ export function canManage(db: Database, ctx: DemoContext, e: Entity) {
 export function editable(e: Entity, db: Database) {
   return (
     !!screens[e.kind].fields &&
-    (!("status" in e) || ["draft", "open"].includes(e.status)) &&
+    (!("status" in e) ||
+      ["draft", "open", "pending_approval"].includes(e.status)) &&
     !(e.kind === "vehicle" && displayStatus(db, e) === "rented") &&
-    !["expense", "inspection"].includes(e.kind)
+    !["expense", "inspection", "message"].includes(e.kind)
   );
 }
 export function Detail({
@@ -43,6 +46,7 @@ export function Detail({
   onDelete,
   onOpen,
   onOpen360,
+  onGeneratePdf,
 }: {
   db: Database;
   ctx: DemoContext;
@@ -52,27 +56,46 @@ export function Detail({
   onDelete: () => void;
   onOpen: (e: Entity) => void;
   onOpen360?: (vehicle: Extract<Entity, { kind: "vehicle" }>) => void;
+  onGeneratePdf?: (printable: PrintableEntity) => void;
 }) {
   const linked = related(db, ctx, entity),
     ids = new Set([entity.id, ...linked.map((e) => e.id)]),
     timeline = entities(db, "audit")
       .filter((a) => ids.has(a.entityId))
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  const extraFields =
+    entity.kind === "quotation"
+      ? ["discountAmount", "discountStatus", "discountApprovedBy", "vatRate"]
+      : entity.kind === "reservation" ||
+          entity.kind === "rental" ||
+          entity.kind === "invoice"
+        ? ["subtotal", "discountAmount", "vatRate", "vatAmount"]
+        : [];
   const fields = [
     ...new Set([
       ...screens[entity.kind].columns,
       ...(screens[entity.kind].fields ?? []).map((f) => f.key),
+      ...extraFields,
       "createdAt",
       "updatedAt",
     ]),
   ].filter((k) => !["permissions", "assignedBranchId"].includes(k));
   const manage = canManage(db, ctx, entity);
-  const workflow = actions(entity).filter(
-    (a) =>
-      a.action !== "approve" ||
-      allowed(db, ctx, "administration", true) ||
-      allowed(db, ctx, "finance", true),
-  );
+  const canApproveDiscount =
+    entity.kind === "quotation" &&
+    entity.status === "pending_approval" &&
+    (allowed(db, ctx, "finance", true) ||
+      allowed(db, ctx, "administration", true));
+  const workflow = actions(entity).filter((a) => {
+    if (["approve_discount", "reject_discount"].includes(a.action))
+      return canApproveDiscount;
+    if (a.action === "approve")
+      return (
+        allowed(db, ctx, "administration", true) ||
+        allowed(db, ctx, "finance", true)
+      );
+    return manage;
+  });
   const outstanding =
     entity.kind === "customer" && allowed(db, ctx, "finance")
       ? entities(db, "invoice")
@@ -104,6 +127,16 @@ export function Detail({
           </div>
         </div>
         <div className="flex flex-wrap gap-2">
+          {isPrintableEntity(entity) && onGeneratePdf ? (
+            <Button
+              variant="default"
+              className="gap-1.5"
+              onClick={() => onGeneratePdf(entity)}
+            >
+              <FileText className="size-4" aria-hidden="true" />
+              Generate PDF
+            </Button>
+          ) : null}
           {entity.kind === "vehicle" && onOpen360 ? (
             <Button variant="outline" onClick={() => onOpen360(entity)}>
               360° File
@@ -147,7 +180,7 @@ export function Detail({
         </section>
         <section className="dc-shadow-card space-y-4 rounded-2xl border bg-surface p-card">
           <h3 className="text-section-heading">Workflow actions</h3>
-          {manage && workflow.length ? (
+          {workflow.length > 0 ? (
             <div className="flex flex-col items-start gap-3">
               {workflow.map((a) => (
                 <div key={a.action} className="space-y-2">
@@ -169,7 +202,7 @@ export function Detail({
             </div>
           ) : (
             <p className="text-sm text-muted-foreground">
-              {manage
+              {manage || canApproveDiscount
                 ? "No further transition is available in this state."
                 : "Your demo role has read-only access to this record."}
             </p>

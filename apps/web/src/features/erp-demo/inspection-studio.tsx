@@ -7,9 +7,9 @@ import { allowed } from "@/lib/demo/permissions";
 import { day, invoiceBalance } from "@/lib/demo/rules";
 import { money, rows } from "@/lib/demo/selectors";
 import type { Database, DemoContext } from "@/lib/demo/types";
+import { DriveCoreSelect } from "@/components/ui/drivecore-select";
 import { projectFuelTelemetry } from "./projections";
 import { useDemo } from "./provider";
-import { selectClass } from "./form";
 import { Status } from "./table";
 
 const DAMAGE_ZONES = [
@@ -164,32 +164,36 @@ export function InspectionStudio({
             </h2>
           </div>
 
-          <label className="w-full max-w-sm space-y-1 text-xs font-semibold text-muted-foreground">
-            Active / Ready Rental Contract
-            <select
-              className={`${selectClass} rounded-xl`}
+          <div className="w-full max-w-sm space-y-1 text-xs font-semibold text-muted-foreground">
+            <span>Active / Ready Rental Contract</span>
+            <DriveCoreSelect
+              ariaLabel="Active / Ready Rental Contract"
               value={rental?.id ?? ""}
-              onChange={(e) => {
-                setSelectedRentalId(e.target.value);
+              onValueChange={(next) => {
+                setSelectedRentalId(next);
                 setReturnOdometer("");
                 setError("");
               }}
-            >
-              {!rentals.length ? (
-                <option value="">No draft or active rentals in scope</option>
-              ) : (
-                rentals.map((r) => {
-                  const v = db.entities.find((e) => e.id === r.vehicleId);
-                  return (
-                    <option key={r.id} value={r.id}>
-                      {v && "registration" in v ? v.registration : r.vehicleId} ·{" "}
-                      {r.status.toUpperCase()}
-                    </option>
-                  );
-                })
-              )}
-            </select>
-          </label>
+              options={
+                !rentals.length
+                  ? [
+                      {
+                        value: "",
+                        label: "No draft or active rentals in scope",
+                      },
+                    ]
+                  : rentals.map((r) => {
+                      const v = db.entities.find((e) => e.id === r.vehicleId);
+                      return {
+                        value: r.id,
+                        label: `${
+                          v && "registration" in v ? v.registration : r.vehicleId
+                        } · ${r.status.toUpperCase()}`,
+                      };
+                    })
+              }
+            />
+          </div>
         </div>
 
         {!rental ? (
@@ -263,22 +267,32 @@ export function InspectionStudio({
                   </label>
 
                   {rental.status === "active" ? (
-                    <label className="space-y-1.5 text-xs font-semibold">
-                      Returned Vehicle Condition
-                      <select
+                    <div className="space-y-1.5 text-xs font-semibold">
+                      <span>Returned Vehicle Condition</span>
+                      <DriveCoreSelect
+                        ariaLabel="Returned Vehicle Condition"
                         value={returnedCondition}
-                        onChange={(e) =>
+                        onValueChange={(val) =>
                           setReturnedCondition(
-                            e.target.value as "available" | "maintenance" | "damaged",
+                            val as "available" | "maintenance" | "damaged",
                           )
                         }
-                        className={`${selectClass} rounded-xl`}
-                      >
-                        <option value="available">Available (Ready for Rent)</option>
-                        <option value="maintenance">Maintenance Required</option>
-                        <option value="damaged">Damaged (Hold Unit)</option>
-                      </select>
-                    </label>
+                        options={[
+                          {
+                            value: "available",
+                            label: "Available (Ready for Rent)",
+                          },
+                          {
+                            value: "maintenance",
+                            label: "Maintenance Required",
+                          },
+                          {
+                            value: "damaged",
+                            label: "Damaged (Hold Unit)",
+                          },
+                        ]}
+                      />
+                    </div>
                   ) : null}
                 </div>
 

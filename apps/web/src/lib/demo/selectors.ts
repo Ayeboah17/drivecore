@@ -147,8 +147,15 @@ export function ledger(db: Database, ctx: DemoContext): LedgerRow[] {
     entry(e, credit, 0, amount);
   };
   for (const i of rows(db, ctx, "invoice"))
-    if (i.status === "issued")
-      pair(i, "Accounts receivable", "Rental revenue", i.total);
+    if (i.status === "issued") {
+      if (i.vatAmount > 0 && i.vatAmount <= i.total) {
+        entry(i, "Accounts receivable", i.total, 0);
+        entry(i, "Rental revenue", 0, i.total - i.vatAmount);
+        entry(i, "VAT payable", 0, i.vatAmount);
+      } else {
+        pair(i, "Accounts receivable", "Rental revenue", i.total);
+      }
+    }
   for (const p of rows(db, ctx, "payment"))
     pair(p, "Cash / bank", "Accounts receivable", p.amount);
   for (const r of rows(db, ctx, "refund")) {

@@ -11,7 +11,9 @@ export interface Field {
     | "money"
     | "datetime"
     | "textarea"
-    | "permissions";
+    | "permissions"
+    | "vehicleFunctions"
+    | "vehiclesMulti";
   options?: readonly string[];
   relation?: Kind | "record";
   optional?: boolean;
@@ -146,6 +148,7 @@ export const screens: Record<Kind, Screen> = {
       "model",
       "category",
       "dailyRate",
+      "functions",
       "condition",
     ],
     fields: [
@@ -180,29 +183,64 @@ export const screens: Record<Kind, Screen> = {
         options: ["Petrol", "Diesel", "Electric", "Hybrid"],
         default: "Petrol",
       },
+      {
+        key: "functions",
+        label: "Vehicle functions",
+        type: "vehicleFunctions",
+        optional: true,
+        help: "Select vehicle features and operational capabilities.",
+      },
     ],
     description:
-      "Availability, identity, inspections and service history. Reserved/rented status derives from allocations.",
+      "Availability, daily rate, capability functions, inspections and service history.",
   },
   quotation: {
     kind: "quotation",
     label: "Quotations",
     columns: [
       "customerId",
-      "vehicleId",
+      "vehicleIds",
       "startsAt",
       "endsAt",
+      "subtotal",
+      "discountPct",
+      "vatAmount",
       "total",
       "status",
     ],
-    fields: [customer, vehicle, ...period],
+    fields: [
+      customer,
+      {
+        key: "vehicleIds",
+        label: "Vehicles",
+        type: "vehiclesMulti",
+        help: "Select one or more vehicles. Converting creates a reservation per vehicle.",
+      },
+      ...period,
+      {
+        key: "discountPct",
+        label: "Discount (%)",
+        type: "number",
+        default: "0",
+        optional: true,
+        help: "Discounts exceeding the company threshold require approval before converting.",
+      },
+    ],
     description:
-      "Daily-rate quotes in started 24-hour blocks; no tax or conversion.",
+      "Multi-vehicle quotes in started 24-hour blocks with discount approval and mandatory VAT.",
   },
   reservation: {
     kind: "reservation",
     label: "Reservations",
-    columns: ["customerId", "vehicleId", "startsAt", "endsAt", "status"],
+    columns: [
+      "customerId",
+      "vehicleId",
+      "startsAt",
+      "endsAt",
+      "vatAmount",
+      "total",
+      "status",
+    ],
     fields: [customer, vehicle, ...period],
     description: "Confirm allocations before creating a rental contract.",
   },
@@ -214,6 +252,7 @@ export const screens: Record<Kind, Screen> = {
       "vehicleId",
       "startsAt",
       "endsAt",
+      "vatAmount",
       "total",
       "status",
     ],
@@ -308,15 +347,23 @@ export const screens: Record<Kind, Screen> = {
   invoice: {
     kind: "invoice",
     label: "Invoices",
-    columns: ["description", "customerId", "total", "dueAt", "status"],
+    columns: [
+      "description",
+      "customerId",
+      "subtotal",
+      "vatAmount",
+      "total",
+      "dueAt",
+      "status",
+    ],
     fields: [
       customer,
       { key: "description", label: "Description" },
-      { key: "total", label: "Invoice total", type: "money" },
+      { key: "total", label: "Invoice total (incl. VAT)", type: "money" },
       { key: "dueAt", label: "Payment due", type: "datetime" },
     ],
     description:
-      "Issue drafts to recognize receivables. Payments and refund/credits are linked transactions.",
+      "Issue drafts to recognize receivables and VAT payable. Payments and refund/credits are linked transactions.",
   },
   payment: {
     kind: "payment",
@@ -391,12 +438,23 @@ export const screens: Record<Kind, Screen> = {
       {
         key: "name",
         label: "Setting",
-        options: ["Workspace note", "Rows per page"],
+        options: [
+          "Workspace note",
+          "Rows per page",
+          "VAT rate (%)",
+          "Discount approval threshold (%)",
+        ],
       },
       { key: "value", label: "Value", type: "textarea" },
     ],
     description:
       "Company notes and demo settings; these do not configure Laravel.",
+  },
+  message: {
+    kind: "message",
+    label: "Messages",
+    columns: ["channel", "senderName", "body", "createdAt"],
+    description: "Branch-scoped internal dispatch and customer inquiries.",
   },
 };
 export const moduleScreens: Record<string, Kind[]> = {
@@ -432,9 +490,25 @@ export function actions(entity: Entity): WorkflowAction[] {
   );
   switch (entity.kind) {
     case "quotation":
-      return entity.status === "draft"
-        ? [action("convert", "Convert to reservation"), cancel]
-        : [];
+      return entity.status === "pending_approval"
+        ? [
+            action(
+              "approve_discount",
+              "Approve discount",
+              [],
+              "Approves the requested discount so the quotation can convert into reservations.",
+            ),
+            action(
+              "reject_discount",
+              "Reject discount",
+              [],
+              "Rejects the requested discount and cancels the quotation.",
+            ),
+            cancel,
+          ]
+        : entity.status === "draft"
+          ? [action("convert", "Convert to reservation"), cancel]
+          : [];
     case "reservation":
       return ["draft", "confirmed"].includes(entity.status)
         ? [
@@ -591,6 +665,19 @@ export const fieldLabel = (key: string, kind?: Kind) =>
       branchId: "Branch",
       customerId: "Customer",
       vehicleId: "Vehicle",
+      vehicleIds: "Vehicles",
+      functions: "Vehicle functions",
+      subtotal: "Subtotal",
+      discountPct: "Discount (%)",
+      discountAmount: "Discount amount",
+      discountStatus: "Discount status",
+      discountApprovedBy: "Approved by",
+      vatRate: "VAT rate (%)",
+      vatAmount: "VAT amount",
+      channel: "Channel",
+      senderName: "Sender",
+      body: "Message",
+      relatedEntityId: "Linked record",
       createdAt: "Created",
       updatedAt: "Updated",
       total: "Total",
@@ -658,4 +745,5 @@ export const entityName = (kind: Kind) =>
     notification: "notification",
     audit: "audit record",
     setting: "setting",
+    message: "message",
   })[kind];
