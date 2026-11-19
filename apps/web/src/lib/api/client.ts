@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { humanizeFieldMessage } from "./error-format";
 
 export class ApiError extends Error {
   constructor(
@@ -12,7 +13,7 @@ export class ApiError extends Error {
 }
 export const errorText = (error: unknown) =>
   error instanceof Error
-    ? error.message
+    ? humanizeFieldMessage(error.message)
     : "The request could not be completed.";
 const messages: Record<number, string> = {
   401: "Your session has expired. Sign in again.",
@@ -91,6 +92,54 @@ export async function request(
   if (payload === null) throw new ApiError(502, messages[502]);
   return payload;
 }
+export async function uploadForm(
+  path: string,
+  formData: FormData,
+  signal?: AbortSignal,
+): Promise<unknown> {
+  const headers: Record<string, string> = {
+    Accept: "application/json",
+    "X-XSRF-TOKEN": csrfToken(document.cookie),
+  };
+  let response: Response;
+  try {
+    response = await fetch(`/api/backend/${path}`, {
+      method: "POST",
+      headers,
+      credentials: "same-origin",
+      cache: "no-store",
+      signal,
+      body: formData,
+    });
+  } catch (error) {
+    if (signal?.aborted) throw error;
+    throw new ApiError(
+      0,
+      "Connection failed. Refresh before trying again.",
+    );
+  }
+  const payload: unknown = await response.json().catch(() => null);
+  if (!response.ok) {
+    const parsed = z
+      .object({
+        message: z.string(),
+        errors: z.record(z.string(), z.array(z.string())),
+      })
+      .safeParse(payload);
+    throw new ApiError(
+      response.status,
+      response.status === 422 && parsed.success
+        ? parsed.data.message
+        : (messages[response.status] ??
+            "The service could not complete the request."),
+      parsed.success ? parsed.data.errors : {},
+      response.headers.get("retry-after"),
+    );
+  }
+  if (payload === null) throw new ApiError(502, messages[502]);
+  return payload;
+}
+
 export async function read<T extends z.ZodType>(
   path: string,
   schema: T,

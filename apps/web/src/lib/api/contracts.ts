@@ -1,6 +1,22 @@
 import { z } from "zod";
 
 export const id = z.number().int().positive().max(Number.MAX_SAFE_INTEGER);
+const numericId = z.union([
+  id,
+  z
+    .string()
+    .regex(/^[1-9]\d*$/)
+    .transform((value) => Number(value))
+    .pipe(id),
+]);
+const nonNegInt = z.union([
+  z.number().int().nonnegative(),
+  z
+    .string()
+    .regex(/^\d+$/)
+    .transform((value) => Number(value))
+    .pipe(z.number().int().nonnegative()),
+]);
 export const userSchema = z.object({
   id,
   name: z.string(),
@@ -146,6 +162,72 @@ export const vehicleSchema = z.object({
     .default([]),
   status: z.enum(["available", "maintenance", "damaged", "rented"]),
 });
+export const documentEntityTypes = [
+  "vehicle",
+  "customer",
+  "reservation",
+  "rental",
+] as const;
+export type DocumentEntityType = (typeof documentEntityTypes)[number];
+export const documentEntityLabels: Record<DocumentEntityType, string> = {
+  vehicle: "Vehicle",
+  customer: "Customer",
+  reservation: "Reservation",
+  rental: "Rental",
+};
+
+export const reservationSchema = z.object({
+  ...ownership,
+  customer_id: id,
+  vehicle_id: id,
+  created_by: id,
+  starts_at: z.string(),
+  ends_at: z.string(),
+  status: z.enum(["confirmed", "cancelled", "completed"]),
+  customer_name: z.string().nullable().optional(),
+  vehicle_registration: z.string().nullable().optional(),
+  vehicle_label: z.string().nullable().optional(),
+  has_rental: z.boolean().optional(),
+  rental_id: id.nullable().optional(),
+});
+
+export const rentalSchema = z.object({
+  ...ownership,
+  reservation_id: id,
+  vehicle_id: id,
+  driver_user_id: id.nullable().optional().default(null),
+  status: z.enum(["draft", "active", "returned"]),
+  handed_over_at: z.string().nullable(),
+  returned_at: z.string().nullable(),
+  handover_odometer: z.number().int().nonnegative().nullable(),
+  return_odometer: z.number().int().nonnegative().nullable(),
+  handover_notes: z.string().nullable(),
+  return_notes: z.string().nullable(),
+  odometer_unit: z.literal("km").optional().default("km"),
+  customer_id: id.nullable().optional(),
+  customer_name: z.string().nullable().optional(),
+  vehicle_registration: z.string().nullable().optional(),
+  vehicle_label: z.string().nullable().optional(),
+  driver_name: z.string().nullable().optional(),
+  starts_at: z.string().nullable().optional(),
+  ends_at: z.string().nullable().optional(),
+});
+
+export const documentSchema = z.object({
+  id: numericId,
+  company_id: numericId,
+  branch_id: numericId,
+  created_at: z.string(),
+  updated_at: z.string(),
+  uploaded_by: numericId,
+  original_name: z.string(),
+  mime_type: z.string(),
+  size: nonNegInt,
+  entity_type: z.enum(documentEntityTypes).nullable().optional().default(null),
+  entity_id: numericId.nullable().optional().default(null),
+  expires_at: z.string().nullable().optional().default(null),
+});
+
 export const managedUserSchema = z.object({
   id,
   name: z.string(),
@@ -161,11 +243,26 @@ export const roleDefinitionSchema = z.object({
 });
 export type Customer = z.infer<typeof customerSchema>;
 export type Vehicle = z.infer<typeof vehicleSchema>;
+export type Reservation = z.infer<typeof reservationSchema>;
+export type Rental = z.infer<typeof rentalSchema>;
+export type DocumentRecord = z.infer<typeof documentSchema>;
 export type ManagedUser = z.infer<typeof managedUserSchema>;
 export type RoleDefinition = z.infer<typeof roleDefinitionSchema>;
 export type Domain = "customers" | "vehicles";
 export const can = (user: User, permission: string) =>
   user.is_platform_admin || user.permissions.includes(permission);
+export const isDriverRole = (user: User) =>
+  !user.is_platform_admin &&
+  user.roles.includes("driver") &&
+  !user.permissions.includes("rentals.view");
+export const canAccessRentals = (user: User) =>
+  can(user, "reservations.view") ||
+  can(user, "rentals.view") ||
+  isDriverRole(user);
+export const canAccessOperations = (user: User) =>
+  can(user, "rentals.view") ||
+  can(user, "documents.view") ||
+  isDriverRole(user);
 export const canAccessUserAdmin = (user: User, companyId: string) =>
   user.is_platform_admin ||
   (can(user, "users.view") &&

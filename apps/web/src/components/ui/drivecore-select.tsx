@@ -70,8 +70,10 @@ export function DriveCoreSelect({
             className,
           )}
         >
-          <SelectValue placeholder={placeholder}>
-            {selected ? selected.label : placeholder}
+          <SelectValue placeholder={placeholder} className="min-w-0">
+            <span className="min-w-0 truncate" title={selected?.label}>
+              {selected ? selected.label : placeholder}
+            </span>
           </SelectValue>
         </SelectTrigger>
         <SelectContent

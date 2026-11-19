@@ -39,11 +39,11 @@ function failure(status: number, message: string) {
 }
 export function allowedPath(method: string, path: string) {
   if (method === "GET")
-    return /^(sanctum\/csrf-cookie|api\/v1\/(health|auth\/me|companies|branches|customers|customers\/[1-9]\d*|vehicles|vehicles\/[1-9]\d*|users|roles))$/.test(
+    return /^(sanctum\/csrf-cookie|api\/v1\/(health|auth\/me|companies|branches|customers|customers\/[1-9]\d*|vehicles|vehicles\/[1-9]\d*|reservations|reservations\/[1-9]\d*|rentals|rentals\/[1-9]\d*|documents|documents\/[1-9]\d*|users|roles))$/.test(
       path,
     );
   if (method === "POST")
-    return /^api\/v1\/(auth\/(login|logout)|companies|branches|customers|vehicles|users)$/.test(
+    return /^api\/v1\/(auth\/(login|logout)|companies|branches|customers|vehicles|reservations|reservations\/[1-9]\d*\/cancel|rentals|rentals\/[1-9]\d*\/(handover|return|extend|assign-driver)|documents|users)$/.test(
       path,
     );
   return (
@@ -66,7 +66,9 @@ export function allowedQuery(
   if (keys.length === 0) {
     return (
       method !== "GET" ||
-      !/^api\/v1\/(customers|vehicles|users|roles)$/.test(path)
+      !/^api\/v1\/(customers|vehicles|reservations|rentals|documents|users|roles)$/.test(
+        path,
+      )
     );
   }
   if (method !== "GET") return false;
@@ -109,6 +111,77 @@ export function allowedQuery(
       status === null ||
       ["available", "rented", "maintenance", "damaged"].includes(status)
     );
+  }
+  if (path === "api/v1/reservations") {
+    if (
+      !checkCommon(
+        [
+          "company_id",
+          "branch_id",
+          "status",
+          "vehicle_id",
+          "customer_id",
+          "q",
+          "page",
+        ],
+        true,
+      )
+    )
+      return false;
+    const status = params.get("status");
+    const vehicleId = params.get("vehicle_id");
+    const customerId = params.get("customer_id");
+    if (
+      status !== null &&
+      !["confirmed", "cancelled", "completed"].includes(status)
+    )
+      return false;
+    if (vehicleId !== null && !posInt(vehicleId)) return false;
+    if (customerId !== null && !posInt(customerId)) return false;
+    return true;
+  }
+  if (path === "api/v1/rentals") {
+    if (
+      !checkCommon(
+        [
+          "company_id",
+          "branch_id",
+          "status",
+          "driver_user_id",
+          "vehicle_id",
+          "q",
+          "page",
+        ],
+        true,
+      )
+    )
+      return false;
+    const status = params.get("status");
+    const driverId = params.get("driver_user_id");
+    const vehicleId = params.get("vehicle_id");
+    if (status !== null && !["draft", "active", "returned"].includes(status))
+      return false;
+    if (driverId !== null && !posInt(driverId)) return false;
+    if (vehicleId !== null && !posInt(vehicleId)) return false;
+    return true;
+  }
+  if (path === "api/v1/documents") {
+    if (
+      !checkCommon(
+        ["company_id", "branch_id", "entity_type", "entity_id", "q", "page"],
+        true,
+      )
+    )
+      return false;
+    const entityType = params.get("entity_type");
+    const entityId = params.get("entity_id");
+    if (
+      entityType !== null &&
+      !["vehicle", "customer", "reservation", "rental"].includes(entityType)
+    )
+      return false;
+    if (entityId !== null && (!entityType || !posInt(entityId))) return false;
+    return true;
   }
   if (path === "api/v1/users") {
     if (
@@ -213,20 +286,25 @@ export async function proxy(
   if (!allowedQuery(request.method, path, url.searchParams))
     return failure(400, "Unsupported query parameters.");
   const mutation = request.method !== "GET";
+  const isDocumentUpload =
+    request.method === "POST" && path === "api/v1/documents";
+  const isDocumentDownload =
+    request.method === "GET" && /^api\/v1\/documents\/[1-9]\d*$/.test(path);
   const allowed = appOrigins(config);
   const requestOrigin = request.headers.get("origin");
   if (mutation && (!requestOrigin || !allowed.includes(requestOrigin)))
     return failure(403, "Invalid request origin.");
   if (mutation && !request.headers.get("x-xsrf-token"))
     return failure(419, "CSRF verification required.");
-  if (
-    mutation &&
-    !/^application\/json(?:;|$)/i.test(
-      request.headers.get("content-type") ?? "",
-    )
-  )
+  const contentType = request.headers.get("content-type") ?? "";
+  if (isDocumentUpload) {
+    if (!/^multipart\/form-data;\s*boundary=/i.test(contentType))
+      return failure(415, "Multipart form data is required.");
+  } else if (mutation && !/^application\/json(?:;|$)/i.test(contentType)) {
     return failure(415, "JSON is required.");
-  if (Number(request.headers.get("content-length") ?? 0) > 65536)
+  }
+  const maxRequestBytes = isDocumentUpload ? 11 * 1024 * 1024 : 65536;
+  if (Number(request.headers.get("content-length") ?? 0) > maxRequestBytes)
     return failure(413, "Request too large.");
   const controller = new AbortController();
   const abort = () => controller.abort();
@@ -234,13 +312,21 @@ export async function proxy(
   if (request.signal.aborted) controller.abort();
   const timer = setTimeout(abort, config.timeout);
   try {
-    let body: string | undefined;
+    let body: string | Uint8Array<ArrayBuffer> | undefined;
     if (mutation) {
       try {
-        body = new TextDecoder().decode(
-          await limitedBody(request.body, 65536, controller.signal),
+        const rawBytes = await limitedBody(
+          request.body,
+          maxRequestBytes,
+          controller.signal,
         );
-        JSON.parse(body);
+        if (isDocumentUpload) {
+          body = rawBytes;
+        } else {
+          const decoded = new TextDecoder().decode(rawBytes);
+          JSON.parse(decoded);
+          body = decoded;
+        }
       } catch (error) {
         return failure(
           controller.signal.aborted
@@ -254,7 +340,9 @@ export async function proxy(
     }
     const activeOrigin = resolvedAppOrigin(request, config);
     const headers = new Headers({
-      Accept: "application/json",
+      Accept: isDocumentDownload
+        ? "application/pdf, image/jpeg, image/png, application/json"
+        : "application/json",
       Origin: activeOrigin,
       Referer: `${activeOrigin}/`,
       "X-Requested-With": "XMLHttpRequest",
@@ -265,7 +353,10 @@ export async function proxy(
     );
     if (cookies) headers.set("Cookie", cookies);
     if (mutation) {
-      headers.set("Content-Type", "application/json");
+      headers.set(
+        "Content-Type",
+        isDocumentUpload ? contentType : "application/json",
+      );
       headers.set("X-XSRF-TOKEN", request.headers.get("x-xsrf-token")!);
     }
     const upstream = await transport(`${config.backend}/${path}${url.search}`, {
@@ -293,7 +384,38 @@ export async function proxy(
       return new Response(null, { status: 204, headers: output });
     if (upstream.status >= 300 && upstream.status < 400)
       return failure(502, "Unexpected API redirect.");
-    if (!upstream.headers.get("content-type")?.includes("application/json"))
+    const upstreamType = upstream.headers.get("content-type") ?? "";
+    if (isDocumentDownload && upstream.ok) {
+      const mime = upstreamType.split(";")[0]?.trim().toLowerCase() ?? "";
+      if (!["application/pdf", "image/jpeg", "image/png"].includes(mime))
+        return failure(502, "Unexpected document content type.");
+      let fileBytes: Uint8Array<ArrayBuffer>;
+      try {
+        fileBytes = await limitedBody(
+          upstream.body,
+          12 * 1024 * 1024,
+          controller.signal,
+        );
+      } catch {
+        return failure(
+          controller.signal.aborted ? 504 : 502,
+          "Invalid document response.",
+        );
+      }
+      output.set("Content-Type", mime);
+      const disposition = upstream.headers.get("content-disposition");
+      output.set(
+        "Content-Disposition",
+        disposition && /^attachment\b/i.test(disposition)
+          ? disposition
+          : "attachment",
+      );
+      return new Response(fileBytes, {
+        status: upstream.status,
+        headers: output,
+      });
+    }
+    if (!upstreamType.includes("application/json"))
       return failure(502, "Unexpected API response.");
     let payload: unknown;
     try {

@@ -32,22 +32,32 @@ test("proxy allowlist excludes tokens, deletes, arbitrary URLs and unsupported d
     "api/v1/auth/tokens",
     "https://elsewhere.test",
     "api/v1/../users",
-    "api/v1/documents/1",
-    "api/v1/reservations",
-    "api/v1/rentals",
+    "api/v1/invoices",
+    "api/v1/quotations",
   ])
     expect(allowedPath("GET", path)).toBe(false);
   expect(allowedPath("DELETE", "api/v1/customers/1")).toBe(false);
+  expect(allowedPath("DELETE", "api/v1/documents/1")).toBe(false);
   expect(allowedPath("GET", "api/v1/customers")).toBe(true);
   expect(allowedPath("GET", "api/v1/vehicles")).toBe(true);
+  expect(allowedPath("GET", "api/v1/reservations")).toBe(true);
+  expect(allowedPath("POST", "api/v1/reservations/1/cancel")).toBe(true);
+  expect(allowedPath("GET", "api/v1/rentals")).toBe(true);
+  expect(allowedPath("POST", "api/v1/rentals/1/handover")).toBe(true);
+  expect(allowedPath("POST", "api/v1/rentals/1/extend")).toBe(true);
+  expect(allowedPath("POST", "api/v1/rentals/1/return")).toBe(true);
+  expect(allowedPath("POST", "api/v1/rentals/1/assign-driver")).toBe(true);
+  expect(allowedPath("GET", "api/v1/documents")).toBe(true);
+  expect(allowedPath("GET", "api/v1/documents/1")).toBe(true);
+  expect(allowedPath("POST", "api/v1/documents")).toBe(true);
   expect(allowedPath("GET", "api/v1/users")).toBe(true);
   expect(allowedPath("GET", "api/v1/roles")).toBe(true);
   expect(allowedPath("POST", "api/v1/users")).toBe(true);
   expect(allowedPath("PATCH", "api/v1/users/1")).toBe(true);
   expect(allowedPath("PATCH", "api/v1/vehicles/1")).toBe(true);
   const rejected = await proxy(
-    make("api/v1/documents/1"),
-    "api/v1/documents/1",
+    make("api/v1/invoices"),
+    "api/v1/invoices",
     config,
     async () => {
       throw new Error("Must not call upstream");
@@ -340,4 +350,98 @@ test("session reads without Origin or Referer use their trusted request host", a
     },
   );
   expect(response.status).toBe(200);
+});
+
+test("M6 reservations, rentals, and documents validate scoped queries, multipart upload, and binary download", async () => {
+  for (const invalid of [
+    "api/v1/reservations",
+    "api/v1/reservations?company_id=1&status=invalid",
+    "api/v1/rentals",
+    "api/v1/rentals?company_id=1&status=unknown",
+    "api/v1/documents",
+    "api/v1/documents?company_id=1&entity_id=5",
+    "api/v1/documents?company_id=1&entity_type=invoice",
+  ]) {
+    const [path] = invalid.split("?");
+    const res = await proxy(make(invalid), path, config, async () => {
+      throw new Error("Must not reach upstream");
+    });
+    expect(res.status).toBe(400);
+  }
+
+  for (const valid of [
+    "api/v1/reservations?company_id=1&status=confirmed&page=1",
+    "api/v1/rentals?company_id=1&status=active&driver_user_id=2",
+    "api/v1/documents?company_id=1&entity_type=vehicle&entity_id=10",
+  ]) {
+    const [path] = valid.split("?");
+    const res = await proxy(make(valid), path, config, async () =>
+      Response.json({ data: [] }),
+    );
+    expect(res.status).toBe(200);
+  }
+
+  // Document upload requires multipart/form-data
+  const jsonDoc = await proxy(
+    make("api/v1/documents", "POST"),
+    "api/v1/documents",
+    config,
+  );
+  expect(jsonDoc.status).toBe(415);
+
+  const multipartReq = new Request(
+    "https://app.example.test/api/backend/api/v1/documents",
+    {
+      method: "POST",
+      headers: {
+        origin: config.app,
+        "content-type": "multipart/form-data; boundary=----dc-boundary",
+        "x-xsrf-token": "synthetic",
+      },
+      body: "------dc-boundary--",
+    },
+  );
+  const uploadOk = await proxy(
+    multipartReq,
+    "api/v1/documents",
+    config,
+    async (_url, init) => {
+      const h = new Headers(init?.headers);
+      expect(h.get("content-type")).toContain("multipart/form-data");
+      return Response.json({ data: { id: 1 } }, { status: 201 });
+    },
+  );
+  expect(uploadOk.status).toBe(201);
+
+  // Binary PDF download streams safely with nosniff + attachment; HTML is rejected 502
+  const pdfDownload = await proxy(
+    make("api/v1/documents/1"),
+    "api/v1/documents/1",
+    config,
+    async () =>
+      new Response("%PDF-1.4\n%%EOF", {
+        status: 200,
+        headers: {
+          "Content-Type": "application/pdf",
+          "Content-Disposition": 'attachment; filename="document-1.pdf"',
+        },
+      }),
+  );
+  expect(pdfDownload.status).toBe(200);
+  expect(pdfDownload.headers.get("content-type")).toBe("application/pdf");
+  expect(pdfDownload.headers.get("x-content-type-options")).toBe("nosniff");
+  expect(pdfDownload.headers.get("cache-control")).toContain("no-store");
+  expect(await pdfDownload.text()).toContain("%PDF-1.4");
+
+  const htmlDownload = await proxy(
+    make("api/v1/documents/1"),
+    "api/v1/documents/1",
+    config,
+    async () =>
+      new Response("<script>alert(1)</script>", {
+        status: 200,
+        headers: { "Content-Type": "text/html" },
+      }),
+  );
+  expect(htmlDownload.status).toBe(502);
 });

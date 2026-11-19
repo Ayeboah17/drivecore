@@ -13,6 +13,7 @@ import { CustomerForm, VehicleForm } from "./forms";
 import { getRecord } from "./service";
 import { RecordDirectory } from "./directory";
 import { RecordDetails, VehicleStatus } from "./presentation";
+import { EntityDocumentsPanel } from "@/features/documents/documents-panel";
 
 export function RecordPage({ domain }: { domain: Domain }) {
   const { record: route = [] } = useParams<{ record?: string[] }>();
@@ -202,18 +203,28 @@ export function RecordPage({ domain }: { domain: Domain }) {
           <VehicleForm key={`${value.id}:${value.updated_at}`} record={value} />
         )
       ) : (
-        <RecordDetails
-          record={value}
-          company={scope.company?.name ?? `Company #${value.company_id}`}
-          currency={scope.company?.currency}
-          branch={
-            scope.directory?.branches.find(
-              (branch) =>
-                branch.id === value.branch_id &&
-                branch.company_id === value.company_id,
-            )?.name ?? `Branch #${value.branch_id}`
-          }
-        />
+        <div className="space-y-6">
+          <RecordDetails
+            record={value}
+            company={scope.company?.name ?? `Company #${value.company_id}`}
+            currency={scope.company?.currency}
+            branch={
+              scope.directory?.branches.find(
+                (branch) =>
+                  branch.id === value.branch_id &&
+                  branch.company_id === value.company_id,
+              )?.name ?? `Branch #${value.branch_id}`
+            }
+          />
+          {can(user!, "documents.view") ? (
+            <EntityDocumentsPanel
+              entityType={domain === "customers" ? "customer" : "vehicle"}
+              entityId={value.id}
+              branchId={value.branch_id}
+              canUpload={can(user!, "documents.manage")}
+            />
+          ) : null}
+        </div>
       )}
     </div>
   );

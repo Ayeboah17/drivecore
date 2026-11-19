@@ -21,6 +21,10 @@ import { useSession } from "@/features/auth/session-provider";
 import { useLiveContext } from "@/features/live/context";
 import { ApiError, errorText, initializeCsrf } from "@/lib/api/client";
 import {
+  humanizeFieldLabel,
+  humanizeFieldMessage,
+} from "@/lib/api/error-format";
+import {
   formatMinorToInput,
   mergeVehicleFunctions,
   parseMajorToMinor,
@@ -71,7 +75,10 @@ export function applyFieldErrors<T extends FieldValues>(
   if (error instanceof ApiError && error.status === 422)
     for (const [name, messages] of Object.entries(error.fields))
       if (known.includes(name))
-        setError(name as Path<T>, { type: "server", message: messages[0] });
+        setError(name as Path<T>, {
+          type: "server",
+          message: messages[0] ? humanizeFieldMessage(messages[0]) : undefined,
+        });
 }
 function useSave(domain: Domain, record?: Customer | Vehicle) {
   const scope = useLiveContext();
@@ -206,7 +213,8 @@ function useSave(domain: Domain, record?: Customer | Vehicle) {
           <ul>
             {Object.entries(error.fields).map(([name, messages]) => (
               <li key={name}>
-                {name}: {messages.join(" ")}
+                {humanizeFieldLabel(name)}:{" "}
+                {messages.map(humanizeFieldMessage).join(" ")}
               </li>
             ))}
           </ul>

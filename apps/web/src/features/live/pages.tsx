@@ -5,7 +5,9 @@ import { usePathname } from "next/navigation";
 import {
   ArrowRight,
   Building2,
+  CalendarRange,
   CarFront,
+  ClipboardList,
   Compass,
   MapPin,
   Settings2,
@@ -18,7 +20,12 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { ViewFadeIn } from "@/components/motion/primitives";
 import { useLiveContext } from "./context";
 import { useSession } from "@/features/auth/session-provider";
-import { can, canAccessUserAdmin } from "@/lib/api/contracts";
+import {
+  can,
+  canAccessOperations,
+  canAccessRentals,
+  canAccessUserAdmin,
+} from "@/lib/api/contracts";
 import {
   canCreateBranch,
   canCreateCompany,
@@ -189,6 +196,8 @@ export function UnavailablePage({ title }: { title?: string }) {
 
   const canViewVehicles = user ? can(user, "vehicles.view") : false;
   const canViewCustomers = user ? can(user, "customers.view") : false;
+  const canViewRentals = user ? canAccessRentals(user) : false;
+  const canViewOperations = user ? canAccessOperations(user) : false;
   const canViewUsers = user ? canAccessUserAdmin(user, scope.companyId) : false;
   const canManageBranches =
     !!(user && scope.company && canCreateBranch(user, scope.companyId));
@@ -303,6 +312,24 @@ export function UnavailablePage({ title }: { title?: string }) {
                   Open Customers
                 </Link>
               ) : null}
+              {canViewRentals ? (
+                <Link
+                  href={`/companies/${scope.companyId}/rentals?branch=${scope.branch}`}
+                  className={buttonVariants({ size: "sm", variant: "outline" })}
+                >
+                  <CalendarRange className="size-4" aria-hidden="true" />
+                  Open Rentals
+                </Link>
+              ) : null}
+              {canViewOperations ? (
+                <Link
+                  href={`/companies/${scope.companyId}/operations?branch=${scope.branch}`}
+                  className={buttonVariants({ size: "sm", variant: "outline" })}
+                >
+                  <ClipboardList className="size-4" aria-hidden="true" />
+                  Open Operations
+                </Link>
+              ) : null}
               {canViewUsers ? (
                 <Link
                   href={`/companies/${scope.companyId}/users?branch=${scope.branch}`}
@@ -318,7 +345,11 @@ export function UnavailablePage({ title }: { title?: string }) {
                   Open Administration
                 </Link>
               ) : null}
-              {!canViewVehicles && !canViewCustomers && !canViewUsers ? (
+              {!canViewVehicles &&
+              !canViewCustomers &&
+              !canViewRentals &&
+              !canViewOperations &&
+              !canViewUsers ? (
                 <span className="text-xs text-muted-foreground">
                   Your account has no record directory permissions in this
                   workspace.

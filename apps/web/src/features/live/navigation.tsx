@@ -17,7 +17,12 @@ import {
   Settings2,
 } from "lucide-react";
 import { navigation } from "@/lib/navigation/definitions";
-import { can, canAccessUserAdmin } from "@/lib/api/contracts";
+import {
+  can,
+  canAccessOperations,
+  canAccessRentals,
+  canAccessUserAdmin,
+} from "@/lib/api/contracts";
 import { useSession } from "@/features/auth/session-provider";
 import { useLiveContext } from "./context";
 
@@ -65,25 +70,39 @@ export function LiveNavigation({
         const restricted =
           item.key === "administration"
             ? !canAccessUserAdmin(user!, scope.companyId)
-            : permission !== null && !can(user!, permission);
+            : item.key === "operations"
+              ? !canAccessOperations(user!)
+              : item.key === "rentals"
+                ? !canAccessRentals(user!)
+                : permission !== null && !can(user!, permission);
         const planned =
           item.key !== "dashboard" &&
+          item.key !== "operations" &&
           item.key !== "fleet" &&
           item.key !== "customers" &&
+          item.key !== "rentals" &&
           item.key !== "administration";
         const target =
           item.key === "dashboard"
             ? "dashboard"
-            : item.key === "fleet"
-              ? "vehicles"
-              : item.key === "customers"
-                ? "customers"
-                : item.key === "administration"
-                  ? "users"
-                  : `modules/${item.key}`;
+            : item.key === "operations"
+              ? "operations"
+              : item.key === "fleet"
+                ? "vehicles"
+                : item.key === "customers"
+                  ? "customers"
+                  : item.key === "rentals"
+                    ? "rentals"
+                    : item.key === "administration"
+                      ? "users"
+                      : `modules/${item.key}`;
         const basePath = `/companies/${scope.companyId}/${target}`;
         const active =
-          !restricted && (path === basePath || path.startsWith(`${basePath}/`));
+          !restricted &&
+          (path === basePath ||
+            path.startsWith(`${basePath}/`) ||
+            (item.key === "rentals" &&
+              path.startsWith(`/companies/${scope.companyId}/reservations/`)));
         const title = `${item.label}${restricted ? " · Restricted" : planned ? " · Planned" : ""}`;
 
         const badge =
