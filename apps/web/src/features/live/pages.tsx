@@ -8,6 +8,7 @@ import {
   CarFront,
   Compass,
   MapPin,
+  Settings2,
   ShieldCheck,
   UsersRound,
 } from "lucide-react";
@@ -17,7 +18,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { ViewFadeIn } from "@/components/motion/primitives";
 import { useLiveContext } from "./context";
 import { useSession } from "@/features/auth/session-provider";
-import { can } from "@/lib/api/contracts";
+import { can, canAccessUserAdmin } from "@/lib/api/contracts";
 import {
   canCreateBranch,
   canCreateCompany,
@@ -188,6 +189,7 @@ export function UnavailablePage({ title }: { title?: string }) {
 
   const canViewVehicles = user ? can(user, "vehicles.view") : false;
   const canViewCustomers = user ? can(user, "customers.view") : false;
+  const canViewUsers = user ? canAccessUserAdmin(user, scope.companyId) : false;
   const canManageBranches =
     !!(user && scope.company && canCreateBranch(user, scope.companyId));
 
@@ -301,7 +303,22 @@ export function UnavailablePage({ title }: { title?: string }) {
                   Open Customers
                 </Link>
               ) : null}
-              {!canViewVehicles && !canViewCustomers ? (
+              {canViewUsers ? (
+                <Link
+                  href={`/companies/${scope.companyId}/users?branch=${scope.branch}`}
+                  className={buttonVariants({
+                    size: "sm",
+                    variant:
+                      canViewVehicles || canViewCustomers
+                        ? "outline"
+                        : "default",
+                  })}
+                >
+                  <Settings2 className="size-4" aria-hidden="true" />
+                  Open Administration
+                </Link>
+              ) : null}
+              {!canViewVehicles && !canViewCustomers && !canViewUsers ? (
                 <span className="text-xs text-muted-foreground">
                   Your account has no record directory permissions in this
                   workspace.

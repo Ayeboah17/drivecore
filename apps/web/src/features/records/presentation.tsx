@@ -1,4 +1,9 @@
-import type { Customer, Vehicle } from "@/lib/api/contracts";
+import {
+  formatMinorCurrency,
+  formatVehicleFunction,
+  type Customer,
+  type Vehicle,
+} from "@/lib/api/contracts";
 import { Badge } from "@/components/ui/badge";
 
 const statusStyles: Record<Vehicle["status"], string> = {
@@ -40,10 +45,12 @@ export function RecordDetails({
   record,
   company,
   branch,
+  currency,
 }: {
   record: Customer | Vehicle;
   company: string;
   branch: string;
+  currency?: string;
 }) {
   return (
     <div className="grid items-start gap-6 xl:grid-cols-3">
@@ -78,9 +85,41 @@ export function RecordDetails({
                   {record.year ?? "Not provided"}
                 </span>
               </Detail>
-              <Detail label="Odometer">
-                Unavailable — distance unit awaiting confirmation
+              <Detail label="Daily rate">
+                <span className="font-mono tabular-nums">
+                  {formatMinorCurrency(record.daily_rate_minor, currency)}
+                </span>
               </Detail>
+              <Detail label="Odometer">
+                <span className="font-mono tabular-nums">
+                  {record.odometer.toLocaleString()}{" "}
+                  {record.odometer_unit ?? "km"}
+                </span>
+              </Detail>
+              <div className="min-w-0 space-y-1 sm:col-span-2">
+                <dt className="text-label text-muted-foreground">
+                  Vehicle functions
+                </dt>
+                <dd className="pt-1">
+                  {record.functions.length === 0 ? (
+                    <span className="text-sm text-muted-foreground">
+                      None selected
+                    </span>
+                  ) : (
+                    <div className="flex flex-wrap gap-2">
+                      {record.functions.map((fn) => (
+                        <Badge
+                          key={fn}
+                          variant="outline"
+                          className="rounded-full px-2.5 py-0.5 text-xs font-medium"
+                        >
+                          {formatVehicleFunction(fn)}
+                        </Badge>
+                      ))}
+                    </div>
+                  )}
+                </dd>
+              </div>
             </>
           )}
         </dl>

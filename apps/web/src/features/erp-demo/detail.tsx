@@ -1,6 +1,8 @@
 "use client";
 import { FileText } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { formatVehicleFunction } from "@/lib/api/contracts";
 import { allowed, kindModule } from "@/lib/demo/permissions";
 import { related, label, money, displayStatus } from "@/lib/demo/selectors";
 import { invoiceBalance, stock, actionBlockReason } from "@/lib/demo/rules";
@@ -159,12 +161,35 @@ export function Detail({
           <h3 className="text-section-heading">Record information</h3>
           <dl className="grid gap-5 sm:grid-cols-2">
             {fields.map((key) => (
-              <div key={key} className="min-w-0 space-y-1">
+              <div
+                key={key}
+                className={`min-w-0 space-y-1 ${entity.kind === "vehicle" && key === "functions" ? "sm:col-span-2" : ""}`}
+              >
                 <dt className="text-label text-muted-foreground">
                   {fieldLabel(key, entity.kind)}
                 </dt>
                 <dd className="break-words text-sm font-medium">
-                  {cell(db, entity, key)}
+                  {entity.kind === "vehicle" && key === "functions" ? (
+                    entity.functions.length === 0 ? (
+                      <span className="text-muted-foreground">
+                        None selected
+                      </span>
+                    ) : (
+                      <div className="flex flex-wrap gap-2 pt-1">
+                        {entity.functions.map((fn) => (
+                          <Badge
+                            key={fn}
+                            variant="outline"
+                            className="rounded-full px-2.5 py-0.5 text-xs font-medium"
+                          >
+                            {formatVehicleFunction(fn)}
+                          </Badge>
+                        ))}
+                      </div>
+                    )
+                  ) : (
+                    cell(db, entity, key)
+                  )}
                 </dd>
               </div>
             ))}

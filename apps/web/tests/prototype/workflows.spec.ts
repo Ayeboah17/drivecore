@@ -198,11 +198,16 @@ test("customer and fleet CRUD persists through reload; document metadata is atta
   await dialog
     .getByRole("button", { name: "GPS Tracker", exact: true })
     .click();
+  await dialog
+    .getByLabel("Add custom vehicle function", { exact: true })
+    .fill("Roof Rack");
+  await dialog.getByRole("button", { name: "Add", exact: true }).click();
   await save(page);
   await expect(
     page.getByRole("heading", { name: "PROTO-999", exact: true }),
   ).toBeVisible();
   await expect(page.getByText("GPS Tracker", { exact: true })).toBeVisible();
+  await expect(page.getByText("Roof Rack", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Edit record", exact: true }).click();
   await page
     .getByRole("dialog")

@@ -25,52 +25,32 @@ test.beforeEach(async ({ request }) => {
   await request.post(`${fixture}/__test/reset`);
 });
 
-test("directories stay blocked without ever downloading a collection, even with search/page URL parameters", async ({
+test("directories load scoped collections without cross-company leakage and open record details", async ({
   page,
   request,
 }) => {
   await login(page);
-  const collections: string[] = [];
-  page.on("request", (r) => {
-    if (
-      r.method() === "GET" &&
-      /\/api\/backend\/api\/v1\/(customers|vehicles)$/.test(
-        new URL(r.url()).pathname,
-      )
-    )
-      collections.push(r.url());
-  });
   await page.setViewportSize({ width: 1440, height: 900 });
-  for (const domain of ["customers", "vehicles"] as const) {
-    await page.goto(
-      `/companies/1/${domain}?branch=all&page=2&search=synthetic`,
-    );
-    await expect(
-      page.getByRole("heading", {
-        name: "Scoped list unavailable",
-        exact: true,
-      }),
-    ).toBeVisible();
-    await expect(page.getByRole("table")).toHaveCount(0);
-    await expect(page.getByRole("searchbox")).toHaveCount(0);
-    await page
-      .getByRole("button", { name: "Open record", exact: true })
-      .click();
-    await expect(
-      page.getByText("Enter a positive whole record ID.", { exact: true }),
-    ).toBeVisible();
-    await capture(page, `${domain}-directory-blocked-light`);
-  }
-  await page.getByLabel("Open a known vehicle ID", { exact: true }).fill("10");
-  await page.getByRole("button", { name: "Open record", exact: true }).click();
+  await page.goto("/companies/1/customers?branch=all");
+  await expect(
+    page.getByRole("table").getByText("Synthetic customer", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByText("Other company customer", { exact: true }),
+  ).toHaveCount(0);
+  await page.goto("/companies/1/vehicles?branch=all");
+  await expect(
+    page.getByRole("table").getByText("SYN-10", { exact: true }),
+  ).toBeVisible();
+  await expect(page.getByText("OTH-12", { exact: true })).toHaveCount(0);
+  await page.getByRole("link", { name: "SYN-10", exact: true }).click();
   await expect(
     page.getByRole("heading", { name: "SYN-10", exact: true }),
   ).toBeVisible();
-  expect(collections).toEqual([]);
   expect(
     (await (await request.get(`${fixture}/__test/stats`)).json())
       .collectionReads,
-  ).toBe(0);
+  ).toBeGreaterThanOrEqual(2);
 });
 
 test("customer create/edit uses exact writable fields, invalidates details and maps field errors", async ({
@@ -171,7 +151,7 @@ test("customer create/edit uses exact writable fields, invalidates details and m
   await expect(page.getByRole("link", { name: /delete/i })).toHaveCount(0);
 });
 
-test("vehicle writes omit unconfirmed odometer, retain current reading and enforce conflicts/rented restrictions", async ({
+test("vehicle writes persist odometer (km), daily rate, functions and enforce conflicts/rented restrictions", async ({
   page,
   request,
 }) => {
@@ -187,10 +167,16 @@ test("vehicle writes omit unconfirmed odometer, retain current reading and enfor
       writes.push(r.postDataJSON());
   });
   await page.goto("/companies/1/vehicles/new?branch=all");
-  await expect(page.getByLabel("Odometer", { exact: true })).toHaveCount(0);
   await page.getByLabel("Registration", { exact: true }).fill("m4-new");
   await page.getByLabel("Make", { exact: true }).fill("Synthetic Make");
   await page.getByLabel("Model", { exact: true }).fill("Synthetic Model");
+  await page.getByLabel("Odometer (km)", { exact: true }).fill("4200");
+  await page.getByLabel("Daily rate (ZMW) (optional)", { exact: true }).fill("1250.99");
+  await page.getByRole("button", { name: "GPS Tracker", exact: true }).click();
+  await page
+    .getByLabel("Add custom vehicle function", { exact: true })
+    .fill("Roof Rack");
+  await page.getByRole("button", { name: "Add", exact: true }).click();
   await page.getByLabel("Year (optional)", { exact: true }).fill("2101");
   await page
     .getByRole("button", { name: "Create vehicle", exact: true })
@@ -206,6 +192,10 @@ test("vehicle writes omit unconfirmed odometer, retain current reading and enfor
   await expect(
     page.getByRole("heading", { name: "M4-NEW", exact: true }),
   ).toBeVisible();
+  await expect(page.getByText("ZMW 1,250.99", { exact: true })).toBeVisible();
+  await expect(page.getByText("4,200 km", { exact: true })).toBeVisible();
+  await expect(page.getByText("GPS Tracker", { exact: true })).toBeVisible();
+  await expect(page.getByText("Roof Rack", { exact: true })).toBeVisible();
   await page.goto("/companies/1/vehicles/10/edit?branch=all");
   await request.post(`${fixture}/__test/control`, { data: { conflict: true } });
   await page.getByRole("button", { name: "Save vehicle", exact: true }).click();
@@ -224,7 +214,12 @@ test("vehicle writes omit unconfirmed odometer, retain current reading and enfor
   await expect(
     page.getByRole("definition").filter({ hasText: /^Preserved Odometer$/ }),
   ).toBeVisible();
-  for (const payload of writes) expect(payload).not.toHaveProperty("odometer");
+  expect(writes[0]).toMatchObject({
+    odometer: 4200,
+    odometer_unit: "km",
+    daily_rate_minor: 125099,
+    functions: ["GPS Tracker", "Roof Rack"],
+  });
   const raw = await page.request.get("/api/backend/api/v1/vehicles/10");
   expect((await raw.json()).data.odometer).toBe(10);
   await capture(page, "vehicle-detail-light");
@@ -320,7 +315,7 @@ test("viewer cannot edit or create, and denied edit URLs do not fetch a record",
   await login(page, "viewer");
   await page.goto("/companies/1/customers?branch=all");
   await expect(
-    page.getByRole("heading", { name: "Scoped list unavailable", exact: true }),
+    page.getByRole("table").getByText("Synthetic customer", { exact: true }),
   ).toBeVisible();
   await expect(
     page.getByRole("link", { name: "Create customer", exact: true }),

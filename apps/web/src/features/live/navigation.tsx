@@ -17,7 +17,7 @@ import {
   Settings2,
 } from "lucide-react";
 import { navigation } from "@/lib/navigation/definitions";
-import { can } from "@/lib/api/contracts";
+import { can, canAccessUserAdmin } from "@/lib/api/contracts";
 import { useSession } from "@/features/auth/session-provider";
 import { useLiveContext } from "./context";
 
@@ -62,11 +62,15 @@ export function LiveNavigation({
             : item.key === "customers"
               ? "customers.view"
               : null;
-        const restricted = permission !== null && !can(user!, permission);
+        const restricted =
+          item.key === "administration"
+            ? !canAccessUserAdmin(user!, scope.companyId)
+            : permission !== null && !can(user!, permission);
         const planned =
           item.key !== "dashboard" &&
           item.key !== "fleet" &&
-          item.key !== "customers";
+          item.key !== "customers" &&
+          item.key !== "administration";
         const target =
           item.key === "dashboard"
             ? "dashboard"
@@ -74,7 +78,9 @@ export function LiveNavigation({
               ? "vehicles"
               : item.key === "customers"
                 ? "customers"
-                : `modules/${item.key}`;
+                : item.key === "administration"
+                  ? "users"
+                  : `modules/${item.key}`;
         const basePath = `/companies/${scope.companyId}/${target}`;
         const active =
           !restricted && (path === basePath || path.startsWith(`${basePath}/`));

@@ -39,16 +39,103 @@ function failure(status: number, message: string) {
 }
 export function allowedPath(method: string, path: string) {
   if (method === "GET")
-    return /^(sanctum\/csrf-cookie|api\/v1\/(health|auth\/me|companies|branches|customers\/[1-9]\d*|vehicles\/[1-9]\d*))$/.test(
+    return /^(sanctum\/csrf-cookie|api\/v1\/(health|auth\/me|companies|branches|customers|customers\/[1-9]\d*|vehicles|vehicles\/[1-9]\d*|users|roles))$/.test(
       path,
     );
   if (method === "POST")
-    return /^api\/v1\/(auth\/(login|logout)|companies|branches|customers|vehicles)$/.test(
+    return /^api\/v1\/(auth\/(login|logout)|companies|branches|customers|vehicles|users)$/.test(
       path,
     );
   return (
-    method === "PATCH" && /^api\/v1\/(customers|vehicles)\/[1-9]\d*$/.test(path)
+    method === "PATCH" &&
+    /^api\/v1\/(customers|vehicles|users)\/[1-9]\d*$/.test(path)
   );
+}
+
+const posInt = (value: string) =>
+  /^[1-9]\d{0,14}$/.test(value) && Number.isSafeInteger(Number(value));
+const validPage = (value: string) =>
+  /^[1-9]\d{0,6}$/.test(value) && Number(value) >= 1 && Number(value) <= 1000000;
+
+export function allowedQuery(
+  method: string,
+  path: string,
+  params: URLSearchParams,
+): boolean {
+  const keys = [...params.keys()];
+  if (keys.length === 0) {
+    return (
+      method !== "GET" ||
+      !/^api\/v1\/(customers|vehicles|users|roles)$/.test(path)
+    );
+  }
+  if (method !== "GET") return false;
+  const uniqueKeys = new Set(keys);
+  if (uniqueKeys.size !== keys.length) return false;
+
+  const checkCommon = (allowed: readonly string[], requireCompany: boolean) => {
+    for (const key of uniqueKeys) {
+      if (!allowed.includes(key)) return false;
+    }
+    const companyId = params.get("company_id");
+    const branchId = params.get("branch_id");
+    const page = params.get("page");
+    const q = params.get("q");
+    if (requireCompany && (!companyId || !posInt(companyId))) return false;
+    if (companyId !== null && !posInt(companyId)) return false;
+    if (branchId !== null && (!companyId || !posInt(branchId))) return false;
+    if (page !== null && !validPage(page)) return false;
+    if (q !== null && q.length > 100) return false;
+    return true;
+  };
+
+  if (path === "api/v1/companies") {
+    return checkCommon(["q", "page"], false);
+  }
+  if (path === "api/v1/branches") {
+    return checkCommon(["company_id", "branch_id", "q", "page"], false);
+  }
+  if (path === "api/v1/customers") {
+    if (!checkCommon(["company_id", "branch_id", "type", "q", "page"], true))
+      return false;
+    const type = params.get("type");
+    return type === null || ["individual", "corporate"].includes(type);
+  }
+  if (path === "api/v1/vehicles") {
+    if (!checkCommon(["company_id", "branch_id", "status", "q", "page"], true))
+      return false;
+    const status = params.get("status");
+    return (
+      status === null ||
+      ["available", "rented", "maintenance", "damaged"].includes(status)
+    );
+  }
+  if (path === "api/v1/users") {
+    if (
+      !checkCommon(
+        ["company_id", "branch_id", "role", "is_active", "q", "page"],
+        true,
+      )
+    )
+      return false;
+    const role = params.get("role");
+    const isActive = params.get("is_active");
+    if (
+      role !== null &&
+      !["company-admin", "operations", "viewer", "driver"].includes(role)
+    )
+      return false;
+    if (
+      isActive !== null &&
+      !["0", "1", "true", "false"].includes(isActive)
+    )
+      return false;
+    return true;
+  }
+  if (path === "api/v1/roles") {
+    return checkCommon(["company_id"], true);
+  }
+  return false;
 }
 export function forwardedCookies(raw: string, name: string) {
   return raw
@@ -123,13 +210,7 @@ export async function proxy(
   )
     return failure(404, "Unsupported API operation.");
   const url = new URL(request.url);
-  if (
-    [...url.searchParams.keys()].some((key) => key !== "page") ||
-    (url.search &&
-      (!/^api\/v1\/(companies|branches)$/.test(path) ||
-        url.searchParams.getAll("page").length !== 1 ||
-        !/^[1-9]\d{0,5}$/.test(url.searchParams.get("page") ?? "")))
-  )
+  if (!allowedQuery(request.method, path, url.searchParams))
     return failure(400, "Unsupported query parameters.");
   const mutation = request.method !== "GET";
   const allowed = appOrigins(config);

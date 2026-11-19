@@ -2,6 +2,8 @@ import { z } from "zod";
 import { ApiError, read, request } from "@/lib/api/client";
 import {
   customerSchema,
+  normalizePage,
+  pageSchema,
   vehicleSchema,
   type Domain,
   type Customer,
@@ -23,6 +25,44 @@ export function assertRecordScope(
       "This record is unavailable in the selected context.",
     );
   return record;
+}
+export async function listRecords(
+  domain: Domain,
+  params: {
+    companyId: string;
+    branch: string;
+    q: string;
+    filter: string;
+    page: number;
+  },
+  signal: AbortSignal,
+) {
+  const query = new URLSearchParams({ company_id: params.companyId });
+  if (params.branch !== "all") query.set("branch_id", params.branch);
+  const trimmedQ = params.q.trim().slice(0, 100);
+  if (trimmedQ) query.set("q", trimmedQ);
+  if (params.filter) {
+    query.set(domain === "customers" ? "type" : "status", params.filter);
+  }
+  if (params.page > 1) query.set("page", String(params.page));
+
+  const schema = domain === "customers" ? customerSchema : vehicleSchema;
+  const payload = await read(
+    `api/v1/${domain}?${query.toString()}`,
+    pageSchema(schema),
+    signal,
+  );
+  const normalized = normalizePage(payload);
+  for (const item of normalized.items) {
+    assertRecordScope(item, params.companyId, params.branch);
+  }
+  return normalized as {
+    items: (Customer | Vehicle)[];
+    page: number;
+    lastPage: number;
+    pageSize: number;
+    total: number;
+  };
 }
 export async function getRecord(
   domain: Domain,

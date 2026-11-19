@@ -27,21 +27,27 @@ const make = (
     },
     ...(method === "GET" ? {} : { body: "{}" }),
   });
-test("proxy allowlist excludes tokens, deletes, arbitrary URLs and unscoped collections", async () => {
+test("proxy allowlist excludes tokens, deletes, arbitrary URLs and unsupported domains", async () => {
   for (const path of [
     "api/v1/auth/tokens",
     "https://elsewhere.test",
-    "api/v1/customers",
-    "api/v1/vehicles",
     "api/v1/../users",
     "api/v1/documents/1",
+    "api/v1/reservations",
+    "api/v1/rentals",
   ])
     expect(allowedPath("GET", path)).toBe(false);
   expect(allowedPath("DELETE", "api/v1/customers/1")).toBe(false);
+  expect(allowedPath("GET", "api/v1/customers")).toBe(true);
+  expect(allowedPath("GET", "api/v1/vehicles")).toBe(true);
+  expect(allowedPath("GET", "api/v1/users")).toBe(true);
+  expect(allowedPath("GET", "api/v1/roles")).toBe(true);
+  expect(allowedPath("POST", "api/v1/users")).toBe(true);
+  expect(allowedPath("PATCH", "api/v1/users/1")).toBe(true);
   expect(allowedPath("PATCH", "api/v1/vehicles/1")).toBe(true);
   const rejected = await proxy(
-    make("api/v1/customers?company_id=1"),
-    "api/v1/customers",
+    make("api/v1/documents/1"),
+    "api/v1/documents/1",
     config,
     async () => {
       throw new Error("Must not call upstream");
@@ -212,29 +218,66 @@ test("cookie policy strips domain and enforces host-only Secure/HttpOnly/SameSit
   ).not.toContain("other");
 });
 
-test("collection paging, search and proposed scope parameters cannot bypass the closed allowlist", async () => {
+test("scoped collections require company_id and validate filters while rejecting unknown query params", async () => {
   let calls = 0;
-  for (const domain of ["customers", "vehicles"]) {
-    for (const query of [
-      "page=2",
-      "search=synthetic",
-      "company_id=1&branch_id=2&page=1",
-      "company_id=1&branch=all",
-    ]) {
-      const response = await proxy(
-        make(`api/v1/${domain}?${query}`),
-        `api/v1/${domain}`,
-        config,
-        async () => {
-          calls++;
-          return Response.json({ data: [] });
-        },
-      );
-      expect(response.status).toBe(404);
-      expect(response.headers.get("cache-control")).toContain("no-store");
-    }
+  for (const invalid of [
+    { path: "api/v1/customers", query: "" },
+    { path: "api/v1/customers", query: "page=2" },
+    { path: "api/v1/customers", query: "company_id=1&search=synthetic" },
+    { path: "api/v1/customers", query: "company_id=1&type=invalid" },
+    { path: "api/v1/vehicles", query: "company_id=1&branch=all" },
+    { path: "api/v1/vehicles", query: "company_id=1&status=unknown" },
+    { path: "api/v1/users", query: "role=driver" },
+    { path: "api/v1/users", query: "company_id=1&role=platform-admin" },
+    { path: "api/v1/users", query: "company_id=1&is_active=maybe" },
+    { path: "api/v1/roles", query: "" },
+    { path: "api/v1/branches", query: "branch_id=2" },
+  ]) {
+    const suffix = invalid.query ? `?${invalid.query}` : "";
+    const response = await proxy(
+      make(`${invalid.path}${suffix}`),
+      invalid.path,
+      config,
+      async () => {
+        calls++;
+        return Response.json({ data: [] });
+      },
+    );
+    expect(response.status).toBe(400);
+    expect(response.headers.get("cache-control")).toContain("no-store");
   }
   expect(calls).toBe(0);
+
+  for (const valid of [
+    "api/v1/customers?company_id=1&branch_id=2&type=corporate&q=apex&page=1",
+    "api/v1/vehicles?company_id=1&status=maintenance&q=toyota&page=2",
+    "api/v1/users?company_id=1&role=driver&is_active=1&q=fleet",
+    "api/v1/roles?company_id=1",
+    "api/v1/branches?company_id=1&q=main",
+  ]) {
+    const [path] = valid.split("?");
+    const response = await proxy(make(valid), path, config, async (url) => {
+      expect(String(url)).toBe(`https://api.example.test/${valid}`);
+      return Response.json({ data: [] });
+    });
+    expect(response.status).toBe(200);
+  }
+  for (const postPath of ["api/v1/customers", "api/v1/vehicles", "api/v1/users"]) {
+    const okPost = await proxy(
+      make(postPath, "POST"),
+      postPath,
+      config,
+      async () => Response.json({ data: {} }, { status: 201 }),
+    );
+    expect(okPost.status).toBe(201);
+    const badPost = await proxy(
+      make(`${postPath}?company_id=1`, "POST"),
+      postPath,
+      config,
+      async () => Response.json({ data: {} }, { status: 201 }),
+    );
+    expect(badPost.status).toBe(400);
+  }
 });
 
 test("multi-origin config accepts all allowlisted origins on mutations and rejects others", async () => {

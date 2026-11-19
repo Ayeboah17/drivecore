@@ -77,15 +77,18 @@ test("anonymous protection, login rotation, restoration, no mock data and cross-
   await expect(page).toHaveURL(/\/login/);
   await expect(other).toHaveURL(/\/login/);
 });
-test("customer create/edit uses backend records, maps 422, prevents double submission and never lists unscoped data", async ({
+test("customer create/edit uses backend records, maps 422, prevents double submission and scopes collections", async ({
   page,
   request,
 }) => {
   await login(page);
   await page.goto("/companies/1/customers?branch=all");
   await expect(
-    page.getByRole("heading", { name: "Scoped list unavailable" }),
+    page.getByRole("table").getByText("Synthetic customer", { exact: true }),
   ).toBeVisible();
+  await expect(
+    page.getByText("Other company customer", { exact: true }),
+  ).toHaveCount(0);
   await page
     .getByRole("link", { name: "Create customer", exact: true })
     .click();
@@ -136,7 +139,7 @@ test("customer create/edit uses backend records, maps 422, prevents double submi
   expect(
     (await (await request.get(`${fixture}/__test/stats`)).json())
       .collectionReads,
-  ).toBe(0);
+  ).toBeGreaterThanOrEqual(1);
   expect(
     (await (await request.get(`${fixture}/__test/stats`)).json())
       .completedWrites,
@@ -282,7 +285,9 @@ test("proxy rejects missing CSRF and hostile origins through the actual Next han
   });
   expect(origin.status()).toBe(403);
   const collection = await request.get("/api/backend/api/v1/customers");
-  expect(collection.status()).toBe(404);
+  expect(collection.status()).toBe(400);
+  const blocked = await request.get("/api/backend/api/v1/documents/1");
+  expect(blocked.status()).toBe(404);
   await request.get("/api/backend/sanctum/csrf-cookie");
   const mismatch = await request.post("/api/backend/api/v1/auth/login", {
     headers: {

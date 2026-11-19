@@ -3,17 +3,18 @@
 import { useId, useRef, useState } from "react";
 import { useForm, useWatch } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { Check, ShieldAlert } from "lucide-react";
+import { ShieldAlert } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { DriveCoreSelect } from "@/components/ui/drivecore-select";
 import { DriveCoreDateTimeField } from "@/components/ui/drivecore-calendar";
+import { VehicleFunctionsInput } from "@/components/ui/vehicle-functions-input";
+import { mergeVehicleFunctions } from "@/lib/api/contracts";
 import {
   DemoError,
   entities,
   valueOf,
-  VEHICLE_FUNCTIONS,
   type Database,
   type DemoContext,
   type Entity,
@@ -137,6 +138,7 @@ export function DemoForm({
   const formId = useId(),
     lock = useRef(false);
   const [failure, setFailure] = useState("");
+  const [fnDraft, setFnDraft] = useState("");
   const combined: Field[] =
     branchRequired && !record
       ? [{ key: "branchId", label: "Branch", relation: "branch" }, ...fields]
@@ -205,11 +207,29 @@ export function DemoForm({
       onSubmit={(event) => {
         void handleSubmit(async (values) => {
           if (lock.current) return;
+          const fnField = combined.find((f) => f.type === "vehicleFunctions");
+          const payload: Values = { ...values };
+          if (fnField && fnDraft.trim()) {
+            const currentList = (payload[fnField.key] ?? "")
+              .split(",")
+              .map((s) => s.trim())
+              .filter(Boolean);
+            const merged = mergeVehicleFunctions(currentList, fnDraft);
+            if (merged.error) {
+              setError(fnField.key, { type: "manual", message: merged.error });
+              return;
+            }
+            payload[fnField.key] = merged.next.join(",");
+            setValue(fnField.key, payload[fnField.key], {
+              shouldValidate: true,
+            });
+            setFnDraft("");
+          }
           lock.current = true;
           onBusy(true);
           setFailure("");
           try {
-            await onSave(values);
+            await onSave(payload);
           } catch (error) {
             if (error instanceof DemoError)
               for (const [key, message] of Object.entries(error.fields))
@@ -308,42 +328,26 @@ export function DemoForm({
                   ))}
                 </fieldset>
               ) : field.type === "vehicleFunctions" ? (
-                <fieldset
+                <VehicleFunctionsInput
                   id={id}
-                  className="flex flex-wrap gap-2 rounded-xl border bg-muted/20 p-3"
-                >
-                  <legend className="sr-only">Vehicle functions</legend>
-                  {VEHICLE_FUNCTIONS.map((fn) => {
-                    const selectedSet = new Set(
-                      currentVal.split(",").map((s) => s.trim()).filter(Boolean),
-                    );
-                    const active = selectedSet.has(fn);
-                    return (
-                      <button
-                        key={fn}
-                        type="button"
-                        aria-pressed={active}
-                        onClick={() => {
-                          if (active) selectedSet.delete(fn);
-                          else selectedSet.add(fn);
-                          setValue(field.key, [...selectedSet].join(","), {
-                            shouldValidate: true,
-                          });
-                        }}
-                        className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold transition-colors focus-visible:outline-2 focus-visible:outline-ring ${
-                          active
-                            ? "bg-structural text-structural-foreground shadow-2xs"
-                            : "border bg-surface text-foreground hover:bg-muted"
-                        }`}
-                      >
-                        {active ? (
-                          <Check className="size-3" aria-hidden="true" />
-                        ) : null}
-                        <span>{fn}</span>
-                      </button>
-                    );
-                  })}
-                </fieldset>
+                  value={currentVal
+                    .split(",")
+                    .map((s) => s.trim())
+                    .filter(Boolean)}
+                  onChange={(next) =>
+                    setValue(field.key, next.join(","), {
+                      shouldValidate: true,
+                    })
+                  }
+                  suggestions={entities(db, "vehicle")
+                    .filter((v) => inScope(db, ctx, v))
+                    .flatMap((v) => v.functions)}
+                  draft={fnDraft}
+                  onDraftChange={setFnDraft}
+                  disabled={isSubmitting}
+                  error={errors[field.key]?.message}
+                  ariaDescribedBy={`${id}-error`}
+                />
               ) : field.type === "vehiclesMulti" ? (
                 <fieldset
                   id={id}

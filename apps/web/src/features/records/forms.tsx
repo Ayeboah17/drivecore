@@ -20,11 +20,19 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useSession } from "@/features/auth/session-provider";
 import { useLiveContext } from "@/features/live/context";
 import { ApiError, errorText, initializeCsrf } from "@/lib/api/client";
-import { type Customer, type Vehicle, type Domain } from "@/lib/api/contracts";
+import {
+  formatMinorToInput,
+  mergeVehicleFunctions,
+  parseMajorToMinor,
+  type Customer,
+  type Vehicle,
+  type Domain,
+} from "@/lib/api/contracts";
 import { saveRecord } from "./service";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { DriveCoreSelect } from "@/components/ui/drivecore-select";
+import { VehicleFunctionsInput } from "@/components/ui/vehicle-functions-input";
 
 import { customerFormSchema, liveVehicleFormSchema } from "./schemas";
 export { customerFormSchema, vehicleFormSchema } from "./schemas";
@@ -350,7 +358,10 @@ export function CustomerForm({ record }: { record?: Customer }) {
   );
 }
 export function VehicleForm({ record }: { record?: Vehicle }) {
+  const scope = useLiveContext();
+  const client = useQueryClient();
   const save = useSave("vehicles", record);
+  const [fnDraft, setFnDraft] = useState("");
   const {
     register,
     handleSubmit,
@@ -366,6 +377,9 @@ export function VehicleForm({ record }: { record?: Vehicle }) {
           make: record.make,
           model: record.model,
           year: record.year === null ? "" : String(record.year),
+          odometer: String(record.odometer),
+          daily_rate: formatMinorToInput(record.daily_rate_minor),
+          functions: [...record.functions],
           status: record.status === "rented" ? "available" : record.status,
         }
       : {
@@ -373,20 +387,50 @@ export function VehicleForm({ record }: { record?: Vehicle }) {
           make: "",
           model: "",
           year: "",
+          odometer: "0",
+          daily_rate: "",
+          functions: [],
           status: "available",
         },
   });
   const vehicleStatus = useWatch({ control, name: "status" });
+  const selectedFunctions = useWatch({ control, name: "functions" }) ?? [];
+  const currency = scope.company?.currency;
+  const functionsId = useId();
+
+  const cachedFleetLists = client.getQueriesData<{ items?: Vehicle[] }>({
+    queryKey: [...scope.key, "vehicles", "list"],
+  });
+  const fleetFunctionSuggestions = cachedFleetLists.flatMap(
+    ([, page]) => page?.items?.flatMap((item) => item.functions ?? []) ?? [],
+  );
+
   return (
     <form
       noValidate
       aria-busy={save.busy}
-      className="dc-shadow-card max-w-xl space-y-4 rounded-2xl border bg-surface p-card"
+      className="dc-shadow-card max-w-2xl space-y-4 rounded-2xl border bg-surface p-card"
       onSubmit={handleSubmit(async (values) => {
+        const merged = mergeVehicleFunctions(values.functions, fnDraft);
+        if (merged.error) {
+          setError("functions", { type: "manual", message: merged.error });
+          return;
+        }
+        if (fnDraft.trim()) {
+          setValue("functions", merged.next, { shouldValidate: true });
+          setFnDraft("");
+        }
         try {
           await save.save({
-            ...values,
+            registration: values.registration,
+            make: values.make,
+            model: values.model,
             year: values.year === "" ? null : Number(values.year),
+            odometer: Number(values.odometer),
+            odometer_unit: "km",
+            daily_rate_minor: parseMajorToMinor(values.daily_rate) ?? 0,
+            functions: merged.next,
+            status: values.status,
           });
         } catch (error) {
           applyFieldErrors(
@@ -394,12 +438,31 @@ export function VehicleForm({ record }: { record?: Vehicle }) {
             ["registration", "make", "model", "year", "odometer", "status"],
             setError,
           );
+          if (error instanceof ApiError && error.status === 422) {
+            if (error.fields.daily_rate_minor?.[0]) {
+              setError("daily_rate", {
+                type: "server",
+                message: error.fields.daily_rate_minor[0],
+              });
+            }
+            const fnFieldError = Object.entries(error.fields).find(
+              ([key, messages]) =>
+                (key === "functions" || key.startsWith("functions.")) &&
+                messages.length > 0,
+            );
+            if (fnFieldError) {
+              setError("functions", {
+                type: "server",
+                message: fnFieldError[1][0],
+              });
+            }
+          }
         }
       })}
     >
       <fieldset
         disabled={isSubmitting || save.busy || record?.status === "rented"}
-        className="space-y-4"
+        className="grid gap-4 sm:grid-cols-2"
       >
         {(["registration", "make", "model", "year"] as const).map((name) => (
           <Field
@@ -421,11 +484,36 @@ export function VehicleForm({ record }: { record?: Vehicle }) {
             />
           </Field>
         ))}
-        <p className="text-sm text-muted-foreground">
-          Odometer entry is unavailable until the distance unit is confirmed.
-          Existing readings are preserved when editing; new vehicles use the
-          API’s default reading.
-        </p>
+
+        <Field
+          name="odometer"
+          label="Odometer (km)"
+          error={errors.odometer?.message}
+        >
+          <Input
+            id="odometer"
+            inputMode="numeric"
+            {...register("odometer")}
+            aria-invalid={!!errors.odometer}
+            aria-describedby="odometer-error"
+          />
+        </Field>
+
+        <Field
+          name="daily_rate"
+          label={`Daily rate${currency ? ` (${currency})` : ""} (optional)`}
+          error={errors.daily_rate?.message}
+        >
+          <Input
+            id="daily_rate"
+            inputMode="decimal"
+            placeholder="0.00"
+            {...register("daily_rate")}
+            aria-invalid={!!errors.daily_rate}
+            aria-describedby="daily_rate-error"
+          />
+        </Field>
+
         <Field name="status" label="Status" error={errors.status?.message}>
           <DriveCoreSelect
             id="status"
@@ -445,7 +533,38 @@ export function VehicleForm({ record }: { record?: Vehicle }) {
             ]}
           />
         </Field>
-        {save.branchControl}
+
+        <div className="sm:col-span-2">{save.branchControl}</div>
+
+        <div className="space-y-2 sm:col-span-2">
+          <label htmlFor={functionsId} className="text-sm font-medium">
+            Vehicle functions (optional)
+          </label>
+          <VehicleFunctionsInput
+            id={functionsId}
+            value={selectedFunctions}
+            onChange={(next) =>
+              setValue("functions", next, { shouldValidate: true })
+            }
+            suggestions={fleetFunctionSuggestions}
+            draft={fnDraft}
+            onDraftChange={setFnDraft}
+            disabled={isSubmitting || save.busy || record?.status === "rented"}
+            error={errors.functions?.message}
+            ariaDescribedBy={`${functionsId}-error`}
+          />
+          <p className="text-xs text-muted-foreground">
+            {record
+              ? "Odometer cannot decrease below the recorded kilometre reading. Leave daily rate blank or 0 if unset."
+              : "Distance unit is kilometres (km). Leave daily rate blank or 0 if unset."}
+          </p>
+          <p
+            id={`${functionsId}-error`}
+            className="text-sm text-danger-foreground"
+          >
+            {errors.functions?.message}
+          </p>
+        </div>
       </fieldset>
       {save.feedback}
       {!record && !save.canCreate ? (

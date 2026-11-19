@@ -205,6 +205,7 @@ export function RecordPage({ domain }: { domain: Domain }) {
         <RecordDetails
           record={value}
           company={scope.company?.name ?? `Company #${value.company_id}`}
+          currency={scope.company?.currency}
           branch={
             scope.directory?.branches.find(
               (branch) =>
