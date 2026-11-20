@@ -24,6 +24,22 @@ const FIELD_LABELS: Record<string, string> = {
   functions: "Vehicle functions",
   file: "Document file",
   notes: "Notes",
+  invoice_id: "Invoice",
+  due_at: "Due date",
+  amount_minor: "Amount",
+  unit_price_minor: "Unit price",
+  extra_charge_minor: "Additional return charge",
+  extra_charge_description: "Additional charge description",
+  incurred_at: "Expense date",
+  paid_at: "Payment date",
+  refunded_at: "Refund date",
+  method: "Payment method",
+  reference: "Payment reference",
+  reason: "Refund reason",
+  lines: "Line items",
+  custom_customer_name: "Custom customer name",
+  custom_customer_email: "Custom customer email",
+  custom_customer_phone: "Custom customer phone",
 };
 
 const MESSAGE_REPLACEMENTS: readonly [RegExp, string][] = [

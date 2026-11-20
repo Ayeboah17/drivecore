@@ -180,3 +180,87 @@ export function useLiveContext() {
   if (!scope) throw new Error("Organization provider missing");
   return scope;
 }
+
+const BRANCH_SWITCH_PRESERVED_PARAMS = [
+  "tab",
+  "flow",
+  "sort",
+  "dir",
+  "dsort",
+  "ddir",
+] as const;
+
+/**
+ * Computes the destination href when switching branches in the live shell:
+ * - On list/tabbed pages, stays on the current route & tab while preserving sort order
+ *   and clearing pagination/search/filter params.
+ * - On branch-scoped record detail/edit/new pages, navigates up to the parent module list/tab
+ *   so users never hit a 404 "unavailable in the selected context" error.
+ */
+export function buildBranchSwitchHref(
+  companyId: string,
+  pathname: string,
+  currentSearch: URLSearchParams | string,
+  nextBranch: string,
+): string {
+  const prefix = `/companies/${companyId}/`;
+  const params = new URLSearchParams();
+  const source =
+    typeof currentSearch === "string"
+      ? new URLSearchParams(currentSearch)
+      : currentSearch;
+
+  if (!pathname.startsWith(prefix)) {
+    params.set("branch", nextBranch);
+    return `/companies/${companyId}/dashboard?${params.toString()}`;
+  }
+
+  const subPath = pathname.slice(prefix.length).replace(/\/+$/, "");
+
+  // List/tabbed top-level routes stay in place and keep tab/flow/sort state
+  if (
+    /^(dashboard|operations|vehicles|customers|rentals|quotations|finance|users|setup|modules\/[^/]+)$/.test(
+      subPath,
+    )
+  ) {
+    for (const key of BRANCH_SWITCH_PRESERVED_PARAMS) {
+      const value = source.get(key);
+      if (value) params.set(key, value);
+    }
+    params.set("branch", nextBranch);
+    return `${prefix}${subPath}?${params.toString()}`;
+  }
+
+  // Record detail/edit/new routes fall back cleanly to their parent module list/tab
+  if (subPath.startsWith("customers/")) {
+    params.set("branch", nextBranch);
+    return `${prefix}customers?${params.toString()}`;
+  }
+  if (subPath.startsWith("vehicles/")) {
+    params.set("branch", nextBranch);
+    return `${prefix}vehicles?${params.toString()}`;
+  }
+  if (subPath.startsWith("rentals/")) {
+    params.set("tab", "rentals");
+    params.set("branch", nextBranch);
+    return `${prefix}rentals?${params.toString()}`;
+  }
+  if (subPath.startsWith("reservations/")) {
+    params.set("tab", "reservations");
+    params.set("branch", nextBranch);
+    return `${prefix}rentals?${params.toString()}`;
+  }
+  if (subPath.startsWith("quotations/")) {
+    params.set("tab", "quotations");
+    params.set("branch", nextBranch);
+    return `${prefix}rentals?${params.toString()}`;
+  }
+  if (subPath.startsWith("finance/")) {
+    params.set("tab", "invoices");
+    params.set("branch", nextBranch);
+    return `${prefix}finance?${params.toString()}`;
+  }
+
+  params.set("branch", nextBranch);
+  return `${prefix}dashboard?${params.toString()}`;
+}

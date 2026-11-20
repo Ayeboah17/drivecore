@@ -1351,12 +1351,14 @@ export function RentalDetailPage() {
   const canViewDocs = can(user!, "documents.view") || isAssignedDriver;
   const canUploadDocs = can(user!, "documents.manage") || isAssignedDriver;
   const canViewReservation = can(user!, "reservations.view");
+  const canViewInvoices = can(user!, "invoices.view");
 
   async function refreshAll() {
     await Promise.all([
       client.invalidateQueries({ queryKey: [...scope.key, "rentals"] }),
       client.invalidateQueries({ queryKey: [...scope.key, "vehicles"] }),
       client.invalidateQueries({ queryKey: [...scope.key, "reservations"] }),
+      client.invalidateQueries({ queryKey: [...scope.key, "invoices"] }),
     ]);
   }
 
@@ -1438,6 +1440,15 @@ export function RentalDetailPage() {
         </div>
 
         <div className="flex flex-wrap gap-2">
+          {canViewInvoices && rental.invoice_id ? (
+            <Link
+              href={`/companies/${scope.companyId}/finance/invoices/${rental.invoice_id}?branch=${encodeURIComponent(scope.branch)}`}
+              className="inline-flex h-9 items-center gap-1.5 rounded-xl border border-border bg-surface px-3.5 text-xs font-semibold text-link hover:border-link/50 hover:bg-muted/50"
+            >
+              <FileText className="size-4" aria-hidden="true" />
+              Open invoice #{rental.invoice_id}
+            </Link>
+          ) : null}
           <Button
             type="button"
             variant="outline"

@@ -58,10 +58,24 @@ export async function listReservations(
     signal,
   );
   const normalized = normalizePage(payload);
-  for (const item of normalized.items) {
-    assertScope(item, params.companyId, params.branch);
-  }
-  return normalized as {
+  // Pre-PR #9 backends may omit branch_id/status filtering on reservations index;
+  // filter client-side instead of failing the entire table with 404.
+  const scopedItems = normalized.items.filter((item) => {
+    if (String(item.company_id) !== params.companyId) return false;
+    if (params.branch !== "all" && String(item.branch_id) !== params.branch)
+      return false;
+    if (params.status && item.status !== params.status) return false;
+    return true;
+  });
+  const total =
+    scopedItems.length !== normalized.items.length && normalized.lastPage === 1
+      ? scopedItems.length
+      : normalized.total;
+  return {
+    ...normalized,
+    items: scopedItems,
+    total,
+  } as {
     items: Reservation[];
     page: number;
     lastPage: number;
@@ -159,10 +173,29 @@ export async function listRentals(
     signal,
   );
   const normalized = normalizePage(payload);
-  for (const item of normalized.items) {
-    assertScope(item, params.companyId, params.branch);
-  }
-  return normalized as {
+  // Pre-PR #9 backends may omit branch_id/status/driver filtering on rentals index;
+  // filter client-side instead of failing the entire table with 404.
+  const scopedItems = normalized.items.filter((item) => {
+    if (String(item.company_id) !== params.companyId) return false;
+    if (params.branch !== "all" && String(item.branch_id) !== params.branch)
+      return false;
+    if (params.status && item.status !== params.status) return false;
+    if (
+      params.driverUserId &&
+      item.driver_user_id !== params.driverUserId
+    )
+      return false;
+    return true;
+  });
+  const total =
+    scopedItems.length !== normalized.items.length && normalized.lastPage === 1
+      ? scopedItems.length
+      : normalized.total;
+  return {
+    ...normalized,
+    items: scopedItems,
+    total,
+  } as {
     items: Rental[];
     page: number;
     lastPage: number;
@@ -212,6 +245,8 @@ export async function transitionRental(
     odometer: number;
     notes: string;
     vehicle_status?: "available" | "maintenance" | "damaged";
+    extra_charge_minor?: number;
+    extra_charge_description?: string;
   },
   signal: AbortSignal,
 ): Promise<Rental> {

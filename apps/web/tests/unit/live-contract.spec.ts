@@ -17,7 +17,11 @@ import {
   generateDriverPassword,
 } from "../../src/features/rentals/timing";
 import { calculateQuotationPreview } from "../../src/features/quotations/pricing";
-import { resolveScope } from "../../src/features/live/context";
+import { calculateInvoicePreview } from "../../src/features/finance/pricing";
+import {
+  buildBranchSwitchHref,
+  resolveScope,
+} from "../../src/features/live/context";
 import { assertRecordScope } from "../../src/features/records/service";
 import {
   nextSortState,
@@ -298,4 +302,71 @@ test("table-sort helper supports 3-state cycling, strict allowlist parsing, and 
   expect(byRateAsc.map((r) => r.id)).toEqual([3, 4, 1, 2]);
   const byRateDesc = sortRows(rows, "rate", "desc", { rate: (r) => r.rate });
   expect(byRateDesc.map((r) => r.id)).toEqual([1, 4, 3, 2]);
+});
+
+test("calculateInvoicePreview computes minor-unit subtotal, discount, VAT and total accurately", () => {
+  const preview = calculateInvoicePreview({
+    lines: [
+      { description: "Toyota Prado (3 days)", quantity: 3, unit_price_minor: 65000 },
+      { description: "Fuel refill", quantity: 1, unit_price_minor: 15000 },
+    ],
+    discountPct: 10,
+    vatRatePct: 15,
+  });
+  expect(preview).toEqual({
+    subtotalMinor: 210000,
+    discountMinor: 21000,
+    taxableMinor: 189000,
+    vatMinor: 28350,
+    totalMinor: 217350,
+  });
+});
+
+test("buildBranchSwitchHref preserves tab/flow/sort on list pages, resets page/filters, and falls back to parent list from detail pages", () => {
+  expect(
+    buildBranchSwitchHref(
+      "1",
+      "/companies/1/rentals",
+      "tab=quotations&status=pending_approval&sort=total_minor&dir=desc&q=apex&page=3&branch=all",
+      "2",
+    ),
+  ).toBe("/companies/1/rentals?tab=quotations&sort=total_minor&dir=desc&branch=2");
+
+  expect(
+    buildBranchSwitchHref(
+      "1",
+      "/companies/1/finance",
+      "tab=payments&flow=refunds&sort=amount_minor&dir=asc&q=credit&page=2&branch=2",
+      "all",
+    ),
+  ).toBe(
+    "/companies/1/finance?tab=payments&flow=refunds&sort=amount_minor&dir=asc&branch=all",
+  );
+
+  expect(
+    buildBranchSwitchHref("1", "/companies/1/vehicles/10/edit", "branch=2", "5"),
+  ).toBe("/companies/1/vehicles?branch=5");
+  expect(
+    buildBranchSwitchHref("1", "/companies/1/customers/10", "branch=2", "all"),
+  ).toBe("/companies/1/customers?branch=all");
+  expect(
+    buildBranchSwitchHref("1", "/companies/1/rentals/600", "branch=2", "5"),
+  ).toBe("/companies/1/rentals?tab=rentals&branch=5");
+  expect(
+    buildBranchSwitchHref("1", "/companies/1/reservations/500", "branch=2", "5"),
+  ).toBe("/companies/1/rentals?tab=reservations&branch=5");
+  expect(
+    buildBranchSwitchHref("1", "/companies/1/quotations/21", "branch=2", "5"),
+  ).toBe("/companies/1/rentals?tab=quotations&branch=5");
+  expect(
+    buildBranchSwitchHref(
+      "1",
+      "/companies/1/finance/invoices/22",
+      "branch=2",
+      "5",
+    ),
+  ).toBe("/companies/1/finance?tab=invoices&branch=5");
+  expect(
+    buildBranchSwitchHref("1", "/companies/1/departures/1", "branch=2", "5"),
+  ).toBe("/companies/1/dashboard?branch=5");
 });

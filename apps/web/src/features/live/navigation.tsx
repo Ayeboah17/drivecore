@@ -19,6 +19,7 @@ import {
 import { navigation } from "@/lib/navigation/definitions";
 import {
   can,
+  canAccessFinance,
   canAccessOperations,
   canAccessRentals,
   canAccessUserAdmin,
@@ -74,13 +75,16 @@ export function LiveNavigation({
               ? !canAccessOperations(user!)
               : item.key === "rentals"
                 ? !canAccessRentals(user!)
-                : permission !== null && !can(user!, permission);
+                : item.key === "finance"
+                  ? !canAccessFinance(user!)
+                  : permission !== null && !can(user!, permission);
         const planned =
           item.key !== "dashboard" &&
           item.key !== "operations" &&
           item.key !== "fleet" &&
           item.key !== "customers" &&
           item.key !== "rentals" &&
+          item.key !== "finance" &&
           item.key !== "administration";
         const target =
           item.key === "dashboard"
@@ -93,9 +97,11 @@ export function LiveNavigation({
                   ? "customers"
                   : item.key === "rentals"
                     ? "rentals"
-                    : item.key === "administration"
-                      ? "users"
-                      : `modules/${item.key}`;
+                    : item.key === "finance"
+                      ? "finance"
+                      : item.key === "administration"
+                        ? "users"
+                        : `modules/${item.key}`;
         const basePath = `/companies/${scope.companyId}/${target}`;
         const active =
           !restricted &&

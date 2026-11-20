@@ -280,6 +280,182 @@ export const rentalSchema = z.object({
   driver_name: z.string().nullable().optional(),
   starts_at: z.string().nullable().optional(),
   ends_at: z.string().nullable().optional(),
+  invoice_id: numericId.nullable().optional().default(null),
+});
+
+export const paymentMethods = [
+  "cash",
+  "card",
+  "bank_transfer",
+  "mobile_money",
+] as const;
+export type PaymentMethod = (typeof paymentMethods)[number];
+
+export const expenseCategories = [
+  "maintenance",
+  "fuel",
+  "insurance",
+  "tolls_parking",
+  "general",
+] as const;
+export type ExpenseCategory = (typeof expenseCategories)[number];
+
+export const arAgeingBuckets = [
+  "current",
+  "d1_30",
+  "d31_60",
+  "d61_90",
+  "d90_plus",
+] as const;
+export type ArAgeingBucketKey = (typeof arAgeingBuckets)[number];
+
+export const invoiceLineSchema = z.object({
+  id: numericId.optional(),
+  description: z.string(),
+  quantity: numericId,
+  unit_price_minor: nonNegInt,
+  line_total_minor: nonNegInt,
+});
+
+export const paymentRecordSchema = z.object({
+  id: numericId,
+  company_id: numericId,
+  branch_id: numericId,
+  invoice_id: numericId,
+  invoice_number: z.string().nullable().optional().default(null),
+  customer_name: z.string().nullable().optional().default(null),
+  recorded_by: numericId,
+  amount_minor: numericId,
+  method: z.enum(paymentMethods),
+  reference: z.string(),
+  paid_at: z.string(),
+  created_at: z.string(),
+});
+
+export const refundRecordSchema = z.object({
+  id: numericId,
+  company_id: numericId,
+  branch_id: numericId,
+  invoice_id: numericId,
+  invoice_number: z.string().nullable().optional().default(null),
+  customer_name: z.string().nullable().optional().default(null),
+  recorded_by: numericId,
+  amount_minor: numericId,
+  reason: z.string(),
+  refunded_at: z.string(),
+  created_at: z.string(),
+});
+
+export const invoiceSchema = z.object({
+  id: numericId,
+  company_id: numericId,
+  branch_id: numericId,
+  customer_id: numericId.nullable().optional().default(null),
+  customer_name: z.string().nullable().optional().default(null),
+  custom_customer_name: z.string().nullable().optional().default(null),
+  custom_customer_email: z.string().nullable().optional().default(null),
+  custom_customer_phone: z.string().nullable().optional().default(null),
+  rental_id: numericId.nullable().optional().default(null),
+  created_by: numericId,
+  invoice_number: z.string(),
+  status: z.enum(["draft", "issued", "void"]),
+  due_at: z.string(),
+  issued_at: z.string().nullable().optional().default(null),
+  voided_at: z.string().nullable().optional().default(null),
+  discount_pct: nonNegNumber.pipe(z.number().max(100)),
+  subtotal_minor: nonNegInt,
+  discount_minor: nonNegInt,
+  vat_rate_pct: nonNegNumber.pipe(z.number().max(100)),
+  vat_minor: nonNegInt,
+  total_minor: nonNegInt,
+  paid_minor: nonNegInt.optional().default(0),
+  refunded_minor: nonNegInt.optional().default(0),
+  net_paid_minor: z.coerce.number().int().optional().default(0),
+  outstanding_minor: nonNegInt.optional().default(0),
+  is_overdue: z.boolean().optional().default(false),
+  notes: z.string().nullable().optional().default(null),
+  created_at: z.string(),
+  updated_at: z.string(),
+  lines: z.array(invoiceLineSchema).optional().default([]),
+  payments: z.array(paymentRecordSchema).optional().default([]),
+  refunds: z.array(refundRecordSchema).optional().default([]),
+});
+
+export const expenseRecordSchema = z.object({
+  id: numericId,
+  company_id: numericId,
+  branch_id: numericId,
+  vehicle_id: numericId.nullable().optional().default(null),
+  vehicle_registration: z.string().nullable().optional().default(null),
+  recorded_by: numericId,
+  category: z.enum(expenseCategories),
+  description: z.string(),
+  amount_minor: numericId,
+  incurred_at: z.string(),
+  created_at: z.string(),
+});
+
+export const arAgeingBucketSchema = z.object({
+  key: z.enum(arAgeingBuckets),
+  label: z.string(),
+  count: nonNegInt,
+  amount_minor: nonNegInt,
+});
+
+export const arExposureSchema = z.object({
+  customer_id: numericId.nullable().optional().default(null),
+  customer_name: z.string(),
+  customer_type: z
+    .enum(["individual", "corporate", "custom"])
+    .optional()
+    .default("individual"),
+  outstanding_minor: nonNegInt,
+  overdue_count: nonNegInt,
+});
+
+export const arAgeingSummarySchema = z.object({
+  buckets: z.array(arAgeingBucketSchema),
+  total_outstanding_minor: nonNegInt,
+  exposures: z.array(arExposureSchema).optional().default([]),
+});
+
+export const glAccountSchema = z.object({
+  id: numericId,
+  code: z.string(),
+  name: z.string(),
+  type: z.enum(["asset", "liability", "equity", "revenue", "expense"]),
+  is_system: z.boolean().optional().default(true),
+  debit_minor: nonNegInt.optional().default(0),
+  credit_minor: nonNegInt.optional().default(0),
+  balance_minor: z.coerce.number().int().optional().default(0),
+});
+
+export const glTrialBalanceSchema = z.object({
+  accounts: z.array(glAccountSchema),
+  total_debits_minor: nonNegInt,
+  total_credits_minor: nonNegInt,
+  is_balanced: z.boolean(),
+});
+
+export const journalLineSchema = z.object({
+  id: numericId.optional(),
+  account_code: z.string(),
+  account_name: z.string(),
+  debit_minor: nonNegInt,
+  credit_minor: nonNegInt,
+});
+
+export const journalEntrySchema = z.object({
+  id: numericId,
+  company_id: numericId,
+  branch_id: numericId,
+  created_by: numericId,
+  source_type: z.enum(["invoice", "payment", "refund", "expense"]),
+  source_id: numericId,
+  reference: z.string(),
+  memo: z.string(),
+  posted_at: z.string(),
+  lines: z.array(journalLineSchema),
 });
 
 export const documentSchema = z.object({
@@ -317,6 +493,18 @@ export type QuotationVehicle = z.infer<typeof quotationVehicleSchema>;
 export type Quotation = z.infer<typeof quotationSchema>;
 export type Reservation = z.infer<typeof reservationSchema>;
 export type Rental = z.infer<typeof rentalSchema>;
+export type InvoiceLine = z.infer<typeof invoiceLineSchema>;
+export type PaymentRecord = z.infer<typeof paymentRecordSchema>;
+export type RefundRecord = z.infer<typeof refundRecordSchema>;
+export type Invoice = z.infer<typeof invoiceSchema>;
+export type ExpenseRecord = z.infer<typeof expenseRecordSchema>;
+export type ArAgeingBucket = z.infer<typeof arAgeingBucketSchema>;
+export type ArExposure = z.infer<typeof arExposureSchema>;
+export type ArAgeingSummary = z.infer<typeof arAgeingSummarySchema>;
+export type GlAccount = z.infer<typeof glAccountSchema>;
+export type GlTrialBalance = z.infer<typeof glTrialBalanceSchema>;
+export type JournalLine = z.infer<typeof journalLineSchema>;
+export type JournalEntry = z.infer<typeof journalEntrySchema>;
 export type DocumentRecord = z.infer<typeof documentSchema>;
 export type ManagedUser = z.infer<typeof managedUserSchema>;
 export type RoleDefinition = z.infer<typeof roleDefinitionSchema>;
@@ -336,6 +524,11 @@ export const canAccessOperations = (user: User) =>
   can(user, "rentals.view") ||
   can(user, "documents.view") ||
   isDriverRole(user);
+export const canAccessFinance = (user: User) =>
+  can(user, "invoices.view") ||
+  can(user, "expenses.view") ||
+  can(user, "gl.view");
+export const canViewGl = (user: User) => can(user, "gl.view");
 export const canAccessUserAdmin = (user: User, companyId: string) =>
   user.is_platform_admin ||
   (can(user, "users.view") &&

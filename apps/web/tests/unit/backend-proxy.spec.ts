@@ -32,8 +32,8 @@ test("proxy allowlist excludes tokens, deletes, arbitrary URLs and unsupported d
     "api/v1/auth/tokens",
     "https://elsewhere.test",
     "api/v1/../users",
-    "api/v1/invoices",
-    "api/v1/invoices",
+    "api/v1/work-orders",
+    "api/v1/purchase-orders",
   ])
     expect(allowedPath("GET", path)).toBe(false);
   expect(allowedPath("DELETE", "api/v1/customers/1")).toBe(false);
@@ -56,8 +56,8 @@ test("proxy allowlist excludes tokens, deletes, arbitrary URLs and unsupported d
   expect(allowedPath("PATCH", "api/v1/users/1")).toBe(true);
   expect(allowedPath("PATCH", "api/v1/vehicles/1")).toBe(true);
   const rejected = await proxy(
-    make("api/v1/invoices"),
-    "api/v1/invoices",
+    make("api/v1/work-orders"),
+    "api/v1/work-orders",
     config,
     async () => {
       throw new Error("Must not call upstream");
@@ -517,6 +517,10 @@ test("collection sorting enforces per-endpoint allowlists and valid direction pa
     "api/v1/rentals?company_id=1&sort=driver_name&dir=asc",
     "api/v1/documents?company_id=1&sort=expires_at&dir=desc",
     "api/v1/users?company_id=1&sort=is_active&dir=desc",
+    "api/v1/invoices?company_id=1&sort=total_minor&dir=desc",
+    "api/v1/payments?company_id=1&sort=paid_at&dir=desc",
+    "api/v1/refunds?company_id=1&sort=refunded_at&dir=desc",
+    "api/v1/expenses?company_id=1&sort=amount_minor&dir=desc",
   ]) {
     const [path] = valid.split("?");
     const res = await proxy(make(valid), path, config, async (url) => {
@@ -525,4 +529,58 @@ test("collection sorting enforces per-endpoint allowlists and valid direction pa
     });
     expect(res.status).toBe(200);
   }
+});
+
+test("M8 finance, AR ageing, GL, and invoice PDF routes enforce scoped queries and binary streaming", async () => {
+  for (const invalid of [
+    "api/v1/invoices",
+    "api/v1/invoices?company_id=1&status=bogus",
+    "api/v1/invoices?company_id=1&ageing_bucket=bad",
+    "api/v1/invoices/ageing",
+    "api/v1/payments?company_id=1&method=crypto",
+    "api/v1/expenses?company_id=1&category=yacht",
+    "api/v1/gl/accounts",
+    "api/v1/gl/journal-entries?company_id=1&source_type=unknown",
+    "api/v1/invoices/5/pdf?bad=1",
+  ]) {
+    const [path] = invalid.split("?");
+    const res = await proxy(make(invalid), path, config, async () => {
+      throw new Error("Must not reach upstream");
+    });
+    expect(res.status).toBe(400);
+  }
+
+  for (const valid of [
+    "api/v1/invoices?company_id=1&status=overdue&ageing_bucket=d31_60&page=1",
+    "api/v1/invoices/ageing?company_id=1&branch_id=2",
+    "api/v1/payments?company_id=1&method=mobile_money",
+    "api/v1/refunds?company_id=1",
+    "api/v1/expenses?company_id=1&category=fuel",
+    "api/v1/gl/accounts?company_id=1",
+    "api/v1/gl/journal-entries?company_id=1&source_type=invoice&account_code=1100",
+  ]) {
+    const [path] = valid.split("?");
+    const res = await proxy(make(valid), path, config, async () =>
+      Response.json({ data: {} }),
+    );
+    expect(res.status).toBe(200);
+  }
+
+  const pdfRes = await proxy(
+    make("api/v1/invoices/12/pdf?download=1"),
+    "api/v1/invoices/12/pdf",
+    config,
+    async () =>
+      new Response("%PDF-1.4\n%%EOF", {
+        status: 200,
+        headers: {
+          "Content-Type": "application/pdf",
+          "Content-Disposition": 'attachment; filename="invoice-12.pdf"',
+        },
+      }),
+  );
+  expect(pdfRes.status).toBe(200);
+  expect(pdfRes.headers.get("content-type")).toBe("application/pdf");
+  expect(pdfRes.headers.get("x-content-type-options")).toBe("nosniff");
+  expect(await pdfRes.text()).toContain("%PDF-1.4");
 });

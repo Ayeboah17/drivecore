@@ -11,10 +11,23 @@ let companySettings = new Map();
 let quotations = new Map();
 let reservations = new Map();
 let rentals = new Map();
+let invoices = new Map();
+let payments = new Map();
+let refunds = new Map();
+let expenses = new Map();
+let journalEntries = new Map();
 let documents = new Map();
 let documentBlobs = new Map();
 let control = {};
 let nextId = 20;
+const SYSTEM_GL_ACCOUNTS = [
+  { id: 1, code: "1000", name: "Cash & Bank", type: "asset", is_system: true },
+  { id: 2, code: "1100", name: "Accounts Receivable", type: "asset", is_system: true },
+  { id: 3, code: "2100", name: "VAT Payable", type: "liability", is_system: true },
+  { id: 4, code: "4000", name: "Rental Revenue", type: "revenue", is_system: true },
+  { id: 5, code: "4100", name: "Sales Refunds & Credits", type: "revenue", is_system: true },
+  { id: 6, code: "5000", name: "Fleet & Operating Expenses", type: "expense", is_system: true },
+];
 let collectionReads = 0;
 let completedWrites = 0;
 const stamp = "2026-11-15T10:00:00Z";
@@ -48,6 +61,12 @@ const ROLE_DEFS = [
       "quotations.view",
       "quotations.manage",
       "quotations.approve_discount",
+      "invoices.view",
+      "invoices.manage",
+      "payments.manage",
+      "expenses.view",
+      "expenses.manage",
+      "gl.view",
     ],
   },
   { name: "driver", permissions: ["companies.view", "branches.view"] },
@@ -63,6 +82,12 @@ const ROLE_DEFS = [
       "documents.view",
       "quotations.view",
       "quotations.approve_discount",
+      "invoices.view",
+      "invoices.manage",
+      "payments.manage",
+      "expenses.view",
+      "expenses.manage",
+      "gl.view",
     ],
   },
   {
@@ -93,6 +118,8 @@ const ROLE_DEFS = [
       "reservations.view",
       "rentals.view",
       "documents.view",
+      "invoices.view",
+      "expenses.view",
     ],
   },
 ];
@@ -123,6 +150,11 @@ function reset() {
     ],
   ]);
   quotations = new Map();
+  invoices = new Map();
+  payments = new Map();
+  refunds = new Map();
+  expenses = new Map();
+  journalEntries = new Map();
   branches = new Map([
     [2, { id: 2, company_id: 1, name: "Synthetic branch" }],
     [4, { id: 4, company_id: 3, name: "Other branch" }],
@@ -435,6 +467,9 @@ function decorateRental(rentalRecord) {
   const driver = rentalRecord.driver_user_id
     ? managedUsers.get(rentalRecord.driver_user_id)
     : null;
+  const linkedInvoice = [...invoices.values()].find(
+    (inv) => inv.rental_id === rentalRecord.id,
+  );
   return {
     ...rentalRecord,
     odometer_unit: "km",
@@ -445,6 +480,119 @@ function decorateRental(rentalRecord) {
     driver_name: driver?.name ?? null,
     starts_at: resRecord?.starts_at ?? null,
     ends_at: resRecord?.ends_at ?? null,
+    invoice_id: linkedInvoice?.id ?? null,
+  };
+}
+
+function postJournalEntry({
+  companyId,
+  branchId,
+  createdBy,
+  sourceType,
+  sourceId,
+  reference,
+  memo,
+  lines,
+}) {
+  const cleanLines = lines
+    .filter((l) => (l.debit_minor ?? 0) > 0 || (l.credit_minor ?? 0) > 0)
+    .map((l, idx) => {
+      const acc = SYSTEM_GL_ACCOUNTS.find((a) => a.code === l.account_code);
+      return {
+        id: nextId + idx,
+        account_code: l.account_code,
+        account_name: acc?.name ?? l.account_code,
+        debit_minor: l.debit_minor ?? 0,
+        credit_minor: l.credit_minor ?? 0,
+      };
+    });
+  if (cleanLines.length === 0) return null;
+  const id = nextId++;
+  const entry = {
+    id,
+    company_id: companyId,
+    branch_id: branchId,
+    created_by: createdBy,
+    source_type: sourceType,
+    source_id: sourceId,
+    reference,
+    memo,
+    posted_at: new Date().toISOString(),
+    lines: cleanLines,
+  };
+  journalEntries.set(id, entry);
+  return entry;
+}
+
+function computeInvoiceTotals(lines, discountPct, vatRatePct) {
+  const normalizedLines = lines.map((line, idx) => {
+    const qty = Math.max(1, Math.floor(Number(line.quantity)));
+    const unit = Math.max(0, Math.round(Number(line.unit_price_minor)));
+    return {
+      id: idx + 1,
+      description: String(line.description).trim(),
+      quantity: qty,
+      unit_price_minor: unit,
+      line_total_minor: qty * unit,
+    };
+  });
+  const subtotal_minor = normalizedLines.reduce(
+    (sum, l) => sum + l.line_total_minor,
+    0,
+  );
+  const discount_minor = Math.round(subtotal_minor * (discountPct / 100));
+  const taxable = Math.max(0, subtotal_minor - discount_minor);
+  const vat_minor = Math.round(taxable * (vatRatePct / 100));
+  const total_minor = taxable + vat_minor;
+  return {
+    lines: normalizedLines,
+    subtotal_minor,
+    discount_minor,
+    vat_minor,
+    total_minor,
+  };
+}
+
+function decorateInvoice(inv) {
+  const cust = inv.customer_id ? customers.get(inv.customer_id) : null;
+  const resolvedName = cust?.name ?? inv.custom_customer_name ?? null;
+  const invPayments = [...payments.values()]
+    .filter((p) => p.invoice_id === inv.id)
+    .map((p) => ({
+      ...p,
+      invoice_number: inv.invoice_number,
+      customer_name: resolvedName,
+    }));
+  const invRefunds = [...refunds.values()]
+    .filter((r) => r.invoice_id === inv.id)
+    .map((r) => ({
+      ...r,
+      invoice_number: inv.invoice_number,
+      customer_name: resolvedName,
+    }));
+  const paid_minor = invPayments.reduce((s, p) => s + p.amount_minor, 0);
+  const refunded_minor = invRefunds.reduce((s, r) => s + r.amount_minor, 0);
+  const net_paid_minor = paid_minor - refunded_minor;
+  const outstanding_minor =
+    inv.status === "issued" ? Math.max(0, inv.total_minor - paid_minor) : 0;
+  const is_overdue =
+    inv.status === "issued" &&
+    outstanding_minor > 0 &&
+    Date.parse(inv.due_at) < Date.now();
+  return {
+    ...inv,
+    customer_id: inv.customer_id ?? null,
+    customer_name: resolvedName,
+    custom_customer_name: inv.custom_customer_name ?? null,
+    custom_customer_email: inv.custom_customer_email ?? null,
+    custom_customer_phone: inv.custom_customer_phone ?? null,
+    paid_minor,
+    refunded_minor,
+    net_paid_minor,
+    outstanding_minor,
+    is_overdue,
+    payments: invPayments,
+    refunds: invRefunds,
   };
 }
 
@@ -622,6 +770,12 @@ createServer(async (req, res) => {
               "reservations.view",
               "rentals.view",
               "documents.view",
+              "invoices.view",
+              "invoices.manage",
+              "payments.manage",
+              "expenses.view",
+              "expenses.manage",
+              "gl.view",
             ]
         : role === "viewer"
           ? [
@@ -632,6 +786,8 @@ createServer(async (req, res) => {
               "reservations.view",
               "rentals.view",
               "documents.view",
+              "invoices.view",
+              "expenses.view",
             ]
           : [
               "customers.view",
@@ -655,6 +811,12 @@ createServer(async (req, res) => {
                     "users.manage",
                     "settings.manage",
                     "quotations.approve_discount",
+                    "invoices.view",
+                    "invoices.manage",
+                    "payments.manage",
+                    "expenses.view",
+                    "expenses.manage",
+                    "gl.view",
                   ]
                 : []),
             ];
@@ -1139,7 +1301,7 @@ createServer(async (req, res) => {
   }
 
   const pdfMatch = url.pathname.match(
-    /^\/api\/v1\/(quotations|reservations|rentals)\/(\d+)\/pdf$/,
+    /^\/api\/v1\/(quotations|reservations|rentals|invoices)\/(\d+)\/pdf$/,
   );
   if (pdfMatch && req.method === "GET") {
     const domain = pdfMatch[1];
@@ -1435,6 +1597,765 @@ createServer(async (req, res) => {
       return;
     }
     fail(404);
+    return;
+  }
+
+  // --- M8 Live Finance, Invoicing, Payments, Refunds, Expenses & GL ---
+  if (url.pathname === "/api/v1/invoices/ageing" && req.method === "GET") {
+    if (!user.is_platform_admin && !user.permissions.includes("invoices.view")) {
+      fail(403);
+      return;
+    }
+    const companyId = Number(url.searchParams.get("company_id"));
+    const branchId = url.searchParams.get("branch_id")
+      ? Number(url.searchParams.get("branch_id"))
+      : null;
+    const buckets = [
+      { key: "current", label: "Current", count: 0, amount_minor: 0 },
+      { key: "d1_30", label: "1–30 Days", count: 0, amount_minor: 0 },
+      { key: "d31_60", label: "31–60 Days", count: 0, amount_minor: 0 },
+      { key: "d61_90", label: "61–90 Days", count: 0, amount_minor: 0 },
+      { key: "d90_plus", label: "90+ Days", count: 0, amount_minor: 0 },
+    ];
+    let totalOutstanding = 0;
+    const byCust = new Map();
+    const nowMs = Date.now();
+    for (const rawInv of invoices.values()) {
+      if (rawInv.company_id !== companyId) continue;
+      if (branchId !== null && rawInv.branch_id !== branchId) continue;
+      const inv = decorateInvoice(rawInv);
+      if (inv.status !== "issued" || inv.outstanding_minor <= 0) continue;
+      const daysPastDue = Math.floor((nowMs - Date.parse(inv.due_at)) / 86_400_000);
+      const idx =
+        daysPastDue > 90
+          ? 4
+          : daysPastDue > 60
+            ? 3
+            : daysPastDue > 30
+              ? 2
+              : daysPastDue > 0
+                ? 1
+                : 0;
+      buckets[idx].count += 1;
+      buckets[idx].amount_minor += inv.outstanding_minor;
+      totalOutstanding += inv.outstanding_minor;
+      const expKey =
+        inv.customer_id !== null
+          ? `crm:${inv.customer_id}`
+          : `custom:${inv.customer_name ?? "Custom"}`;
+      const cur = byCust.get(expKey) ?? {
+        customer_id: inv.customer_id,
+        customer_name:
+          inv.customer_name ??
+          (inv.customer_id ? `Customer #${inv.customer_id}` : "Custom customer"),
+        customer_type:
+          inv.customer_id !== null
+            ? (customers.get(inv.customer_id)?.type ?? "individual")
+            : "custom",
+        outstanding_minor: 0,
+        overdue_count: 0,
+      };
+      cur.outstanding_minor += inv.outstanding_minor;
+      if (daysPastDue > 0) cur.overdue_count += 1;
+      byCust.set(expKey, cur);
+    }
+    json(200, {
+      data: {
+        buckets,
+        total_outstanding_minor: totalOutstanding,
+        exposures: [...byCust.values()].sort(
+          (a, b) => b.outstanding_minor - a.outstanding_minor,
+        ),
+      },
+    });
+    return;
+  }
+
+  const invoiceMatch = url.pathname.match(
+    /^\/api\/v1\/invoices(?:\/(\d+)(?:\/(issue|void|payments|refunds))?)?$/,
+  );
+  if (invoiceMatch) {
+    const invoiceId = invoiceMatch[1] ? Number(invoiceMatch[1]) : null;
+    const action = invoiceMatch[2] ?? null;
+
+    if (req.method === "GET" && !invoiceId) {
+      if (!user.is_platform_admin && !user.permissions.includes("invoices.view")) {
+        fail(403);
+        return;
+      }
+      const companyId = Number(url.searchParams.get("company_id"));
+      const branchId = url.searchParams.get("branch_id")
+        ? Number(url.searchParams.get("branch_id"))
+        : null;
+      const statusFilter = url.searchParams.get("status");
+      const customerFilter = url.searchParams.get("customer_id")
+        ? Number(url.searchParams.get("customer_id"))
+        : null;
+      const rentalFilter = url.searchParams.get("rental_id")
+        ? Number(url.searchParams.get("rental_id"))
+        : null;
+      const bucketFilter = url.searchParams.get("ageing_bucket");
+      const q = (url.searchParams.get("q") ?? "").trim().toLowerCase();
+      const nowMs = Date.now();
+      const items = [...invoices.values()]
+        .map(decorateInvoice)
+        .filter((inv) => {
+          if (inv.company_id !== companyId) return false;
+          if (branchId !== null && inv.branch_id !== branchId) return false;
+          if (customerFilter !== null && inv.customer_id !== customerFilter)
+            return false;
+          if (rentalFilter !== null && inv.rental_id !== rentalFilter)
+            return false;
+          if (statusFilter) {
+            const disp =
+              inv.status === "void"
+                ? "void"
+                : inv.status === "draft"
+                  ? "draft"
+                  : inv.outstanding_minor === 0 && inv.paid_minor > 0
+                    ? "paid"
+                    : inv.is_overdue
+                      ? "overdue"
+                      : "issued";
+            if (statusFilter === "issued") {
+              if (inv.status !== "issued") return false;
+            } else if (disp !== statusFilter) {
+              return false;
+            }
+          }
+          if (bucketFilter) {
+            if (inv.status !== "issued" || inv.outstanding_minor <= 0)
+              return false;
+            const daysPastDue = Math.floor(
+              (nowMs - Date.parse(inv.due_at)) / 86_400_000,
+            );
+            const bKey =
+              daysPastDue > 90
+                ? "d90_plus"
+                : daysPastDue > 60
+                  ? "d61_90"
+                  : daysPastDue > 30
+                    ? "d31_60"
+                    : daysPastDue > 0
+                      ? "d1_30"
+                      : "current";
+            if (bKey !== bucketFilter) return false;
+          }
+          if (
+            q &&
+            ![
+              inv.invoice_number,
+              inv.customer_name ?? "",
+              inv.notes ?? "",
+            ].some((s) => s.toLowerCase().includes(q))
+          ) {
+            return false;
+          }
+          return true;
+        });
+      paginateSlice(
+        sortItems(items, {
+          id: (inv) => inv.id,
+          customer_name: (inv) => inv.customer_name,
+          due_at: (inv) => inv.due_at,
+          total_minor: (inv) => inv.total_minor,
+          outstanding_minor: (inv) => inv.outstanding_minor,
+          status: (inv) => inv.status,
+          created_at: (inv) => inv.created_at,
+        }),
+      );
+      return;
+    }
+
+    if (req.method === "GET" && invoiceId && !action) {
+      if (!user.is_platform_admin && !user.permissions.includes("invoices.view")) {
+        fail(403);
+        return;
+      }
+      const inv = invoices.get(invoiceId);
+      if (!inv) fail(404);
+      else json(200, { data: decorateInvoice(inv) });
+      return;
+    }
+
+    if (req.method === "POST" && !invoiceId) {
+      if (
+        !user.is_platform_admin &&
+        !user.permissions.includes("invoices.manage")
+      ) {
+        fail(403);
+        return;
+      }
+      const companyId = Number(input.company_id);
+      const branchId = Number(input.branch_id);
+      const hasCustomerId =
+        input.customer_id !== undefined && input.customer_id !== null;
+      const customName = String(input.custom_customer_name ?? "").trim();
+      if ((hasCustomerId && customName) || (!hasCustomerId && !customName)) {
+        fail(422, {
+          custom_customer_name: [
+            "Provide either an existing customer or a custom customer name.",
+          ],
+        });
+        return;
+      }
+      const customerId = hasCustomerId ? Number(input.customer_id) : null;
+      const rawLines = Array.isArray(input.lines) ? input.lines : [];
+      if (rawLines.length === 0) {
+        fail(422, { lines: ["At least one line item is required."] });
+        return;
+      }
+      const settings = companySettings.get(companyId) ?? { vat_rate_pct: 15 };
+      const discountPct = Number(input.discount_pct ?? 0);
+      const totals = computeInvoiceTotals(
+        rawLines,
+        discountPct,
+        settings.vat_rate_pct,
+      );
+      const id = nextId++;
+      const created = {
+        id,
+        company_id: companyId,
+        branch_id: branchId,
+        customer_id: customerId,
+        custom_customer_name: customerId === null ? customName : null,
+        custom_customer_email:
+          customerId === null && input.custom_customer_email
+            ? String(input.custom_customer_email).trim()
+            : null,
+        custom_customer_phone:
+          customerId === null && input.custom_customer_phone
+            ? String(input.custom_customer_phone).trim()
+            : null,
+        rental_id: null,
+        created_by: user.id,
+        invoice_number: `INV-${String(id).padStart(5, "0")}`,
+        status: "draft",
+        due_at: input.due_at || new Date(Date.now() + 14 * 86_400_000).toISOString(),
+        issued_at: null,
+        voided_at: null,
+        discount_pct: discountPct,
+        vat_rate_pct: settings.vat_rate_pct,
+        ...totals,
+        notes: input.notes ? String(input.notes) : null,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      };
+      invoices.set(id, created);
+      completedWrites++;
+      json(201, { data: decorateInvoice(created) });
+      return;
+    }
+
+    if (req.method === "PATCH" && invoiceId && !action) {
+      if (
+        !user.is_platform_admin &&
+        !user.permissions.includes("invoices.manage")
+      ) {
+        fail(403);
+        return;
+      }
+      const inv = invoices.get(invoiceId);
+      if (!inv) {
+        fail(404);
+        return;
+      }
+      if (inv.status !== "draft") {
+        fail(409);
+        return;
+      }
+      const rawLines = Array.isArray(input.lines) ? input.lines : inv.lines;
+      if (rawLines.length === 0) {
+        fail(422, { lines: ["At least one line item is required."] });
+        return;
+      }
+      const discountPct =
+        input.discount_pct !== undefined
+          ? Number(input.discount_pct)
+          : inv.discount_pct;
+      const totals = computeInvoiceTotals(rawLines, discountPct, inv.vat_rate_pct);
+      Object.assign(inv, totals, {
+        discount_pct: discountPct,
+        due_at: input.due_at || inv.due_at,
+        ...(inv.customer_id === null && input.custom_customer_name !== undefined
+          ? {
+              custom_customer_name: String(input.custom_customer_name).trim(),
+              custom_customer_email: input.custom_customer_email
+                ? String(input.custom_customer_email).trim()
+                : null,
+              custom_customer_phone: input.custom_customer_phone
+                ? String(input.custom_customer_phone).trim()
+                : null,
+            }
+          : {}),
+        notes:
+          input.notes !== undefined
+            ? input.notes
+              ? String(input.notes)
+              : null
+            : inv.notes,
+        updated_at: new Date().toISOString(),
+      });
+      completedWrites++;
+      json(200, { data: decorateInvoice(inv) });
+      return;
+    }
+
+    if (req.method === "POST" && invoiceId && action === "issue") {
+      if (
+        !user.is_platform_admin &&
+        !user.permissions.includes("invoices.manage")
+      ) {
+        fail(403);
+        return;
+      }
+      const inv = invoices.get(invoiceId);
+      if (!inv) {
+        fail(404);
+        return;
+      }
+      if (inv.status !== "draft") {
+        fail(409);
+        return;
+      }
+      if (inv.total_minor <= 0) {
+        fail(422, { lines: ["Invoice total must be greater than zero to issue."] });
+        return;
+      }
+      inv.status = "issued";
+      inv.issued_at = new Date().toISOString();
+      inv.updated_at = inv.issued_at;
+      postJournalEntry({
+        companyId: inv.company_id,
+        branchId: inv.branch_id,
+        createdBy: user.id,
+        sourceType: "invoice",
+        sourceId: inv.id,
+        reference: inv.invoice_number,
+        memo: `Issued invoice ${inv.invoice_number}`,
+        lines: [
+          { account_code: "1100", debit_minor: inv.total_minor, credit_minor: 0 },
+          {
+            account_code: "4000",
+            debit_minor: 0,
+            credit_minor: inv.total_minor - inv.vat_minor,
+          },
+          { account_code: "2100", debit_minor: 0, credit_minor: inv.vat_minor },
+        ],
+      });
+      completedWrites++;
+      json(200, { data: decorateInvoice(inv) });
+      return;
+    }
+
+    if (req.method === "POST" && invoiceId && action === "void") {
+      if (
+        !user.is_platform_admin &&
+        !user.permissions.includes("invoices.manage")
+      ) {
+        fail(403);
+        return;
+      }
+      const inv = invoices.get(invoiceId);
+      if (!inv) {
+        fail(404);
+        return;
+      }
+      const dec = decorateInvoice(inv);
+      if (inv.status === "void" || dec.paid_minor > 0) {
+        fail(409);
+        return;
+      }
+      const wasIssued = inv.status === "issued";
+      inv.status = "void";
+      inv.voided_at = new Date().toISOString();
+      inv.updated_at = inv.voided_at;
+      if (wasIssued) {
+        postJournalEntry({
+          companyId: inv.company_id,
+          branchId: inv.branch_id,
+          createdBy: user.id,
+          sourceType: "invoice",
+          sourceId: inv.id,
+          reference: `${inv.invoice_number} (VOID)`,
+          memo: `Voided issued invoice ${inv.invoice_number}`,
+          lines: [
+            {
+              account_code: "4000",
+              debit_minor: inv.total_minor - inv.vat_minor,
+              credit_minor: 0,
+            },
+            { account_code: "2100", debit_minor: inv.vat_minor, credit_minor: 0 },
+            { account_code: "1100", debit_minor: 0, credit_minor: inv.total_minor },
+          ],
+        });
+      }
+      completedWrites++;
+      json(200, { data: decorateInvoice(inv) });
+      return;
+    }
+
+    if (req.method === "POST" && invoiceId && action === "payments") {
+      if (
+        !user.is_platform_admin &&
+        !user.permissions.includes("payments.manage")
+      ) {
+        fail(403);
+        return;
+      }
+      const inv = invoices.get(invoiceId);
+      if (!inv) {
+        fail(404);
+        return;
+      }
+      if (inv.status !== "issued") {
+        fail(409);
+        return;
+      }
+      const dec = decorateInvoice(inv);
+      const amountMinor = Number(input.amount_minor);
+      if (
+        !Number.isInteger(amountMinor) ||
+        amountMinor <= 0 ||
+        amountMinor > dec.outstanding_minor
+      ) {
+        fail(422, {
+          amount_minor: [
+            "Payment amount must be positive and cannot exceed the outstanding balance.",
+          ],
+        });
+        return;
+      }
+      const id = nextId++;
+      const created = {
+        id,
+        company_id: inv.company_id,
+        branch_id: inv.branch_id,
+        invoice_id: inv.id,
+        invoice_number: inv.invoice_number,
+        customer_name: dec.customer_name,
+        recorded_by: user.id,
+        amount_minor: amountMinor,
+        method: input.method || "bank_transfer",
+        reference: String(input.reference || `RCPT-${id}`),
+        paid_at: input.paid_at || new Date().toISOString(),
+        created_at: new Date().toISOString(),
+      };
+      payments.set(id, created);
+      postJournalEntry({
+        companyId: inv.company_id,
+        branchId: inv.branch_id,
+        createdBy: user.id,
+        sourceType: "payment",
+        sourceId: id,
+        reference: created.reference,
+        memo: `Payment on ${inv.invoice_number}`,
+        lines: [
+          { account_code: "1000", debit_minor: amountMinor, credit_minor: 0 },
+          { account_code: "1100", debit_minor: 0, credit_minor: amountMinor },
+        ],
+      });
+      completedWrites++;
+      json(201, { data: created });
+      return;
+    }
+
+    if (req.method === "POST" && invoiceId && action === "refunds") {
+      if (
+        !user.is_platform_admin &&
+        !user.permissions.includes("payments.manage")
+      ) {
+        fail(403);
+        return;
+      }
+      const inv = invoices.get(invoiceId);
+      if (!inv) {
+        fail(404);
+        return;
+      }
+      if (inv.status !== "issued") {
+        fail(409);
+        return;
+      }
+      const dec = decorateInvoice(inv);
+      const amountMinor = Number(input.amount_minor);
+      if (
+        !Number.isInteger(amountMinor) ||
+        amountMinor <= 0 ||
+        amountMinor > dec.net_paid_minor
+      ) {
+        fail(422, {
+          amount_minor: [
+            "Refund amount must be positive and cannot exceed net recorded payments.",
+          ],
+        });
+        return;
+      }
+      if (!String(input.reason ?? "").trim()) {
+        fail(422, { reason: ["A refund reason is required."] });
+        return;
+      }
+      const id = nextId++;
+      const created = {
+        id,
+        company_id: inv.company_id,
+        branch_id: inv.branch_id,
+        invoice_id: inv.id,
+        invoice_number: inv.invoice_number,
+        customer_name: dec.customer_name,
+        recorded_by: user.id,
+        amount_minor: amountMinor,
+        reason: String(input.reason).trim(),
+        refunded_at: input.refunded_at || new Date().toISOString(),
+        created_at: new Date().toISOString(),
+      };
+      refunds.set(id, created);
+      postJournalEntry({
+        companyId: inv.company_id,
+        branchId: inv.branch_id,
+        createdBy: user.id,
+        sourceType: "refund",
+        sourceId: id,
+        reference: `REF-${id} (${inv.invoice_number})`,
+        memo: `Refund on ${inv.invoice_number}: ${created.reason}`,
+        lines: [
+          { account_code: "4100", debit_minor: amountMinor, credit_minor: 0 },
+          { account_code: "1000", debit_minor: 0, credit_minor: amountMinor },
+        ],
+      });
+      completedWrites++;
+      json(201, { data: created });
+      return;
+    }
+
+    fail(404);
+    return;
+  }
+
+  if (url.pathname === "/api/v1/payments" && req.method === "GET") {
+    if (!user.is_platform_admin && !user.permissions.includes("invoices.view")) {
+      fail(403);
+      return;
+    }
+    const companyId = Number(url.searchParams.get("company_id"));
+    const branchId = url.searchParams.get("branch_id")
+      ? Number(url.searchParams.get("branch_id"))
+      : null;
+    const methodFilter = url.searchParams.get("method");
+    const q = (url.searchParams.get("q") ?? "").trim().toLowerCase();
+    const items = [...payments.values()].filter((p) => {
+      if (p.company_id !== companyId) return false;
+      if (branchId !== null && p.branch_id !== branchId) return false;
+      if (methodFilter && p.method !== methodFilter) return false;
+      if (
+        q &&
+        ![p.reference, p.invoice_number ?? "", p.customer_name ?? ""].some((s) =>
+          s.toLowerCase().includes(q),
+        )
+      )
+        return false;
+      return true;
+    });
+    paginateSlice(
+      sortItems(items, {
+        id: (p) => p.id,
+        paid_at: (p) => p.paid_at,
+        amount_minor: (p) => p.amount_minor,
+        method: (p) => p.method,
+      }),
+    );
+    return;
+  }
+
+  if (url.pathname === "/api/v1/refunds" && req.method === "GET") {
+    if (!user.is_platform_admin && !user.permissions.includes("invoices.view")) {
+      fail(403);
+      return;
+    }
+    const companyId = Number(url.searchParams.get("company_id"));
+    const branchId = url.searchParams.get("branch_id")
+      ? Number(url.searchParams.get("branch_id"))
+      : null;
+    const q = (url.searchParams.get("q") ?? "").trim().toLowerCase();
+    const items = [...refunds.values()].filter((r) => {
+      if (r.company_id !== companyId) return false;
+      if (branchId !== null && r.branch_id !== branchId) return false;
+      if (
+        q &&
+        ![r.reason, r.invoice_number ?? "", r.customer_name ?? ""].some((s) =>
+          s.toLowerCase().includes(q),
+        )
+      )
+        return false;
+      return true;
+    });
+    paginateSlice(
+      sortItems(items, {
+        id: (r) => r.id,
+        refunded_at: (r) => r.refunded_at,
+        amount_minor: (r) => r.amount_minor,
+      }),
+    );
+    return;
+  }
+
+  if (url.pathname === "/api/v1/expenses") {
+    if (req.method === "GET") {
+      if (!user.is_platform_admin && !user.permissions.includes("expenses.view")) {
+        fail(403);
+        return;
+      }
+      const companyId = Number(url.searchParams.get("company_id"));
+      const branchId = url.searchParams.get("branch_id")
+        ? Number(url.searchParams.get("branch_id"))
+        : null;
+      const categoryFilter = url.searchParams.get("category");
+      const q = (url.searchParams.get("q") ?? "").trim().toLowerCase();
+      const items = [...expenses.values()].filter((e) => {
+        if (e.company_id !== companyId) return false;
+        if (branchId !== null && e.branch_id !== branchId) return false;
+        if (categoryFilter && e.category !== categoryFilter) return false;
+        if (
+          q &&
+          ![e.description, e.vehicle_registration ?? ""].some((s) =>
+            s.toLowerCase().includes(q),
+          )
+        )
+          return false;
+        return true;
+      });
+      paginateSlice(
+        sortItems(items, {
+          id: (e) => e.id,
+          incurred_at: (e) => e.incurred_at,
+          description: (e) => e.description,
+          category: (e) => e.category,
+          amount_minor: (e) => e.amount_minor,
+        }),
+      );
+      return;
+    }
+    if (req.method === "POST") {
+      if (
+        !user.is_platform_admin &&
+        !user.permissions.includes("expenses.manage")
+      ) {
+        fail(403);
+        return;
+      }
+      const amountMinor = Number(input.amount_minor);
+      if (!Number.isInteger(amountMinor) || amountMinor <= 0) {
+        fail(422, { amount_minor: ["Expense amount must be greater than zero."] });
+        return;
+      }
+      const vehicle = input.vehicle_id ? vehicles.get(Number(input.vehicle_id)) : null;
+      const id = nextId++;
+      const created = {
+        id,
+        company_id: Number(input.company_id),
+        branch_id: Number(input.branch_id),
+        vehicle_id: vehicle?.id ?? null,
+        vehicle_registration: vehicle?.registration ?? null,
+        recorded_by: user.id,
+        category: input.category || "general",
+        description: String(input.description ?? "").trim(),
+        amount_minor: amountMinor,
+        incurred_at: input.incurred_at || new Date().toISOString(),
+        created_at: new Date().toISOString(),
+      };
+      expenses.set(id, created);
+      postJournalEntry({
+        companyId: created.company_id,
+        branchId: created.branch_id,
+        createdBy: user.id,
+        sourceType: "expense",
+        sourceId: id,
+        reference: `EXP-${id}`,
+        memo: `${created.category}: ${created.description}`,
+        lines: [
+          { account_code: "5000", debit_minor: amountMinor, credit_minor: 0 },
+          { account_code: "1000", debit_minor: 0, credit_minor: amountMinor },
+        ],
+      });
+      completedWrites++;
+      json(201, { data: created });
+      return;
+    }
+  }
+
+  if (url.pathname === "/api/v1/gl/accounts" && req.method === "GET") {
+    if (!user.is_platform_admin && !user.permissions.includes("gl.view")) {
+      fail(403);
+      return;
+    }
+    const companyId = Number(url.searchParams.get("company_id"));
+    const branchId = url.searchParams.get("branch_id")
+      ? Number(url.searchParams.get("branch_id"))
+      : null;
+    const totals = new Map(
+      SYSTEM_GL_ACCOUNTS.map((a) => [a.code, { debit: 0, credit: 0 }]),
+    );
+    let totalDebits = 0;
+    let totalCredits = 0;
+    for (const entry of journalEntries.values()) {
+      if (entry.company_id !== companyId) continue;
+      if (branchId !== null && entry.branch_id !== branchId) continue;
+      for (const line of entry.lines) {
+        const cur = totals.get(line.account_code) ?? { debit: 0, credit: 0 };
+        cur.debit += line.debit_minor;
+        cur.credit += line.credit_minor;
+        totals.set(line.account_code, cur);
+        totalDebits += line.debit_minor;
+        totalCredits += line.credit_minor;
+      }
+    }
+    json(200, {
+      data: {
+        accounts: SYSTEM_GL_ACCOUNTS.map((a) => {
+          const t = totals.get(a.code) ?? { debit: 0, credit: 0 };
+          return {
+            ...a,
+            debit_minor: t.debit,
+            credit_minor: t.credit,
+            balance_minor: t.debit - t.credit,
+          };
+        }),
+        total_debits_minor: totalDebits,
+        total_credits_minor: totalCredits,
+        is_balanced: totalDebits === totalCredits,
+      },
+    });
+    return;
+  }
+
+  if (url.pathname === "/api/v1/gl/journal-entries" && req.method === "GET") {
+    if (!user.is_platform_admin && !user.permissions.includes("gl.view")) {
+      fail(403);
+      return;
+    }
+    const companyId = Number(url.searchParams.get("company_id"));
+    const branchId = url.searchParams.get("branch_id")
+      ? Number(url.searchParams.get("branch_id"))
+      : null;
+    const accountCode = url.searchParams.get("account_code");
+    const sourceType = url.searchParams.get("source_type");
+    const q = (url.searchParams.get("q") ?? "").trim().toLowerCase();
+    const items = [...journalEntries.values()]
+      .filter((e) => {
+        if (e.company_id !== companyId) return false;
+        if (branchId !== null && e.branch_id !== branchId) return false;
+        if (sourceType && e.source_type !== sourceType) return false;
+        if (accountCode && !e.lines.some((l) => l.account_code === accountCode))
+          return false;
+        if (
+          q &&
+          ![e.reference, e.memo].some((s) => s.toLowerCase().includes(q))
+        )
+          return false;
+        return true;
+      })
+      .sort((a, b) => b.id - a.id);
+    paginateSlice(items);
     return;
   }
 
@@ -1755,6 +2676,67 @@ createServer(async (req, res) => {
             vehicle.odometer = Number(input.odometer);
           }
           if (resRec) resRec.status = "completed";
+          // Auto-create draft invoice on return carrying quotation discount/VAT or vehicle rate
+          const settings = companySettings.get(rec.company_id) ?? {
+            vat_rate_pct: 15,
+          };
+          const linkedQuote = [...quotations.values()].find((q) =>
+            q.reservation_ids.includes(rec.reservation_id),
+          );
+          const quoteVeh = linkedQuote?.vehicles.find(
+            (v) => v.vehicle_id === rec.vehicle_id,
+          );
+          const rentalDays = resRec
+            ? Math.max(
+                1,
+                Math.ceil(
+                  (Date.parse(resRec.ends_at) - Date.parse(resRec.starts_at)) /
+                    86_400_000,
+                ),
+              )
+            : 1;
+          const unitRate =
+            quoteVeh?.daily_rate_minor ?? vehicle?.daily_rate_minor ?? 0;
+          const invLines = [
+            {
+              description: `Rental #${rec.id} (${vehicle?.registration ?? `Vehicle #${rec.vehicle_id}`})`,
+              quantity: rentalDays,
+              unit_price_minor: unitRate,
+            },
+          ];
+          const extraMinor = Number(input.extra_charge_minor ?? 0);
+          if (extraMinor > 0) {
+            invLines.push({
+              description:
+                String(input.extra_charge_description ?? "").trim() ||
+                "Additional return charge",
+              quantity: 1,
+              unit_price_minor: extraMinor,
+            });
+          }
+          const discountPct = linkedQuote?.discount_pct ?? 0;
+          const vatRatePct = linkedQuote?.vat_rate_pct ?? settings.vat_rate_pct;
+          const totals = computeInvoiceTotals(invLines, discountPct, vatRatePct);
+          const invId = nextId++;
+          invoices.set(invId, {
+            id: invId,
+            company_id: rec.company_id,
+            branch_id: rec.branch_id,
+            customer_id: resRec?.customer_id ?? 10,
+            rental_id: rec.id,
+            created_by: user.id,
+            invoice_number: `INV-${String(invId).padStart(5, "0")}`,
+            status: "draft",
+            due_at: new Date(Date.now() + 14 * 86_400_000).toISOString(),
+            issued_at: null,
+            voided_at: null,
+            discount_pct: discountPct,
+            vat_rate_pct: vatRatePct,
+            ...totals,
+            notes: null,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          });
         }
         completedWrites++;
         json(200, { data: decorateRental(rec) });

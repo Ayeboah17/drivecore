@@ -26,6 +26,7 @@ import {
   can,
   canAccessUserAdmin,
   canManageUsers,
+  parseMajorToMinor,
   type Customer,
   type Rental,
   type Reservation,
@@ -1413,6 +1414,8 @@ function HandoverReturnForm({
     "available" | "maintenance" | "damaged"
   >("available");
   const [notes, setNotes] = useState("");
+  const [extraCharge, setExtraCharge] = useState("");
+  const [extraChargeDesc, setExtraChargeDesc] = useState("");
   const [timing, setTiming] = useState(() =>
     evaluateTransitionTiming(mode, scheduledAt),
   );
@@ -1449,6 +1452,27 @@ function HandoverReturnForm({
       );
       return;
     }
+    let extraMinor: number | undefined;
+    if (mode === "return" && extraCharge.trim()) {
+      const parsed = parseMajorToMinor(extraCharge);
+      if (parsed === null || parsed < 0) {
+        setError(
+          new Error("Enter a valid additional return charge (e.g. 150.00)."),
+        );
+        return;
+      }
+      if (parsed > 0) {
+        if (!extraChargeDesc.trim()) {
+          setError(
+            new Error(
+              "Describe the additional return charge before continuing.",
+            ),
+          );
+          return;
+        }
+        extraMinor = parsed;
+      }
+    }
     lock.current = true;
     setBusy(true);
     onBusyChange(true);
@@ -1462,6 +1486,12 @@ function HandoverReturnForm({
           odometer: Number(odometer.trim()),
           notes: notes.trim(),
           ...(mode === "return" ? { vehicle_status: vehicleStatus } : {}),
+          ...(extraMinor && extraMinor > 0
+            ? {
+                extra_charge_minor: extraMinor,
+                extra_charge_description: extraChargeDesc.trim(),
+              }
+            : {}),
         },
         controller.current.signal,
       );
@@ -1575,6 +1605,46 @@ function HandoverReturnForm({
             onChange={(e) => setNotes(e.target.value)}
           />
         </div>
+
+        {mode === "return" ? (
+          <div className="space-y-3 rounded-xl border border-border/80 bg-muted/25 p-3.5">
+            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              Additional return charge (optional)
+            </p>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="space-y-1">
+                <label
+                  htmlFor={`${formId}-extra-charge`}
+                  className="text-xs font-medium"
+                >
+                  Extra charge amount
+                </label>
+                <Input
+                  id={`${formId}-extra-charge`}
+                  inputMode="decimal"
+                  placeholder="0.00"
+                  value={extraCharge}
+                  onChange={(e) => setExtraCharge(e.target.value)}
+                />
+              </div>
+              <div className="space-y-1">
+                <label
+                  htmlFor={`${formId}-extra-desc`}
+                  className="text-xs font-medium"
+                >
+                  Charge description
+                </label>
+                <Input
+                  id={`${formId}-extra-desc`}
+                  maxLength={255}
+                  placeholder="e.g. Fuel refill, cleaning"
+                  value={extraChargeDesc}
+                  onChange={(e) => setExtraChargeDesc(e.target.value)}
+                />
+              </div>
+            </div>
+          </div>
+        ) : null}
       </fieldset>
 
       <FormErrorBanner

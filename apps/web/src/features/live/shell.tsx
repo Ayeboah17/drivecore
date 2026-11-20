@@ -14,7 +14,7 @@ import {
 } from "./account-menu";
 import { hasWholeCompanyDirectory } from "@/features/setup/contracts";
 import { errorText } from "@/lib/api/client";
-import { useLiveContext } from "./context";
+import { buildBranchSwitchHref, useLiveContext } from "./context";
 import { Button } from "@/components/ui/button";
 import { StatePanel } from "@/components/layout/state-panel";
 import { DriveCoreLogo } from "@/components/brand/drivecore-mark";
@@ -77,6 +77,8 @@ export function Protected({ children }: { children: React.ReactNode }) {
 function Selectors() {
   const { user } = useSession();
   const scope = useLiveContext();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
   const branches =
     scope.directory?.branches.filter(
       (b) => String(b.company_id) === scope.companyId,
@@ -114,10 +116,16 @@ function Selectors() {
       <Select
         value={scope.branch}
         onValueChange={(value) => {
-          if (value)
+          if (value && value !== scope.branch) {
             scope.navigate(
-              `/companies/${scope.companyId}/dashboard?branch=${value}`,
+              buildBranchSwitchHref(
+                scope.companyId,
+                pathname,
+                searchParams,
+                value,
+              ),
             );
+          }
         }}
       >
         <SelectTrigger

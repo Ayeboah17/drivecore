@@ -8,7 +8,7 @@
 
 ---
 
-## Master Quick-Reference Index (M6–M7)
+## Master Quick-Reference Index (M6–M8)
 
 ### A. Endpoint Index
 
@@ -17,7 +17,7 @@
 | M6 | `GET` | `/api/v1/reservations` | `reservations.view` | `company_id` required; optional `branch_id`, `status`, `vehicle_id`, `customer_id`, `q`, `page` |
 | M6 | `GET/POST` | `/api/v1/rentals` | `rentals.view` or `driver` self-scope / `rentals.manage` | Optional `driver_user_id` on `POST`; `driver` sees only assigned rentals |
 | M6 | `POST` | `/api/v1/rentals/{id}/handover` | `rentals.manage` or assigned `driver` | **Anytime** while `draft` + vehicle `available` + reservation `confirmed` (no `starts_at`/`ends_at` hard block) |
-| M6 | `POST` | `/api/v1/rentals/{id}/return` | `rentals.manage` or assigned `driver` | Anytime while `active`; updates vehicle status + odometer + completes reservation |
+| M6/M8 | `POST` | `/api/v1/rentals/{id}/return` | `rentals.manage` or assigned `driver` | Anytime while `active`; optional `extra_charge_minor` & `extra_charge_description`; atomically creates `draft` invoice & returns `invoice_id` |
 | M6 | `POST` | `/api/v1/rentals/{id}/extend` | `rentals.manage` | Transactional overlap check against future confirmed reservations (`409`) |
 | M6 | `POST` | `/api/v1/rentals/{id}/assign-driver` | `rentals.manage` | Assign/unassign active `driver` user in company/branch scope |
 | M6 | `GET/POST` | `/api/v1/documents` | `documents.view`/`documents.manage` or assigned `driver` (`rental` docs) | Polymorphic `entity_type` (`vehicle\|customer\|reservation\|rental\|quotation\|invoice`), `entity_id`, `expires_at`; integer casts on response |
@@ -29,9 +29,19 @@
 | M7 | `POST` | `/api/v1/quotations/{id}/reject-discount` | `quotations.approve_discount` | Rejects pending discount with optional `notes`; quote stays immutable |
 | M7 | `POST` | `/api/v1/quotations/{id}/cancel` | `quotations.manage` | Cancels unconverted (`pending_approval` or `approved`) quotation (`409` if converted/rejected/cancelled) |
 | M7 | `POST` | `/api/v1/quotations/{id}/convert` | `quotations.manage` + `reservations.manage` | Atomically locks all selected vehicles & creates 1 `Reservation` per vehicle (`409` if unapproved discount or any overlap) |
-| M7 | `GET` | `/api/v1/{quotations\|reservations\|rentals}/{id}/pdf` | Matching `.view` permission (or assigned `driver` for rentals) | Authoritative PDF export (`Content-Type: application/pdf`, `nosniff`, `private, no-store`, optional `?download=1`) |
+| M7/M8 | `GET` | `/api/v1/{quotations\|reservations\|rentals\|invoices}/{id}/pdf` | Matching `.view` permission (or assigned `driver` for rentals) | Authoritative PDF export (`Content-Type: application/pdf`, `nosniff`, `private, no-store`, optional `?download=1`) |
+| M8 | `GET/POST` | `/api/v1/invoices` | `invoices.view` / `invoices.manage` | Scoped list (`status`, `customer_id`, `rental_id`, `ageing_bucket`, `q`, `sort`, `dir`, `page`); `POST` creates manual `draft` invoice with structured `lines[]` |
+| M8 | `GET` | `/api/v1/invoices/ageing` | `invoices.view` | 5-bucket AR Ageing (`Current`, `1–30d`, `31–60d`, `61–90d`, `90+d`) + top customer exposures |
+| M8 | `GET/PATCH` | `/api/v1/invoices/{id}` | `invoices.view` / `invoices.manage` | `GET` includes `lines[]`, `payments[]`, `refunds[]`, balances; `PATCH` edits `draft` only (`409` if `issued`/`void`) |
+| M8 | `POST` | `/api/v1/invoices/{id}/issue` | `invoices.manage` | Locks `draft` → `issued` (requires `total_minor > 0`), posts balanced GL entry (`DR 1100`, `CR 4000`, `CR 2100`) |
+| M8 | `POST` | `/api/v1/invoices/{id}/void` | `invoices.manage` | Voids `draft` or unpaid `issued` invoice (`409` if `paid_minor > 0`); posts reversing GL entry if previously `issued` |
+| M8 | `GET/POST` | `/api/v1/payments` & `/api/v1/invoices/{id}/payments` | `invoices.view` / `payments.manage` | Lists payments; `POST` locks invoice row, rejects `amount_minor > outstanding_minor` (`422`), posts GL (`DR 1000`, `CR 1100`) |
+| M8 | `GET/POST` | `/api/v1/refunds` & `/api/v1/invoices/{id}/refunds` | `invoices.view` / `payments.manage` | Lists refunds; `POST` locks invoice row, rejects `amount_minor > net_paid_minor` (`422`), requires `reason`, posts GL (`DR 4100`, `CR 1000`) |
+| M8 | `GET/POST` | `/api/v1/expenses` | `expenses.view` / `expenses.manage` | Immutable expenses with category (`maintenance\|fuel\|insurance\|tolls_parking\|general`) & optional `vehicle_id`; posts GL (`DR 5000`, `CR 1000`) |
+| M8 | `GET` | `/api/v1/gl/accounts` | `gl.view` | Read-only system-seeded Chart of Accounts + scoped Trial Balance (`debit_minor`, `credit_minor`, `balance_minor`) |
+| M8 | `GET` | `/api/v1/gl/journal-entries` | `gl.view` | Paginated immutable balanced `JournalEntry` rows with `lines[]` (`account_code`, `source_type`, `q`, `page`) |
 
-### B. Spatie Role & Permission Matrix (M6–M7 Additions)
+### B. Spatie Role & Permission Matrix (M6–M8 Additions)
 
 | Permission | `company-admin` | `operations` | `finance` | `driver` | `viewer` |
 | :--- | :---: | :---: | :---: | :---: | :---: |
@@ -44,6 +54,10 @@
 | `documents.view` / `documents.manage` | Yes / Yes | Yes / Yes | Yes / — | Self-scoped (`rental`) | Yes / — |
 | `quotations.view` / `quotations.manage` | Yes / Yes | Yes / Yes | Yes / — | — / — | Yes / — |
 | `quotations.approve_discount` | Yes | — | Yes | — | — |
+| `invoices.view` / `invoices.manage` | Yes / Yes | — / — | Yes / Yes | — / — | Yes / — |
+| `payments.manage` | Yes | — | Yes | — | — |
+| `expenses.view` / `expenses.manage` | Yes / Yes | — / — | Yes / Yes | — / — | Yes / — |
+| `gl.view` | Yes | — | Yes | — | — |
 
 *(Platform admins with `is_platform_admin = true` bypass all permission gates.)*
 
@@ -332,10 +346,226 @@ Add optional `sort` and `dir` (`asc` | `desc`, default `asc`, `dir` requires `so
 ---
 
 ## Milestone 8 — Live Finance, Invoicing, Payments, Refunds, Expenses, AR Ageing & GL (PR #11)
-*(Will be appended when Milestone 8 is implemented.)*
+
+### 8.1 Spatie Roles & Permissions Additions
+Add permissions to `RolePermissionSeeder`:
+- `invoices.view`, `invoices.manage`
+- `payments.manage`
+- `expenses.view`, `expenses.manage`
+- `gl.view`
+
+Role assignments:
+- `company-admin` & `finance`: all 6 permissions above.
+- `viewer`: `invoices.view`, `expenses.view` only (NO `gl.view`, NO `.manage`).
+- `operations` & `driver`: none.
+
+### 8.2 Database Migrations
+
+#### A. `invoices` & `invoice_lines`
+```php
+Schema::create('invoices', function (Blueprint $table): void {
+    $table->id();
+    $table->foreignId('company_id')->constrained()->cascadeOnDelete();
+    $table->foreignId('branch_id')->constrained()->cascadeOnDelete();
+    $table->foreignId('customer_id')->nullable()->constrained()->nullOnDelete();
+    $table->string('custom_customer_name', 255)->nullable();
+    $table->string('custom_customer_email', 255)->nullable();
+    $table->string('custom_customer_phone', 50)->nullable();
+    $table->foreignId('rental_id')->nullable()->constrained()->nullOnDelete();
+    $table->foreignId('created_by')->constrained('users');
+    $table->string('invoice_number', 40);
+    $table->string('status', 20)->default('draft'); // draft | issued | void
+    $table->timestampTz('due_at');
+    $table->timestampTz('issued_at')->nullable();
+    $table->timestampTz('voided_at')->nullable();
+    $table->decimal('discount_pct', 5, 2)->default(0.00);
+    $table->unsignedBigInteger('subtotal_minor')->default(0);
+    $table->unsignedBigInteger('discount_minor')->default(0);
+    $table->decimal('vat_rate_pct', 5, 2)->default(15.00);
+    $table->unsignedBigInteger('vat_minor')->default(0);
+    $table->unsignedBigInteger('total_minor')->default(0);
+    $table->text('notes')->nullable();
+    $table->timestamps();
+
+    $table->unique(['company_id', 'invoice_number']);
+    $table->index(['company_id', 'branch_id', 'status']);
+    $table->index(['company_id', 'status', 'due_at']);
+    $table->index(['company_id', 'rental_id']);
+});
+
+Schema::create('invoice_lines', function (Blueprint $table): void {
+    $table->id();
+    $table->foreignId('invoice_id')->constrained()->cascadeOnDelete();
+    $table->string('description', 255);
+    $table->unsignedInteger('quantity')->default(1);
+    $table->unsignedBigInteger('unit_price_minor');
+    $table->unsignedBigInteger('line_total_minor');
+    $table->unsignedSmallInteger('sort_order')->default(0);
+    $table->timestamps();
+});
+```
+
+#### B. `payments`, `refunds`, and `expenses`
+```php
+Schema::create('payments', function (Blueprint $table): void {
+    $table->id();
+    $table->foreignId('company_id')->constrained()->cascadeOnDelete();
+    $table->foreignId('branch_id')->constrained()->cascadeOnDelete();
+    $table->foreignId('invoice_id')->constrained()->cascadeOnDelete();
+    $table->foreignId('recorded_by')->constrained('users');
+    $table->unsignedBigInteger('amount_minor');
+    $table->string('method', 32); // cash | card | bank_transfer | mobile_money
+    $table->string('reference', 120);
+    $table->timestampTz('paid_at');
+    $table->timestamps();
+    $table->index(['company_id', 'branch_id', 'paid_at']);
+    $table->index(['invoice_id']);
+});
+
+Schema::create('refunds', function (Blueprint $table): void {
+    $table->id();
+    $table->foreignId('company_id')->constrained()->cascadeOnDelete();
+    $table->foreignId('branch_id')->constrained()->cascadeOnDelete();
+    $table->foreignId('invoice_id')->constrained()->cascadeOnDelete();
+    $table->foreignId('recorded_by')->constrained('users');
+    $table->unsignedBigInteger('amount_minor');
+    $table->string('reason', 500);
+    $table->timestampTz('refunded_at');
+    $table->timestamps();
+    $table->index(['company_id', 'branch_id', 'refunded_at']);
+    $table->index(['invoice_id']);
+});
+
+Schema::create('expenses', function (Blueprint $table): void {
+    $table->id();
+    $table->foreignId('company_id')->constrained()->cascadeOnDelete();
+    $table->foreignId('branch_id')->constrained()->cascadeOnDelete();
+    $table->foreignId('vehicle_id')->nullable()->constrained()->nullOnDelete();
+    $table->foreignId('recorded_by')->constrained('users');
+    $table->string('category', 32); // maintenance | fuel | insurance | tolls_parking | general
+    $table->string('description', 255);
+    $table->unsignedBigInteger('amount_minor');
+    $table->timestampTz('incurred_at');
+    $table->timestamps();
+    $table->index(['company_id', 'branch_id', 'category', 'incurred_at']);
+    $table->index(['company_id', 'vehicle_id']);
+});
+```
+
+#### C. `gl_accounts`, `journal_entries`, and `journal_lines`
+```php
+Schema::create('gl_accounts', function (Blueprint $table): void {
+    $table->id();
+    $table->foreignId('company_id')->constrained()->cascadeOnDelete();
+    $table->string('code', 20);
+    $table->string('name', 120);
+    $table->string('type', 20); // asset | liability | equity | revenue | expense
+    $table->boolean('is_system')->default(true);
+    $table->timestamps();
+    $table->unique(['company_id', 'code']);
+});
+
+Schema::create('journal_entries', function (Blueprint $table): void {
+    $table->id();
+    $table->foreignId('company_id')->constrained()->cascadeOnDelete();
+    $table->foreignId('branch_id')->constrained()->cascadeOnDelete();
+    $table->foreignId('created_by')->constrained('users');
+    $table->string('source_type', 32); // invoice | payment | refund | expense
+    $table->unsignedBigInteger('source_id');
+    $table->string('reference', 120);
+    $table->string('memo', 255);
+    $table->timestampTz('posted_at');
+    $table->timestamps();
+    $table->index(['company_id', 'branch_id', 'posted_at']);
+    $table->index(['company_id', 'source_type', 'source_id']);
+});
+
+Schema::create('journal_lines', function (Blueprint $table): void {
+    $table->id();
+    $table->foreignId('journal_entry_id')->constrained()->cascadeOnDelete();
+    $table->foreignId('gl_account_id')->constrained('gl_accounts');
+    $table->unsignedBigInteger('debit_minor')->default(0);
+    $table->unsignedBigInteger('credit_minor')->default(0);
+    $table->timestamps();
+    $table->index(['gl_account_id']);
+});
+```
+Seed system accounts automatically on company creation (and backfill existing companies):
+- `1000` Cash & Bank (`asset`)
+- `1100` Accounts Receivable (`asset`)
+- `2100` VAT Payable (`liability`)
+- `4000` Rental Revenue (`revenue`)
+- `4100` Sales Refunds & Credits (`revenue`, contra-revenue)
+- `5000` Fleet & Operating Expenses (`expense`)
+
+### 8.3 Auto-Draft Invoice on Rental Return (`POST /api/v1/rentals/{rental}/return`)
+- Accept optional fields: `extra_charge_minor` (integer `>= 0`, default `0`), `extra_charge_description` (string max 255, required when `extra_charge_minor > 0`).
+- Inside the existing return `DB::transaction`:
+  1. Complete rental, update vehicle status/odometer, complete reservation.
+  2. Auto-create a `draft` `Invoice` with `due_at = now()->addDays(14)`:
+     - Line 1: Rental charge — if the reservation was converted from a `Quotation`, carry its snapshotted `daily_rate_minor`, `discount_pct`, and `vat_rate_pct`; otherwise use `$vehicle->daily_rate_minor × rental_days` and `$company->vat_rate_pct` (`discount_pct = 0`).
+     - Line 2 (optional): if `extra_charge_minor > 0`, add line `{ description: extra_charge_description, quantity: 1, unit_price_minor: extra_charge_minor }`.
+  3. Include `invoice_id` on `Rental` responses (nullable int).
+
+### 8.4 Invoice, Payment, Refund, Expense & GL Endpoints
+
+#### A. Invoices (`invoices.view` / `invoices.manage`)
+- `GET /api/v1/invoices`: `company_id` required; optional `branch_id`, `status` (`draft|issued|paid|overdue|void`), `customer_id`, `rental_id`, `ageing_bucket` (`current|d1_30|d31_60|d61_90|d90_plus`), `q`, `page`, `sort` (`id|customer_name|due_at|total_minor|outstanding_minor|status|created_at`), `dir`.
+  - Each invoice returns computed integer balances: `paid_minor` (`SUM(payments)`), `refunded_minor` (`SUM(refunds)`), `net_paid_minor` (`paid_minor - refunded_minor`), `outstanding_minor` (`status === 'issued' ? max(0, total_minor - paid_minor) : 0`), and `is_overdue` (`status === 'issued' && outstanding_minor > 0 && due_at < now()`).
+- `POST /api/v1/invoices`: creates manual `draft` invoice with **either** `customer_id` (existing CRM customer in company/branch) **or** `custom_customer_name` (non-empty string max 255, plus optional `custom_customer_email` email max 255 & `custom_customer_phone` max 50 — mutually exclusive, else `422`), `lines[]` (`min:1`, `max:50`, each `{ description, quantity >= 1, unit_price_minor >= 0 }`), `discount_pct` (`0..100`), `due_at`, `notes?`. Server computes `subtotal_minor`, `discount_minor`, `vat_rate_pct` (from company settings), `vat_minor`, `total_minor`.
+- `PATCH /api/v1/invoices/{id}`: updates `draft` invoice only (`409` if `issued` or `void`). Replaces `lines[]`, allows updating `custom_customer_name`/`custom_customer_email`/`custom_customer_phone` on custom-customer drafts, and recomputes totals server-side.
+- `POST /api/v1/invoices/{id}/issue`: inside `DB::transaction` locking invoice:
+  1. Require `status === 'draft'` (`409`) and `total_minor > 0` (`422`).
+  2. Set `status = 'issued'`, `issued_at = now()`.
+  3. Post balanced `JournalEntry` (`source_type='invoice'`): `DR 1100 Accounts Receivable (total_minor)`, `CR 4000 Rental Revenue (total_minor - vat_minor)`, `CR 2100 VAT Payable (vat_minor)` (omit VAT line if `vat_minor === 0`).
+  4. Audit `invoice.issued`.
+- `POST /api/v1/invoices/{id}/void`: inside `DB::transaction` locking invoice:
+  1. Require `status !== 'void'` (`409`) and `paid_minor === 0` (`409`, paid invoices must be settled via Refunds).
+  2. If previously `issued`, post balanced reversing `JournalEntry`: `DR 4000 (total_minor - vat_minor)`, `DR 2100 (vat_minor)`, `CR 1100 (total_minor)`.
+  3. Set `status = 'void'`, `voided_at = now()`. Audit `invoice.voided`.
+- `GET /api/v1/invoices/{id}/pdf` (`invoices.view`): authoritative PDF export (`Content-Type: application/pdf`, `nosniff`, `private, no-store`, optional `?download=1`).
+- `GET /api/v1/invoices/ageing` (`invoices.view`): `company_id` required, optional `branch_id`. Returns 5 buckets (`current`, `d1_30`, `d31_60`, `d61_90`, `d90_plus` with `{ key, label, count, amount_minor }`), `total_outstanding_minor`, and top `exposures[]` (`{ customer_id: int|null, customer_name, customer_type: 'individual'|'corporate'|'custom', outstanding_minor, overdue_count }`).
+
+#### B. Payments & Refunds (`invoices.view` / `payments.manage`)
+- `GET /api/v1/payments`: `company_id` required; optional `branch_id`, `invoice_id`, `method`, `q`, `page`, `sort` (`id|paid_at|amount_minor|method`), `dir`.
+- `POST /api/v1/invoices/{id}/payments`: inside `DB::transaction` with `Invoice::lockForUpdate()`:
+  1. Require `invoice.status === 'issued'` (`409`).
+  2. Require `amount_minor > 0` and `amount_minor <= outstanding_minor` (else `422` on `amount_minor`).
+  3. Validate `method` in `['cash', 'card', 'bank_transfer', 'mobile_money']`, `reference` required (max 120).
+  4. Insert `Payment`, post balanced `JournalEntry` (`DR 1000 Cash & Bank`, `CR 1100 Accounts Receivable`), audit `payment.recorded`, return `201`.
+- `GET /api/v1/refunds`: `company_id` required; optional `branch_id`, `invoice_id`, `q`, `page`, `sort` (`id|refunded_at|amount_minor`), `dir`.
+- `POST /api/v1/invoices/{id}/refunds`: inside `DB::transaction` with `Invoice::lockForUpdate()`:
+  1. Require `invoice.status === 'issued'` (`409`).
+  2. Require `amount_minor > 0` and `amount_minor <= net_paid_minor` (else `422` on `amount_minor`), and `reason` required (max 500).
+  3. Insert `Refund`, post balanced `JournalEntry` (`DR 4100 Sales Refunds & Credits`, `CR 1000 Cash & Bank`), audit `refund.recorded`, return `201`.
+
+#### C. Expenses (`expenses.view` / `expenses.manage`)
+- `GET /api/v1/expenses`: `company_id` required; optional `branch_id`, `category`, `vehicle_id`, `q`, `page`, `sort` (`id|incurred_at|description|category|amount_minor`), `dir`.
+- `POST /api/v1/expenses`: creates immutable expense (`amount_minor > 0`, `category` in `['maintenance','fuel','insurance','tolls_parking','general']`, optional `vehicle_id` in same company/branch), posts balanced `JournalEntry` (`DR 5000 Fleet & Operating Expenses`, `CR 1000 Cash & Bank`), audits `expense.recorded`, returns `201`.
+
+#### D. Double-Entry General Ledger (`gl.view` ONLY — `403` for `viewer`, `operations`, `driver`)
+- `GET /api/v1/gl/accounts`: `company_id` required; optional `branch_id`. Returns seeded `gl_accounts` with scoped `debit_minor`, `credit_minor`, `balance_minor`, plus `total_debits_minor`, `total_credits_minor`, and `is_balanced` (`total_debits_minor === total_credits_minor`).
+- `GET /api/v1/gl/journal-entries`: `company_id` required; optional `branch_id`, `account_code`, `source_type` (`invoice|payment|refund|expense`), `q`, `page`. Returns paginated entries ordered by `posted_at DESC, id DESC` with nested `lines[]` (`account_code`, `account_name`, `debit_minor`, `credit_minor`).
+
+### 8.5 Required Feature Tests (`tests/Feature/MilestoneEightTest.php`)
+1. Returning a rental with optional `extra_charge_minor` atomically creates a `draft` invoice carrying quote discount/VAT (or direct vehicle rate); Finance edits lines and issues it (`DR 1100 / CR 4000 + CR 2100`).
+2. Issued invoice rejects `PATCH` (`409`); unpaid issued invoice voids cleanly with reversing GL; paid/partially paid issued invoice rejects `void` (`409`).
+3. Concurrent/overpayment `amount_minor > outstanding_minor` returns `422`; refund `amount_minor > net_paid_minor` returns `422`.
+4. Posting an expense with optional `vehicle_id` emits `DR 5000 / CR 1000` and is immutable.
+5. `GET /api/v1/gl/accounts` & `GET /api/v1/gl/journal-entries` return `403` for `viewer`, `operations`, and `driver`, and always satisfy `SUM(debit_minor) === SUM(credit_minor)`.
+6. `GET /api/v1/invoices/ageing` accurately buckets open issued invoices into `current`, `d1_30`, `d31_60`, `d61_90`, `d90_plus`, and `GET /api/v1/invoices/{id}/pdf` streams valid `%PDF-` bytes with `nosniff` + `private, no-store`.
 
 ## Milestone 9 — Live Maintenance, Inventory, Procurement & Vehicle 360 (PR #12)
 *(Will be appended when Milestone 9 is implemented.)*
 
 ## Milestone 10 — Live Messaging/Chat Center, Dashboard KPIs/Infographics, Reports & Audit (PR #13)
 *(Will be appended when Milestone 10 is implemented.)*
+
+## Milestone 11 — Detailed Stats, Customer/Vehicle Rollups & Advanced Filtering (PR #14)
+*(Will be appended when Milestone 11 is implemented.)*
+
+## Milestone 12 — Authentication, Admin Email Invitations & Account Lifecycle (PR #15)
+*(Will be appended when Milestone 12 is implemented.)*
+
+## Milestone 13 — Car Tracker / GPS Telematics API Integration (PR #16 — TBD)
+*(Will be appended once GPS tracker vendor API details are available.)*

@@ -138,3 +138,33 @@ These items bridge the newly implemented Demo features (`M4+`) into Laravel cont
   2. Connect Live Dashboard **KPI Cards** and **`KpiInfographicsBand`** (Fleet Composition donut, Revenue/VAT/Costs comparison, Quote-to-Cash funnel) using `DriveCoreDateRangePicker`.
   3. Enable Expo Driver App sync workflows against shared Sanctum tokens & handover/message endpoints.
 - **Acceptance Criteria:** End-to-end staging rehearsal with real PostgreSQL, Redis/Horizon workers, S3 storage, dark/light contrast accessibility audit, and load/rate-limit verification.
+
+---
+
+### Milestone 11 — Detailed Stats, Customer/Vehicle Rollups & Advanced Filtering
+- **Backend Prerequisites:**
+  1. Server-computed entity rollups on `customers` (`total_spent_minor` = `payments - refunds`, `total_invoiced_minor`, `open_ar_minor`, `rental_count`, `avg_rental_value_minor`, `last_rental_at`) and `vehicles` (`revenue_minor`, `expense_minor`, `net_roi_minor`, `utilization_pct`, `rental_count`, `total_km_driven`, `idle_days`), with monetary fields gated behind `invoices.view`.
+  2. Multi-facet filtering (`from`/`to` date range, `min_spend_minor`/`max_spend_minor`, `min_rate_minor`/`max_rate_minor`, `functions[]`, `has_open_ar`, `idle_days_min`) and multi-page sorting by computed metrics.
+  3. `GET/POST/DELETE /api/v1/saved-filters` (personal & admin-shared saved filter views) plus `GET /api/v1/stats/{customers|vehicles|branches}` with CSV export.
+- **Frontend Deliverables:**
+  1. Inline KPI rollup strips and sortable metric columns on Customers & Fleet directories and detail pages (monetary metrics gated by `invoices.view`).
+  2. Dedicated `Reports → Detailed Stats` workspace with cross-filtering, one-click preset chips (`Top spenders`, `Has open AR`, `Idle > 14d`, `Unpriced`), `SavedFiltersMenu`, and scoped CSV export.
+- **Acceptance Criteria:** Multi-page sorting by server-computed customer spend >25 rows; `operations` sees operational stats only with zero monetary leakage; personal vs. company-shared `saved_filters` enforce strict ownership.
+
+---
+
+### Milestone 12 — Authentication, Admin Email Invitations & Account Lifecycle
+- **Backend Prerequisites:**
+  1. `invitations` table with SHA-256 hashed single-use tokens (72h expiry), `GET/POST /api/v1/invitations`, `resend`, `revoke` (`users.manage`, whole-company — no public self-serve signup), plus public `invitations/preview` and `invitations/accept`.
+  2. Public rate-limited `forgot-password` (no account enumeration) & `reset-password` (revokes existing sessions/tokens).
+  3. Authenticated `PATCH /api/v1/auth/profile` & `POST /api/v1/auth/change-password` (current password required + optional revoke other sessions), plus `must_change_password` flag for directly created fallback accounts (e.g., field drivers without email).
+- **Frontend Deliverables:**
+  1. Public `/accept-invite`, `/forgot-password`, and `/reset-password` routes + `"Forgot password?"` link on `/login`.
+  2. Primary **Invite user by email** flow + Pending Invitations management in `Administration → Users` (retaining `"Create directly"` fallback with mandatory first-login password change).
+  3. Authenticated `/account` Profile & Security page + mandatory password-change gate when `must_change_password = true`. *(2FA/TOTP and SSO/OAuth deferred to post-MVP.)*
+- **Acceptance Criteria:** Expired/revoked/used tokens return `410`/`422` with recovery guidance; `must_change_password = true` blocks ERP routes until rotated; forgot-password never reveals email existence.
+
+---
+
+### Milestone 13 — Car Tracker / GPS Telematics API Integration *(TBD)*
+- **Status:** Deferred until GPS tracker vendor and API documentation are finalized. Will integrate real-time vehicle location, telematics snapshots, and alerts via a provider-agnostic backend adapter.

@@ -72,18 +72,26 @@ export async function listDocuments(
     signal,
   );
   const normalized = normalizePage(payload);
-  for (const item of normalized.items) {
-    if (
-      String(item.company_id) !== params.companyId ||
-      (params.branch !== "all" && String(item.branch_id) !== params.branch)
-    ) {
-      throw new ApiError(
-        502,
-        "Unexpected document scope returned by the API.",
-      );
-    }
-  }
-  return normalized as {
+  // Pre-PR #9 backends may omit branch_id/entity filtering on documents index;
+  // filter client-side instead of failing the panel with 502.
+  const scopedItems = normalized.items.filter((item) => {
+    if (String(item.company_id) !== params.companyId) return false;
+    if (params.branch !== "all" && String(item.branch_id) !== params.branch)
+      return false;
+    if (params.entityType && item.entity_type !== params.entityType)
+      return false;
+    if (params.entityId && item.entity_id !== params.entityId) return false;
+    return true;
+  });
+  const total =
+    scopedItems.length !== normalized.items.length && normalized.lastPage === 1
+      ? scopedItems.length
+      : normalized.total;
+  return {
+    ...normalized,
+    items: scopedItems,
+    total,
+  } as {
     items: DocumentRecord[];
     page: number;
     lastPage: number;
