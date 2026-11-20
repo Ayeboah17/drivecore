@@ -128,6 +128,7 @@ export function mergeVehicleFunctions(
 export const managedRoleNames = [
   "company-admin",
   "operations",
+  "finance",
   "viewer",
   "driver",
 ] as const;
@@ -135,6 +136,7 @@ export type ManagedRoleName = (typeof managedRoleNames)[number];
 export const managedRoleLabels: Record<ManagedRoleName, string> = {
   "company-admin": "Company Admin",
   operations: "Operations",
+  finance: "Finance",
   viewer: "Viewer",
   driver: "Driver",
 };
@@ -167,6 +169,8 @@ export const documentEntityTypes = [
   "customer",
   "reservation",
   "rental",
+  "quotation",
+  "invoice",
 ] as const;
 export type DocumentEntityType = (typeof documentEntityTypes)[number];
 export const documentEntityLabels: Record<DocumentEntityType, string> = {
@@ -174,7 +178,72 @@ export const documentEntityLabels: Record<DocumentEntityType, string> = {
   customer: "Customer",
   reservation: "Reservation",
   rental: "Rental",
+  quotation: "Quotation",
+  invoice: "Invoice",
 };
+
+const nonNegNumber = z.union([
+  z.number().nonnegative(),
+  z
+    .string()
+    .regex(/^\d+(?:\.\d+)?$/)
+    .transform((v) => Number(v))
+    .pipe(z.number().nonnegative()),
+]);
+
+export const companySettingsSchema = z.object({
+  company_id: numericId,
+  currency: z.string(),
+  vat_rate_pct: nonNegNumber.pipe(z.number().max(100)),
+  discount_approval_threshold_pct: nonNegNumber.pipe(z.number().max(100)),
+});
+
+export const quotationVehicleSchema = z.object({
+  vehicle_id: numericId,
+  registration: z.string(),
+  make: z.string(),
+  model: z.string(),
+  daily_rate_minor: nonNegInt,
+  line_subtotal_minor: nonNegInt,
+  reservation_id: numericId.nullable().optional().default(null),
+});
+
+export const quotationSchema = z.object({
+  id: numericId,
+  company_id: numericId,
+  branch_id: numericId,
+  customer_id: numericId,
+  created_by: numericId.nullable().optional().default(null),
+  customer_name: z.string().nullable().optional().default(null),
+  starts_at: z.string(),
+  ends_at: z.string(),
+  rental_days: numericId,
+  status: z.enum([
+    "draft",
+    "pending_approval",
+    "approved",
+    "rejected",
+    "cancelled",
+    "converted",
+  ]),
+  discount_pct: nonNegNumber.pipe(z.number().max(100)),
+  discount_status: z.enum(["not_required", "pending", "approved", "rejected"]),
+  discount_decided_by: numericId.nullable().optional().default(null),
+  discount_decided_by_name: z.string().nullable().optional().default(null),
+  discount_decided_at: z.string().nullable().optional().default(null),
+  discount_decision_notes: z.string().nullable().optional().default(null),
+  subtotal_minor: nonNegInt,
+  discount_minor: nonNegInt,
+  vat_rate_pct: nonNegNumber.pipe(z.number().max(100)),
+  vat_minor: nonNegInt,
+  total_minor: nonNegInt,
+  notes: z.string().nullable().optional().default(null),
+  converted_at: z.string().nullable().optional().default(null),
+  created_at: z.string(),
+  updated_at: z.string(),
+  vehicles: z.array(quotationVehicleSchema).optional().default([]),
+  reservation_ids: z.array(numericId).optional().default([]),
+});
 
 export const reservationSchema = z.object({
   ...ownership,
@@ -243,6 +312,9 @@ export const roleDefinitionSchema = z.object({
 });
 export type Customer = z.infer<typeof customerSchema>;
 export type Vehicle = z.infer<typeof vehicleSchema>;
+export type CompanySettings = z.infer<typeof companySettingsSchema>;
+export type QuotationVehicle = z.infer<typeof quotationVehicleSchema>;
+export type Quotation = z.infer<typeof quotationSchema>;
 export type Reservation = z.infer<typeof reservationSchema>;
 export type Rental = z.infer<typeof rentalSchema>;
 export type DocumentRecord = z.infer<typeof documentSchema>;
@@ -256,6 +328,7 @@ export const isDriverRole = (user: User) =>
   user.roles.includes("driver") &&
   !user.permissions.includes("rentals.view");
 export const canAccessRentals = (user: User) =>
+  can(user, "quotations.view") ||
   can(user, "reservations.view") ||
   can(user, "rentals.view") ||
   isDriverRole(user);
@@ -272,6 +345,12 @@ export const canAccessUserAdmin = (user: User, companyId: string) =>
 export const canManageUsers = (user: User, companyId: string) =>
   user.is_platform_admin ||
   (can(user, "users.manage") &&
+    user.companies.some(
+      (c) => String(c.id) === companyId && c.branch_id === null,
+    ));
+export const canManageCompanySettings = (user: User, companyId: string) =>
+  user.is_platform_admin ||
+  ((can(user, "settings.manage") || can(user, "users.manage")) &&
     user.companies.some(
       (c) => String(c.id) === companyId && c.branch_id === null,
     ));
@@ -302,6 +381,15 @@ export function formatMinorCurrency(
   const whole = Math.floor(minor / 100);
   const frac = String(minor % 100).padStart(2, "0");
   return `${currency ? `${currency} ` : ""}${whole.toLocaleString()}.${frac}`;
+}
+
+/** Formats integer minor units as explicit money (including 0.00 and negative amounts). */
+export function formatMoneyMinor(minor: number, currency?: string): string {
+  const sign = minor < 0 ? "-" : "";
+  const abs = Math.abs(Math.round(minor));
+  const whole = Math.floor(abs / 100);
+  const frac = String(abs % 100).padStart(2, "0");
+  return `${sign}${currency ? `${currency} ` : ""}${whole.toLocaleString()}.${frac}`;
 }
 export function pageSchema<T extends z.ZodType>(record: T) {
   return z.object({

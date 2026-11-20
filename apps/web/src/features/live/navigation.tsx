@@ -102,7 +102,9 @@ export function LiveNavigation({
           (path === basePath ||
             path.startsWith(`${basePath}/`) ||
             (item.key === "rentals" &&
-              path.startsWith(`/companies/${scope.companyId}/reservations/`)));
+              (path.startsWith(`/companies/${scope.companyId}/reservations/`) ||
+                path === `/companies/${scope.companyId}/quotations` ||
+                path.startsWith(`/companies/${scope.companyId}/quotations/`))));
         const title = `${item.label}${restricted ? " · Restricted" : planned ? " · Planned" : ""}`;
 
         const badge =

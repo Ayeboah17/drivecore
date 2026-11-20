@@ -2,7 +2,7 @@ import { test, expect, type Page } from "@playwright/test";
 import { randomUUID } from "node:crypto";
 import { mkdir } from "node:fs/promises";
 import { resolve } from "node:path";
-const fixture = "http://127.0.0.1:3201";
+const fixture = "http://127.0.0.1:4201";
 const screenshots = resolve(
   process.cwd(),
   "../../documentation/screenshots/workspace-selection",

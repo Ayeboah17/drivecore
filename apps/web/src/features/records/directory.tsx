@@ -14,17 +14,49 @@ import { errorText } from "@/lib/api/client";
 import { useLiveContext } from "@/features/live/context";
 import {
   DataSearchForm,
+  DataTable,
+  DataTableBody,
+  DataTableCell,
   DataTableFrame,
+  DataTableHead,
+  DataTableHeaderCell,
+  DataTableRow,
+  DataTableSkeleton,
+  PlateTag,
+  StatusDotBadge,
   type ActiveFilterChip,
+  type StatusDotTone,
 } from "@/components/data/data-table";
 import { StatePanel } from "@/components/layout/state-panel";
 import { ViewFadeIn } from "@/components/motion/primitives";
-import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { DriveCoreSelect } from "@/components/ui/drivecore-select";
-import { Skeleton } from "@/components/ui/skeleton";
-import { VehicleStatus } from "./presentation";
+import {
+  nextSortState,
+  parseSortParams,
+  sortRows,
+  type SortDirection,
+} from "@/lib/table-sort";
 import { listRecords } from "./service";
+
+const CUSTOMER_SORT_KEYS = ["name", "type", "email"] as const;
+const VEHICLE_SORT_KEYS = [
+  "registration",
+  "make",
+  "daily_rate_minor",
+  "odometer",
+  "status",
+] as const;
+
+const VEHICLE_STATUS_META: Record<
+  Vehicle["status"],
+  { label: string; tone: StatusDotTone }
+> = {
+  available: { label: "Available", tone: "success" },
+  rented: { label: "Rented", tone: "info" },
+  maintenance: { label: "Maintenance", tone: "warning" },
+  damaged: { label: "Damaged", tone: "danger" },
+};
 
 const CUSTOMER_TYPES = [
   { value: "", label: "All customer types" },
@@ -63,6 +95,11 @@ export function RecordDirectory({
     Number.isInteger(parsedPage) && parsedPage >= 1 && parsedPage <= 1000000
       ? parsedPage
       : 1;
+  const { sort, dir } = parseSortParams(
+    searchParams.get("sort"),
+    searchParams.get("dir"),
+    isCustomers ? CUSTOMER_SORT_KEYS : VEHICLE_SORT_KEYS,
+  );
 
   const base = `/companies/${scope.companyId}/${domain}`;
   const branchSuffix = `?branch=${scope.branch}`;
@@ -71,16 +108,29 @@ export function RecordDirectory({
     q?: string;
     filter?: string;
     page?: number;
+    sort?: string;
+    dir?: SortDirection | "";
   }) {
     const params = new URLSearchParams();
     params.set("branch", scope.branch);
     const nextQ = (next.q !== undefined ? next.q : rawQ).trim().slice(0, 100);
     const nextFilter = next.filter !== undefined ? next.filter : filter;
     const nextPage = next.page !== undefined ? next.page : 1;
+    const nextSort = next.sort !== undefined ? next.sort : sort;
+    const nextDir = next.dir !== undefined ? next.dir : dir;
     if (nextQ) params.set("q", nextQ);
     if (nextFilter) params.set(filterParamKey, nextFilter);
+    if (nextSort && nextDir) {
+      params.set("sort", nextSort);
+      params.set("dir", nextDir);
+    }
     if (nextPage > 1) params.set("page", String(nextPage));
     scope.navigate(`${base}?${params.toString()}`);
+  }
+
+  function handleSort(columnKey: string) {
+    const next = nextSortState(sort, dir, columnKey);
+    updateQuery({ sort: next.sort, dir: next.dir, page: 1 });
   }
 
   const directory = useQuery({
@@ -88,7 +138,7 @@ export function RecordDirectory({
       ...scope.key,
       domain,
       "list",
-      { q: rawQ.trim(), filter, page },
+      { q: rawQ.trim(), filter, page, sort, dir },
     ],
     queryFn: ({ signal }) =>
       listRecords(
@@ -99,6 +149,8 @@ export function RecordDirectory({
           q: rawQ,
           filter,
           page,
+          sort: sort || undefined,
+          dir: dir || undefined,
         },
         signal,
       ),
@@ -178,7 +230,7 @@ export function RecordDirectory({
               onSubmitQuery={(nextQ) => updateQuery({ q: nextQ, page: 1 })}
             />
             <div className="w-full space-y-1.5 sm:w-52">
-              <span className="block text-label font-semibold">
+              <span className="block text-xs font-medium text-muted-foreground">
                 {isCustomers ? "Customer type" : "Vehicle status"}
               </span>
               <DriveCoreSelect
@@ -227,18 +279,10 @@ export function RecordDirectory({
         }
       >
         {directory.isPending ? (
-          <div
-            role="status"
-            aria-label={`Loading ${title.toLowerCase()}`}
-            className="space-y-3 p-card"
-          >
-            <p className="text-sm text-muted-foreground">
-              Loading {title.toLowerCase()}…
-            </p>
-            {[0, 1, 2, 3].map((row) => (
-              <Skeleton key={row} className="h-11 w-full rounded-xl" />
-            ))}
-          </div>
+          <DataTableSkeleton
+            columns={isCustomers ? 6 : 7}
+            label={`Loading ${title.toLowerCase()}`}
+          />
         ) : directory.error ? (
           <div className="p-card">
             <StatePanel
@@ -295,103 +339,198 @@ export function RecordDirectory({
             )}
           </div>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full border-collapse text-left text-sm">
-              <thead className="bg-structural text-xs font-semibold uppercase tracking-wider text-structural-foreground">
-                {isCustomers ? (
-                  <tr>
-                    <th className="px-4 py-3">Name</th>
-                    <th className="px-4 py-3">Type</th>
-                    <th className="px-4 py-3">Email</th>
-                    <th className="px-4 py-3">Phone</th>
-                    <th className="px-4 py-3">Branch</th>
-                    <th className="px-4 py-3 text-right">Action</th>
-                  </tr>
-                ) : (
-                  <tr>
-                    <th className="px-4 py-3">Registration</th>
-                    <th className="px-4 py-3">Vehicle</th>
-                    <th className="px-4 py-3">Daily rate</th>
-                    <th className="px-4 py-3">Odometer</th>
-                    <th className="px-4 py-3">Functions</th>
-                    <th className="px-4 py-3">Status</th>
-                    <th className="px-4 py-3 text-right">Action</th>
-                  </tr>
-                )}
-              </thead>
-              <tbody className="divide-y">
-                {isCustomers
-                  ? (directory.data.items as Customer[]).map((customer) => (
-                      <tr
-                        key={customer.id}
-                        className="transition-colors hover:bg-muted/35"
-                      >
-                        <td className="px-4 py-3 font-semibold">
-                          <Link
-                            href={`${base}/${customer.id}${branchSuffix}`}
-                            className="text-foreground hover:text-link hover:underline"
-                          >
-                            {customer.name}
-                          </Link>
-                        </td>
-                        <td className="px-4 py-3">
-                          <Badge variant="outline" className="font-mono text-xs">
-                            {customer.type === "individual"
-                              ? "Individual"
-                              : "Corporate"}
-                          </Badge>
-                        </td>
-                        <td className="px-4 py-3 text-muted-foreground">
+          <DataTable>
+            <DataTableHead>
+              {isCustomers ? (
+                <tr>
+                  <DataTableHeaderCell
+                    sortKey="name"
+                    activeSort={sort}
+                    activeDir={dir}
+                    onSort={handleSort}
+                  >
+                    Name
+                  </DataTableHeaderCell>
+                  <DataTableHeaderCell
+                    sortKey="type"
+                    activeSort={sort}
+                    activeDir={dir}
+                    onSort={handleSort}
+                  >
+                    Type
+                  </DataTableHeaderCell>
+                  <DataTableHeaderCell
+                    sortKey="email"
+                    activeSort={sort}
+                    activeDir={dir}
+                    onSort={handleSort}
+                  >
+                    Email
+                  </DataTableHeaderCell>
+                  <DataTableHeaderCell>Phone</DataTableHeaderCell>
+                  <DataTableHeaderCell>Branch</DataTableHeaderCell>
+                  <DataTableHeaderCell align="right">Action</DataTableHeaderCell>
+                </tr>
+              ) : (
+                <tr>
+                  <DataTableHeaderCell
+                    sortKey="registration"
+                    activeSort={sort}
+                    activeDir={dir}
+                    onSort={handleSort}
+                  >
+                    Registration
+                  </DataTableHeaderCell>
+                  <DataTableHeaderCell
+                    sortKey="make"
+                    activeSort={sort}
+                    activeDir={dir}
+                    onSort={handleSort}
+                  >
+                    Vehicle
+                  </DataTableHeaderCell>
+                  <DataTableHeaderCell
+                    align="right"
+                    sortKey="daily_rate_minor"
+                    activeSort={sort}
+                    activeDir={dir}
+                    onSort={handleSort}
+                  >
+                    Daily rate
+                  </DataTableHeaderCell>
+                  <DataTableHeaderCell
+                    align="right"
+                    sortKey="odometer"
+                    activeSort={sort}
+                    activeDir={dir}
+                    onSort={handleSort}
+                  >
+                    Odometer
+                  </DataTableHeaderCell>
+                  <DataTableHeaderCell>Functions</DataTableHeaderCell>
+                  <DataTableHeaderCell
+                    sortKey="status"
+                    activeSort={sort}
+                    activeDir={dir}
+                    onSort={handleSort}
+                  >
+                    Status
+                  </DataTableHeaderCell>
+                  <DataTableHeaderCell align="right">Action</DataTableHeaderCell>
+                </tr>
+              )}
+            </DataTableHead>
+            <DataTableBody>
+              {isCustomers
+                ? sortRows(
+                    directory.data.items as Customer[],
+                    sort,
+                    dir,
+                    {
+                      name: (c) => c.name,
+                      type: (c) => c.type,
+                      email: (c) => c.email,
+                    },
+                  ).map((customer) => (
+                    <DataTableRow key={customer.id}>
+                      <DataTableCell className="max-w-[16rem]">
+                        <Link
+                          href={`${base}/${customer.id}${branchSuffix}`}
+                          title={customer.name}
+                          className="block truncate font-medium text-foreground hover:text-link hover:underline"
+                        >
+                          {customer.name}
+                        </Link>
+                      </DataTableCell>
+                      <DataTableCell>
+                        <StatusDotBadge
+                          tone={
+                            customer.type === "corporate" ? "info" : "neutral"
+                          }
+                        >
+                          {customer.type === "individual"
+                            ? "Individual"
+                            : "Corporate"}
+                        </StatusDotBadge>
+                      </DataTableCell>
+                      <DataTableCell className="max-w-[14rem] text-muted-foreground">
+                        <span
+                          title={customer.email || undefined}
+                          className="block truncate"
+                        >
                           {customer.email || "—"}
-                        </td>
-                        <td className="px-4 py-3 font-mono text-xs text-muted-foreground tabular-nums">
-                          {customer.phone || "—"}
-                        </td>
-                        <td className="px-4 py-3 text-muted-foreground">
-                          {branchName(customer.branch_id)}
-                        </td>
-                        <td className="px-4 py-3 text-right">
-                          <Link
-                            href={`${base}/${customer.id}${branchSuffix}`}
-                            className="text-xs font-semibold text-link hover:underline"
-                          >
-                            Open
-                          </Link>
-                        </td>
-                      </tr>
-                    ))
-                  : (directory.data.items as Vehicle[]).map((vehicle) => (
-                      <tr
-                        key={vehicle.id}
-                        className="transition-colors hover:bg-muted/35"
-                      >
-                        <td className="px-4 py-3">
+                        </span>
+                      </DataTableCell>
+                      <DataTableCell numeric className="text-muted-foreground">
+                        {customer.phone || "—"}
+                      </DataTableCell>
+                      <DataTableCell className="text-muted-foreground">
+                        {branchName(customer.branch_id)}
+                      </DataTableCell>
+                      <DataTableCell align="right">
+                        <Link
+                          href={`${base}/${customer.id}${branchSuffix}`}
+                          className="text-xs font-medium text-link hover:underline"
+                        >
+                          Open
+                        </Link>
+                      </DataTableCell>
+                    </DataTableRow>
+                  ))
+                : sortRows(
+                    directory.data.items as Vehicle[],
+                    sort,
+                    dir,
+                    {
+                      registration: (v) => v.registration,
+                      make: (v) => `${v.make} ${v.model}`,
+                      daily_rate_minor: (v) => v.daily_rate_minor,
+                      odometer: (v) => v.odometer,
+                      status: (v) => v.status,
+                    },
+                  ).map((vehicle) => {
+                    const statusMeta = VEHICLE_STATUS_META[vehicle.status];
+                    return (
+                      <DataTableRow key={vehicle.id}>
+                        <DataTableCell>
                           <Link
                             href={`${base}/${vehicle.id}${branchSuffix}`}
-                            className="inline-block rounded-md bg-structural px-2 py-0.5 font-mono text-xs font-bold text-structural-foreground hover:opacity-90"
+                            className="inline-block"
                           >
-                            {vehicle.registration}
+                            <PlateTag className="transition-colors duration-150 group-hover:border-link/50 group-hover:text-link">
+                              {vehicle.registration}
+                            </PlateTag>
                           </Link>
-                        </td>
-                        <td className="px-4 py-3 font-medium">
-                          {vehicle.make} {vehicle.model}
+                        </DataTableCell>
+                        <DataTableCell className="max-w-[14rem]">
+                          <span className="font-medium">
+                            {vehicle.make} {vehicle.model}
+                          </span>
                           {vehicle.year ? (
                             <span className="ml-1.5 font-mono text-xs text-muted-foreground tabular-nums">
                               ({vehicle.year})
                             </span>
                           ) : null}
-                        </td>
-                        <td className="px-4 py-3 font-mono text-xs font-semibold tabular-nums">
+                        </DataTableCell>
+                        <DataTableCell
+                          align="right"
+                          numeric
+                          className="font-semibold text-foreground"
+                        >
                           {formatMinorCurrency(
                             vehicle.daily_rate_minor,
                             scope.company?.currency,
                           )}
-                        </td>
-                        <td className="px-4 py-3 font-mono text-xs text-muted-foreground tabular-nums">
+                        </DataTableCell>
+                        <DataTableCell
+                          align="right"
+                          numeric
+                          className="text-muted-foreground"
+                        >
                           {vehicle.odometer.toLocaleString()}{" "}
                           {vehicle.odometer_unit ?? "km"}
-                        </td>
-                        <td className="px-4 py-3">
+                        </DataTableCell>
+                        <DataTableCell>
                           {vehicle.functions.length === 0 ? (
                             <span className="text-xs text-muted-foreground">
                               —
@@ -401,35 +540,37 @@ export function RecordDirectory({
                               {vehicle.functions.slice(0, 2).map((fn) => (
                                 <span
                                   key={fn}
-                                  className="rounded-full border bg-muted/40 px-2 py-0.5 text-[11px] font-medium"
+                                  className="rounded-md border border-border/70 bg-muted/35 px-2 py-0.5 text-[11px] font-medium text-foreground"
                                 >
                                   {formatVehicleFunction(fn)}
                                 </span>
                               ))}
                               {vehicle.functions.length > 2 ? (
-                                <span className="rounded-full border bg-muted/40 px-2 py-0.5 font-mono text-[11px] text-muted-foreground">
+                                <span className="rounded-md border border-border/70 bg-muted/35 px-2 py-0.5 font-mono text-[11px] text-muted-foreground">
                                   +{vehicle.functions.length - 2}
                                 </span>
                               ) : null}
                             </div>
                           )}
-                        </td>
-                        <td className="px-4 py-3">
-                          <VehicleStatus status={vehicle.status} />
-                        </td>
-                        <td className="px-4 py-3 text-right">
+                        </DataTableCell>
+                        <DataTableCell>
+                          <StatusDotBadge tone={statusMeta.tone}>
+                            {statusMeta.label}
+                          </StatusDotBadge>
+                        </DataTableCell>
+                        <DataTableCell align="right">
                           <Link
                             href={`${base}/${vehicle.id}${branchSuffix}`}
-                            className="text-xs font-semibold text-link hover:underline"
+                            className="text-xs font-medium text-link hover:underline"
                           >
                             Open
                           </Link>
-                        </td>
-                      </tr>
-                    ))}
-              </tbody>
-            </table>
-          </div>
+                        </DataTableCell>
+                      </DataTableRow>
+                    );
+                  })}
+            </DataTableBody>
+          </DataTable>
         )}
       </DataTableFrame>
     </ViewFadeIn>

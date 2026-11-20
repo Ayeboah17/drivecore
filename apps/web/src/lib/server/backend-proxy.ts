@@ -39,16 +39,18 @@ function failure(status: number, message: string) {
 }
 export function allowedPath(method: string, path: string) {
   if (method === "GET")
-    return /^(sanctum\/csrf-cookie|api\/v1\/(health|auth\/me|companies|branches|customers|customers\/[1-9]\d*|vehicles|vehicles\/[1-9]\d*|reservations|reservations\/[1-9]\d*|rentals|rentals\/[1-9]\d*|documents|documents\/[1-9]\d*|users|roles))$/.test(
+    return /^(sanctum\/csrf-cookie|api\/v1\/(health|auth\/me|companies|companies\/[1-9]\d*\/settings|branches|customers|customers\/[1-9]\d*|vehicles|vehicles\/[1-9]\d*|quotations|quotations\/[1-9]\d*|reservations|reservations\/[1-9]\d*|rentals|rentals\/[1-9]\d*|(quotations|reservations|rentals)\/[1-9]\d*\/pdf|documents|documents\/[1-9]\d*|users|roles))$/.test(
       path,
     );
   if (method === "POST")
-    return /^api\/v1\/(auth\/(login|logout)|companies|branches|customers|vehicles|reservations|reservations\/[1-9]\d*\/cancel|rentals|rentals\/[1-9]\d*\/(handover|return|extend|assign-driver)|documents|users)$/.test(
+    return /^api\/v1\/(auth\/(login|logout)|companies|branches|customers|vehicles|quotations|quotations\/[1-9]\d*\/(approve-discount|reject-discount|cancel|convert)|reservations|reservations\/[1-9]\d*\/cancel|rentals|rentals\/[1-9]\d*\/(handover|return|extend|assign-driver)|documents|users)$/.test(
       path,
     );
   return (
     method === "PATCH" &&
-    /^api\/v1\/(customers|vehicles|users)\/[1-9]\d*$/.test(path)
+    /^api\/v1\/((customers|vehicles|users)\/[1-9]\d*|companies\/[1-9]\d*\/settings)$/.test(
+      path,
+    )
   );
 }
 
@@ -66,7 +68,7 @@ export function allowedQuery(
   if (keys.length === 0) {
     return (
       method !== "GET" ||
-      !/^api\/v1\/(customers|vehicles|reservations|rentals|documents|users|roles)$/.test(
+      !/^api\/v1\/(customers|vehicles|quotations|reservations|rentals|documents|users|roles)$/.test(
         path,
       )
     );
@@ -91,6 +93,15 @@ export function allowedQuery(
     return true;
   };
 
+  const checkSort = (allowedSorts: readonly string[]) => {
+    const sort = params.get("sort");
+    const dir = params.get("dir");
+    if (dir !== null && !sort) return false;
+    if (dir !== null && dir !== "asc" && dir !== "desc") return false;
+    if (sort !== null && !allowedSorts.includes(sort)) return false;
+    return true;
+  };
+
   if (path === "api/v1/companies") {
     return checkCommon(["q", "page"], false);
   }
@@ -98,19 +109,74 @@ export function allowedQuery(
     return checkCommon(["company_id", "branch_id", "q", "page"], false);
   }
   if (path === "api/v1/customers") {
-    if (!checkCommon(["company_id", "branch_id", "type", "q", "page"], true))
+    if (
+      !checkCommon(
+        ["company_id", "branch_id", "type", "q", "page", "sort", "dir"],
+        true,
+      )
+    )
       return false;
     const type = params.get("type");
-    return type === null || ["individual", "corporate"].includes(type);
+    return (
+      (type === null || ["individual", "corporate"].includes(type)) &&
+      checkSort(["name", "type", "email"])
+    );
   }
   if (path === "api/v1/vehicles") {
-    if (!checkCommon(["company_id", "branch_id", "status", "q", "page"], true))
+    if (
+      !checkCommon(
+        ["company_id", "branch_id", "status", "q", "page", "sort", "dir"],
+        true,
+      )
+    )
       return false;
     const status = params.get("status");
     return (
-      status === null ||
-      ["available", "rented", "maintenance", "damaged"].includes(status)
+      (status === null ||
+        ["available", "rented", "maintenance", "damaged"].includes(status)) &&
+      checkSort(["registration", "make", "daily_rate_minor", "odometer", "status"])
     );
+  }
+  if (path === "api/v1/quotations") {
+    if (
+      !checkCommon(
+        [
+          "company_id",
+          "branch_id",
+          "status",
+          "customer_id",
+          "q",
+          "page",
+          "sort",
+          "dir",
+        ],
+        true,
+      )
+    )
+      return false;
+    const status = params.get("status");
+    const customerId = params.get("customer_id");
+    if (
+      status !== null &&
+      ![
+        "draft",
+        "pending_approval",
+        "approved",
+        "rejected",
+        "cancelled",
+        "converted",
+      ].includes(status)
+    )
+      return false;
+    if (customerId !== null && !posInt(customerId)) return false;
+    return checkSort(["id", "customer_name", "total_minor", "status"]);
+  }
+  if (/^api\/v1\/(quotations|reservations|rentals)\/[1-9]\d*\/pdf$/.test(path)) {
+    for (const key of uniqueKeys) {
+      if (key !== "download") return false;
+    }
+    const dl = params.get("download");
+    return dl === null || dl === "1" || dl === "0";
   }
   if (path === "api/v1/reservations") {
     if (
@@ -123,6 +189,8 @@ export function allowedQuery(
           "customer_id",
           "q",
           "page",
+          "sort",
+          "dir",
         ],
         true,
       )
@@ -138,7 +206,13 @@ export function allowedQuery(
       return false;
     if (vehicleId !== null && !posInt(vehicleId)) return false;
     if (customerId !== null && !posInt(customerId)) return false;
-    return true;
+    return checkSort([
+      "id",
+      "customer_name",
+      "vehicle_registration",
+      "starts_at",
+      "status",
+    ]);
   }
   if (path === "api/v1/rentals") {
     if (
@@ -151,6 +225,8 @@ export function allowedQuery(
           "vehicle_id",
           "q",
           "page",
+          "sort",
+          "dir",
         ],
         true,
       )
@@ -163,12 +239,27 @@ export function allowedQuery(
       return false;
     if (driverId !== null && !posInt(driverId)) return false;
     if (vehicleId !== null && !posInt(vehicleId)) return false;
-    return true;
+    return checkSort([
+      "id",
+      "vehicle_registration",
+      "customer_name",
+      "driver_name",
+      "status",
+    ]);
   }
   if (path === "api/v1/documents") {
     if (
       !checkCommon(
-        ["company_id", "branch_id", "entity_type", "entity_id", "q", "page"],
+        [
+          "company_id",
+          "branch_id",
+          "entity_type",
+          "entity_id",
+          "q",
+          "page",
+          "sort",
+          "dir",
+        ],
         true,
       )
     )
@@ -177,16 +268,32 @@ export function allowedQuery(
     const entityId = params.get("entity_id");
     if (
       entityType !== null &&
-      !["vehicle", "customer", "reservation", "rental"].includes(entityType)
+      ![
+        "vehicle",
+        "customer",
+        "reservation",
+        "rental",
+        "quotation",
+        "invoice",
+      ].includes(entityType)
     )
       return false;
     if (entityId !== null && (!entityType || !posInt(entityId))) return false;
-    return true;
+    return checkSort(["original_name", "size", "expires_at"]);
   }
   if (path === "api/v1/users") {
     if (
       !checkCommon(
-        ["company_id", "branch_id", "role", "is_active", "q", "page"],
+        [
+          "company_id",
+          "branch_id",
+          "role",
+          "is_active",
+          "q",
+          "page",
+          "sort",
+          "dir",
+        ],
         true,
       )
     )
@@ -195,7 +302,9 @@ export function allowedQuery(
     const isActive = params.get("is_active");
     if (
       role !== null &&
-      !["company-admin", "operations", "viewer", "driver"].includes(role)
+      !["company-admin", "operations", "finance", "viewer", "driver"].includes(
+        role,
+      )
     )
       return false;
     if (
@@ -203,7 +312,7 @@ export function allowedQuery(
       !["0", "1", "true", "false"].includes(isActive)
     )
       return false;
-    return true;
+    return checkSort(["name", "email", "role", "is_active"]);
   }
   if (path === "api/v1/roles") {
     return checkCommon(["company_id"], true);
@@ -289,7 +398,10 @@ export async function proxy(
   const isDocumentUpload =
     request.method === "POST" && path === "api/v1/documents";
   const isDocumentDownload =
-    request.method === "GET" && /^api\/v1\/documents\/[1-9]\d*$/.test(path);
+    request.method === "GET" &&
+    /^api\/v1\/(documents\/[1-9]\d*|(quotations|reservations|rentals)\/[1-9]\d*\/pdf)$/.test(
+      path,
+    );
   const allowed = appOrigins(config);
   const requestOrigin = request.headers.get("origin");
   if (mutation && (!requestOrigin || !allowed.includes(requestOrigin)))

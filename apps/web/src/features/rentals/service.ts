@@ -34,6 +34,8 @@ export async function listReservations(
     status?: string;
     q?: string;
     page?: number;
+    sort?: string;
+    dir?: string;
   },
   signal: AbortSignal,
 ) {
@@ -43,6 +45,12 @@ export async function listReservations(
   const trimmedQ = (params.q ?? "").trim().slice(0, 100);
   if (trimmedQ) query.set("q", trimmedQ);
   if (params.page && params.page > 1) query.set("page", String(params.page));
+  if (params.sort) {
+    query.set("sort", params.sort);
+    if (params.dir === "asc" || params.dir === "desc") {
+      query.set("dir", params.dir);
+    }
+  }
 
   const payload = await read(
     `api/v1/reservations?${query.toString()}`,
@@ -124,6 +132,8 @@ export async function listRentals(
     driverUserId?: number;
     q?: string;
     page?: number;
+    sort?: string;
+    dir?: string;
   },
   signal: AbortSignal,
 ) {
@@ -136,6 +146,12 @@ export async function listRentals(
   const trimmedQ = (params.q ?? "").trim().slice(0, 100);
   if (trimmedQ) query.set("q", trimmedQ);
   if (params.page && params.page > 1) query.set("page", String(params.page));
+  if (params.sort) {
+    query.set("sort", params.sort);
+    if (params.dir === "asc" || params.dir === "desc") {
+      query.set("dir", params.dir);
+    }
+  }
 
   const payload = await read(
     `api/v1/rentals?${query.toString()}`,

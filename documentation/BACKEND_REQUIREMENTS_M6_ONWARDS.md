@@ -1,0 +1,341 @@
+# DriveCore ERP — Consolidated Backend Requirements (Milestone 6 Onwards)
+
+> **Single Source of Truth (M6+):** This document consolidates **all** Laravel REST API (`drivecore-backend`) requirements from **Milestone 6** onwards in PR implementation order. It supersedes the standalone `BACKEND_MILESTONE_6_SPEC.md` file.
+>
+> **Milestone 5 Prerequisite:** Ensure PR #8 (`b2a450e`) plus the small custom vehicle functions validation update in `documentation/BACKEND_CUSTOM_VEHICLE_FUNCTIONS.md` are deployed before PR #9.
+>
+> **Backend Source Constraint:** `drivecore-backend` was not modified by the frontend repo. Every contract, query parameter, payload, validation rule, concurrency lock, permission, and status code below matches the live Next.js BFF proxy (`apps/web/src/lib/server/backend-proxy.ts`), Zod contracts (`apps/web/src/lib/api/contracts.ts`), and Playwright E2E suite.
+
+---
+
+## Master Quick-Reference Index (M6–M7)
+
+### A. Endpoint Index
+
+| Milestone | Method | Endpoint | Required Permission / Access | Notes |
+| :--- | :--- | :--- | :--- | :--- |
+| M6 | `GET` | `/api/v1/reservations` | `reservations.view` | `company_id` required; optional `branch_id`, `status`, `vehicle_id`, `customer_id`, `q`, `page` |
+| M6 | `GET/POST` | `/api/v1/rentals` | `rentals.view` or `driver` self-scope / `rentals.manage` | Optional `driver_user_id` on `POST`; `driver` sees only assigned rentals |
+| M6 | `POST` | `/api/v1/rentals/{id}/handover` | `rentals.manage` or assigned `driver` | **Anytime** while `draft` + vehicle `available` + reservation `confirmed` (no `starts_at`/`ends_at` hard block) |
+| M6 | `POST` | `/api/v1/rentals/{id}/return` | `rentals.manage` or assigned `driver` | Anytime while `active`; updates vehicle status + odometer + completes reservation |
+| M6 | `POST` | `/api/v1/rentals/{id}/extend` | `rentals.manage` | Transactional overlap check against future confirmed reservations (`409`) |
+| M6 | `POST` | `/api/v1/rentals/{id}/assign-driver` | `rentals.manage` | Assign/unassign active `driver` user in company/branch scope |
+| M6 | `GET/POST` | `/api/v1/documents` | `documents.view`/`documents.manage` or assigned `driver` (`rental` docs) | Polymorphic `entity_type` (`vehicle\|customer\|reservation\|rental\|quotation\|invoice`), `entity_id`, `expires_at`; integer casts on response |
+| M6 | `GET` | `/api/v1/documents/{id}` | `documents.view` or assigned `driver` | Binary stream with `nosniff` + `private, no-store` |
+| M7 | `GET/PATCH` | `/api/v1/companies/{id}/settings` | `companies.view` (GET) / `settings.manage` (PATCH, whole-company) | `vat_rate_pct` (0–100, default `15.00`), `discount_approval_threshold_pct` (0–100, default `10.00`) |
+| M7 | `GET/POST` | `/api/v1/quotations` | `quotations.view` / `quotations.manage` | Multi-vehicle `vehicle_ids[]` (requires `daily_rate_minor > 0`), `discount_pct`, server-computed minor-unit pricing |
+| M7 | `GET` | `/api/v1/quotations/{id}` | `quotations.view` | Includes snapshotted `vehicles[]` & converted `reservation_ids[]` |
+| M7 | `POST` | `/api/v1/quotations/{id}/approve-discount` | `quotations.approve_discount` | Approves pending discount (`409` if not `pending_approval`) |
+| M7 | `POST` | `/api/v1/quotations/{id}/reject-discount` | `quotations.approve_discount` | Rejects pending discount with optional `notes`; quote stays immutable |
+| M7 | `POST` | `/api/v1/quotations/{id}/cancel` | `quotations.manage` | Cancels unconverted (`pending_approval` or `approved`) quotation (`409` if converted/rejected/cancelled) |
+| M7 | `POST` | `/api/v1/quotations/{id}/convert` | `quotations.manage` + `reservations.manage` | Atomically locks all selected vehicles & creates 1 `Reservation` per vehicle (`409` if unapproved discount or any overlap) |
+| M7 | `GET` | `/api/v1/{quotations\|reservations\|rentals}/{id}/pdf` | Matching `.view` permission (or assigned `driver` for rentals) | Authoritative PDF export (`Content-Type: application/pdf`, `nosniff`, `private, no-store`, optional `?download=1`) |
+
+### B. Spatie Role & Permission Matrix (M6–M7 Additions)
+
+| Permission | `company-admin` | `operations` | `finance` | `driver` | `viewer` |
+| :--- | :---: | :---: | :---: | :---: | :---: |
+| `companies.view`, `branches.view` | Yes | Yes | Yes | Yes (assigned) | Yes |
+| `settings.manage` | Yes | — | — | — | — |
+| `customers.view` / `customers.manage` | Yes / Yes | Yes / Yes | Yes / — | — / — | Yes / — |
+| `vehicles.view` / `vehicles.manage` | Yes / Yes | Yes / Yes | Yes / — | — / — | Yes / — |
+| `reservations.view` / `reservations.manage` | Yes / Yes | Yes / Yes | Yes / — | — / — | Yes / — |
+| `rentals.view` / `rentals.manage` | Yes / Yes | Yes / Yes | Yes / — | Self-scoped | Yes / — |
+| `documents.view` / `documents.manage` | Yes / Yes | Yes / Yes | Yes / — | Self-scoped (`rental`) | Yes / — |
+| `quotations.view` / `quotations.manage` | Yes / Yes | Yes / Yes | Yes / — | — / — | Yes / — |
+| `quotations.approve_discount` | Yes | — | Yes | — | — |
+
+*(Platform admins with `is_platform_admin = true` bypass all permission gates.)*
+
+---
+
+## Milestone 6 — Live Operations, Rentals, Anytime Handover & Documents (PR #9)
+
+### 6.1 Database Migrations
+
+#### A. Add `driver_user_id` to `rentals`
+```php
+Schema::table('rentals', function (Blueprint $table): void {
+    $table->foreignId('driver_user_id')
+        ->nullable()
+        ->after('vehicle_id')
+        ->constrained('users')
+        ->nullOnDelete();
+    $table->index(['company_id', 'driver_user_id', 'status']);
+});
+```
+Add `'driver_user_id'` to `Rental::$fillable` and cast `'driver_user_id' => 'integer'`.
+
+#### B. Add polymorphic entity linking, expiry & integer casts to `documents`
+```php
+Schema::table('documents', function (Blueprint $table): void {
+    $table->string('entity_type', 32)->nullable()->after('uploaded_by');
+    $table->unsignedBigInteger('entity_id')->nullable()->after('entity_type');
+    $table->timestampTz('expires_at')->nullable()->after('size');
+    $table->index(['company_id', 'entity_type', 'entity_id']);
+});
+```
+Add `'entity_type'`, `'entity_id'`, `'expires_at'` to `Document::$fillable` and cast `'company_id' => 'integer'`, `'branch_id' => 'integer'`, `'uploaded_by' => 'integer'`, `'size' => 'integer'`, `'entity_id' => 'integer'`, `'expires_at' => 'immutable_datetime'` (or call `->refresh()` on `Document::create(...)`) so `POST /api/v1/documents` returns integer IDs rather than multipart strings.
+
+### 6.2 Scoped `DirectoryQuery` on `index()` Endpoints
+Update `ReservationController::index`, `RentalController::index`, and `DocumentController::index` to use `DirectoryQuery::apply` (`paginate(25)->withQueryString()`):
+
+| Endpoint | Required | Optional | Search (`q`) Columns | Filters |
+| :--- | :--- | :--- | :--- | :--- |
+| `GET /api/v1/reservations` | `company_id` | `branch_id`, `status`, `vehicle_id`, `customer_id`, `q`, `page` | Linked customer `name`, vehicle `registration`, or reservation ID | `status` in `['confirmed', 'cancelled', 'completed']`, `vehicle_id`, `customer_id` |
+| `GET /api/v1/rentals` | `company_id` | `branch_id`, `status`, `driver_user_id`, `vehicle_id`, `q`, `page` | Linked vehicle `registration`, customer `name`, or notes | `status` in `['draft', 'active', 'returned']`, `driver_user_id`, `vehicle_id` |
+| `GET /api/v1/documents` | `company_id` | `branch_id`, `entity_type`, `entity_id`, `q`, `page` | `original_name`, `mime_type` | `entity_type` in `['vehicle', 'customer', 'reservation', 'rental', 'quotation', 'invoice']`, `entity_id` (requires `entity_type`, else `422`) |
+
+### 6.3 Rental Extension, Driver Assignment & Anytime Handover Timing
+
+#### Routes
+```php
+Route::post('rentals/{rental}/extend', [RentalController::class, 'extend'])
+    ->middleware('can:rentals.manage')
+    ->name('rentals.extend');
+Route::post('rentals/{rental}/assign-driver', [RentalController::class, 'assignDriver'])
+    ->middleware('can:rentals.manage')
+    ->name('rentals.assign-driver');
+```
+
+#### A. Driver Assignment (`POST /api/v1/rentals` & `POST /api/v1/rentals/{rental}/assign-driver`)
+- `POST /api/v1/rentals`: `{ reservation_id: int, driver_user_id?: int|null }`.
+- `POST /api/v1/rentals/{rental}/assign-driver`: `{ driver_user_id: int|null }`.
+- When `driver_user_id !== null`: user must exist, `is_active = true`, hold role `'driver'`, belong to `rental.company_id`, and if branch-restricted match `rental.branch_id` (else `422` on `driver_user_id`).
+- Allowed only when `rental.status` is `'draft'` or `'active'` (else `409`). Audit: `rental.driver_assigned`.
+
+#### B. Rental Extension (`POST /api/v1/rentals/{rental}/extend`)
+- Payload: `{ ends_at: ISO-8601 datetime, notes?: string (max 1000) }`.
+- Inside `DB::transaction(..., 3)` locking `vehicle`, `rental`, and `reservation`:
+  1. Require `rental.status === 'active'` (else `409`).
+  2. Require `ends_at->gt($reservation->ends_at)` (else `422` on `ends_at`).
+  3. Check overlapping `confirmed` reservations for same `vehicle_id` excluding `$reservation->id`: `where('starts_at', '<', $newEndsAt)->where('ends_at', '>', $reservation->ends_at)->exists()` → abort `409`.
+  4. Update `$reservation->ends_at`, write `RecordAudit::write($user, 'rental.extended', $rental)`, return `new RecordResource($rental)`.
+
+#### C. Anytime Handover Timing (`TransitionRental::handle`)
+- Remove the scheduled-window hard `409` block (`$reservation->starts_at->lte(now()) && $reservation->ends_at->isFuture()`) from `handover` so early and late handovers succeed anytime while operational integrity still holds (frontend displays a ±30 minute warning banner + required confirmation checkbox):
+```php
+abort_unless(
+    $rental->status === 'draft'
+    && $vehicle->status === 'available'
+    && $reservation->status === 'confirmed',
+    409,
+    'Rental cannot be handed over at this time.'
+);
+```
+- Keep odometer monotonicity (`odometer >= $vehicle->odometer`) and `lockForUpdate()`.
+- **Recommended audit enrichment:** Record `{ scheduled_at, delta_minutes }` in `RecordAudit::write` when handover or return occurs more than 30 minutes before or after `starts_at` / `ends_at`.
+
+### 6.4 Driver Self-Scoped Access (`driver` role)
+- `GET /api/v1/rentals`: allow `driver` role automatically scoped with `->where('driver_user_id', $user->id)` when lacking `rentals.view`.
+- `GET /api/v1/rentals/{rental}` & `POST /api/v1/rentals/{rental}/{handover|return}`: allow `driver` **only** when `$rental->driver_user_id === $user->id` (else `403`/`404`). Keep `extend` and `assign-driver` restricted to `rentals.manage`.
+- `GET/POST /api/v1/documents` & `GET /api/v1/documents/{document}`: allow `driver` **only** when `entity_type === 'rental'` and referenced rental belongs to `$user->id`.
+
+### 6.5 Polymorphic Documents (`StoreDocumentRequest` & `DocumentController`)
+```php
+'entity_type' => ['sometimes', 'nullable', Rule::in(['vehicle', 'customer', 'reservation', 'rental', 'quotation', 'invoice'])],
+'entity_id' => ['required_with:entity_type', 'nullable', 'integer', 'min:1'],
+'expires_at' => ['sometimes', 'nullable', 'date'],
+```
+Verify target entity exists in same `(company_id, branch_id)` and is accessible (else `404`/`422`). Retain `mimes:pdf,jpg,jpeg,png`, `max:10240`, `nosniff`, and `private, no-store` streaming headers.
+
+### 6.6 Recommended Read-Only Summary Fields on `RecordResource`
+Eager-load linked relations to eliminate client N+1 lookups:
+- **`Reservation`**: `customer_name`, `vehicle_registration`, `vehicle_label`, `has_rental`, `rental_id`.
+- **`Rental`**: `odometer_unit: 'km'`, `customer_id`, `customer_name`, `vehicle_registration`, `vehicle_label`, `driver_name`, `starts_at`, `ends_at`.
+
+### 6.7 Required Feature Tests (`tests/Feature/MilestoneSixTest.php`)
+1. Scoped pagination (>25 rows), search, and filters on `/reservations`, `/rentals`, `/documents` with cross-company/branch isolation.
+2. `POST /api/v1/rentals/{id}/extend`: succeeds when free, `409` on overlap, `409` on draft/returned, `422` on non-increasing `ends_at`.
+3. Anytime handover (both before `starts_at` and after `ends_at` while vehicle available & reservation confirmed) + odometer monotonicity.
+4. Driver assignment validation + `driver` self-scoping (assigned rentals & rental photos only; `403`/`404` for unassigned records, `extend`, `assign-driver`).
+5. Polymorphic `documents` upload (`entity_type`, `entity_id`, `expires_at`, integer IDs in JSON response) and streamed download headers.
+
+---
+
+## Milestone 7 — Multi-Vehicle Quotations, Discount Approvals, VAT, Financial Settings & PDF Engine (PR #10)
+
+### 7.1 Database Migrations
+
+#### A. Add Financial Settings columns to `companies`
+```php
+Schema::table('companies', function (Blueprint $table): void {
+    $table->decimal('vat_rate_pct', 5, 2)->default(15.00)->after('currency');
+    $table->decimal('discount_approval_threshold_pct', 5, 2)->default(10.00)->after('vat_rate_pct');
+});
+```
+Cast both as `'float'` in `Company` so JSON serialization returns clean numbers (`0..100`).
+
+#### B. Create `quotations` and `quotation_vehicles` tables
+```php
+Schema::create('quotations', function (Blueprint $table): void {
+    $table->id();
+    $table->foreignId('company_id')->constrained()->cascadeOnDelete();
+    $table->foreignId('branch_id')->constrained()->cascadeOnDelete();
+    $table->foreignId('customer_id')->constrained()->restrictOnDelete();
+    $table->foreignId('created_by')->nullable()->constrained('users')->nullOnDelete();
+    $table->timestampTz('starts_at');
+    $table->timestampTz('ends_at');
+    $table->unsignedInteger('rental_days'); // max(1, ceil((ends_at - starts_at) / 24h))
+    $table->string('status', 32)->default('approved'); // draft | pending_approval | approved | rejected | cancelled | converted
+    $table->decimal('discount_pct', 5, 2)->default(0.00);
+    $table->string('discount_status', 32)->default('not_required'); // not_required | pending | approved | rejected
+    $table->foreignId('discount_decided_by')->nullable()->constrained('users')->nullOnDelete();
+    $table->timestampTz('discount_decided_at')->nullable();
+    $table->string('discount_decision_notes', 500)->nullable();
+    $table->unsignedBigInteger('subtotal_minor');
+    $table->unsignedBigInteger('discount_minor')->default(0);
+    $table->decimal('vat_rate_pct', 5, 2);
+    $table->unsignedBigInteger('vat_minor')->default(0);
+    $table->unsignedBigInteger('total_minor');
+    $table->text('notes')->nullable();
+    $table->timestampTz('converted_at')->nullable();
+    $table->timestamps();
+
+    $table->index(['company_id', 'branch_id', 'status']);
+    $table->index(['company_id', 'customer_id']);
+});
+
+Schema::create('quotation_vehicles', function (Blueprint $table): void {
+    $table->id();
+    $table->foreignId('quotation_id')->constrained()->cascadeOnDelete();
+    $table->foreignId('vehicle_id')->constrained()->restrictOnDelete();
+    $table->unsignedBigInteger('daily_rate_minor'); // snapshot of vehicle.daily_rate_minor at quote creation (> 0)
+    $table->unsignedBigInteger('line_subtotal_minor'); // daily_rate_minor * rental_days
+    $table->foreignId('reservation_id')->nullable()->constrained('reservations')->nullOnDelete();
+    $table->timestamps();
+
+    $table->unique(['quotation_id', 'vehicle_id']);
+});
+```
+
+### 7.2 Seeded Roles & Permissions (`RolePermissionSeeder.php`)
+Add permissions:
+- `settings.manage` → `company-admin`
+- `quotations.view` → `company-admin`, `operations`, `finance`, `viewer`
+- `quotations.manage` → `company-admin`, `operations`
+- `quotations.approve_discount` → `company-admin`, `finance`
+- Seed the `finance` role with `companies.view`, `branches.view`, `customers.view`, `vehicles.view`, `reservations.view`, `rentals.view`, `documents.view`, `quotations.view`, `quotations.approve_discount` (and M8 `finance.*` when implemented).
+
+### 7.3 Company Financial Settings API
+- **`GET /api/v1/companies/{company}/settings`** (`companies.view`, verified company membership):
+  ```json
+  {
+    "data": {
+      "company_id": 1,
+      "currency": "ZMW",
+      "vat_rate_pct": 15,
+      "discount_approval_threshold_pct": 10
+    }
+  }
+  ```
+- **`PATCH /api/v1/companies/{company}/settings`** (`settings.manage`, whole-company membership):
+  - Validates `vat_rate_pct`: `['required', 'numeric', 'min:0', 'max:100']`
+  - Validates `discount_approval_threshold_pct`: `['required', 'numeric', 'min:0', 'max:100']`
+  - Writes `RecordAudit::write($user, 'company.settings_updated', $company)`.
+  - Never retroactively recalculates existing quotations or issued invoices.
+
+### 7.4 Quotations API (`QuotationController`)
+
+#### A. `GET /api/v1/quotations` (`quotations.view`)
+- Scoped `DirectoryQuery::apply`, `paginate(25)->withQueryString()`.
+- Required: `company_id`. Optional: `branch_id`, `status` (`draft|pending_approval|approved|rejected|cancelled|converted`), `customer_id`, `q` (customer name, vehicle registration, quotation ID), `page`.
+- Each quotation resource includes:
+  - Core fields (`id`, `company_id`, `branch_id`, `customer_id`, `customer_name`, `starts_at`, `ends_at`, `rental_days`, `status`, `discount_pct`, `discount_status`, `discount_decided_by`, `discount_decided_by_name`, `discount_decided_at`, `discount_decision_notes`, `subtotal_minor`, `discount_minor`, `vat_rate_pct`, `vat_minor`, `total_minor`, `notes`, `converted_at`, `created_at`, `updated_at`)
+  - `vehicles`: array of `{ vehicle_id, registration, make, model, daily_rate_minor, line_subtotal_minor, reservation_id }`
+  - `reservation_ids`: integer array of created reservation IDs once converted.
+
+#### B. `POST /api/v1/quotations` (`quotations.manage`)
+- Payload:
+  ```json
+  {
+    "company_id": 1,
+    "branch_id": 2,
+    "customer_id": 10,
+    "vehicle_ids": [10, 14],
+    "starts_at": "2026-12-01T09:00:00Z",
+    "ends_at": "2026-12-04T09:00:00Z",
+    "discount_pct": 12.5,
+    "notes": "Corporate multi-vehicle fleet hire"
+  }
+  ```
+- Validation & authoritative server pricing:
+  1. `vehicle_ids`: `required|array|min:1|max:25`, each unique positive int belonging to `(company_id, branch_id)` with `status = 'available'` **and `daily_rate_minor > 0`** (else `422` on `vehicle_ids`).
+  2. `ends_at > starts_at` (else `422` on `ends_at`).
+  3. `discount_pct`: `sometimes|numeric|min:0|max:100` (default `0`).
+  4. Verify no selected vehicle has an overlapping `confirmed` reservation in `[starts_at, ends_at]` (else `409`).
+  5. Compute integer minor units server-side (started 24h blocks, VAT after discount):
+     - `rental_days = max(1, (int) ceil(($endMs - $startMs) / 86_400_000))`
+     - `line_subtotal_minor = vehicle.daily_rate_minor * rental_days`
+     - `subtotal_minor = sum(line_subtotal_minor)`
+     - `discount_minor = (int) round($subtotal_minor * ($discount_pct / 100))`
+     - `taxable_minor = max(0, $subtotal_minor - $discount_minor)`
+     - `vat_minor = (int) round($taxable_minor * ($company->vat_rate_pct / 100))`
+     - `total_minor = $taxable_minor + $vat_minor`
+  6. Discount approval gate:
+     - If `$discount_pct > $company->discount_approval_threshold_pct`: `status = 'pending_approval'`, `discount_status = 'pending'`.
+     - Else: `status = 'approved'`, `discount_status = 'not_required'`.
+  7. Write `RecordAudit::write($user, 'quotation.created', $quotation)` and return `201`.
+
+#### C. `POST /api/v1/quotations/{id}/approve-discount` & `reject-discount` (`quotations.approve_discount`)
+- Payload: `{ notes?: string (max 500) }`.
+- Require `quotation.status === 'pending_approval'` and `quotation.discount_status === 'pending'` (else `409`).
+- `approve-discount`: sets `status = 'approved'`, `discount_status = 'approved'`, stamps `discount_decided_by = $user->id`, `discount_decided_at = now()`, `discount_decision_notes`. Audit: `quotation.discount_approved`.
+- `reject-discount`: sets `status = 'rejected'`, `discount_status = 'rejected'`, stamps decider & notes. Quotation remains immutable (frontend offers `"Revise as new quote"` to create a fresh quotation). Audit: `quotation.discount_rejected`.
+
+#### D. `POST /api/v1/quotations/{id}/cancel` (`quotations.manage`)
+- Allowed when `quotation.status` is `'pending_approval'` or `'approved'` (else `409`).
+- Sets `status = 'cancelled'`, writes `RecordAudit::write($user, 'quotation.cancelled', $quotation)`, returns `200`.
+
+#### E. `POST /api/v1/quotations/{id}/convert` (`quotations.manage` + `reservations.manage`)
+- Inside `DB::transaction(..., 3)`:
+  1. Lock `quotation` (`lockForUpdate()`); require `status === 'approved'` (abort `409` if `pending_approval`, `rejected`, `cancelled`, or already `converted`).
+  2. Lock ALL `vehicles` in `quotation_vehicles` ordered by `vehicle_id ASC` (deadlock-safe) with `lockForUpdate()`.
+  3. Verify every vehicle is still `status === 'available'` and has zero overlapping `confirmed` reservations for `[starts_at, ends_at]`; if ANY vehicle conflicts, abort `409` and roll back the entire transaction (zero partial reservations).
+  4. Create one `confirmed` `Reservation` per `quotation_vehicle` row and store its `reservation_id` back on `quotation_vehicles`.
+  5. Update `quotation.status = 'converted'`, `quotation.converted_at = now()`.
+  6. Write `RecordAudit::write($user, 'quotation.converted', $quotation)` and return `200` with updated quotation (including `reservation_ids[]`).
+
+### 7.5 Authoritative Server PDF Export (`GET /api/v1/{domain}/{id}/pdf`) `[BACKEND CONFIRMATION REQUIRED: DomPDF vs. Browsershot]`
+- Endpoints:
+  - `GET /api/v1/quotations/{id}/pdf` (`quotations.view`)
+  - `GET /api/v1/reservations/{id}/pdf` (`reservations.view`)
+  - `GET /api/v1/rentals/{id}/pdf` (`rentals.view` or assigned `driver`)
+- Headers:
+  - `Content-Type: application/pdf`
+  - `Content-Disposition: inline; filename="{domain}-{id}.pdf"` (or `attachment` if `?download=1`)
+  - `Cache-Control: private, no-store, max-age=0`
+  - `X-Content-Type-Options: nosniff`
+
+### 7.6 Required Feature Tests (`tests/Feature/MilestoneSevenTest.php`)
+1. Company financial settings `GET`/`PATCH` validation (`0..100`), `403` for non-admin, existing quotes unchanged after settings update.
+2. Multi-vehicle quotation creation with 2+ priced vehicles: server computes exact `rental_days`, `subtotal_minor`, `discount_minor`, `vat_minor`, `total_minor`; rejects any vehicle with `daily_rate_minor === 0` (`422`).
+3. Discount > threshold forces `pending_approval`; worker without `quotations.approve_discount` receives `403` on approve and `409` on convert.
+4. Finance/Admin approves discount → `convert` atomically creates all linked `Reservation` records; overlapping vehicle rolls back ALL reservations with `409`.
+5. Rejecting a discount marks the quote immutable `rejected`; cancelling an unconverted quote marks it `cancelled` (`409` on converted quotes).
+6. `GET /api/v1/{quotations|reservations|rentals}/{id}/pdf` enforces company/branch isolation & permissions and returns valid `%PDF-` bytes with `nosniff` + `private, no-store`.
+7. Server-side `sort` & `dir` ordering across paginated collections (`> 25` rows) with strict allowlist validation (`422` on unknown sort keys).
+
+### 7.7 Server-Side Collection Sorting (`DirectoryQuery::apply` — Cross-Cutting M6/M7)
+Add optional `sort` and `dir` (`asc` | `desc`, default `asc`, `dir` requires `sort`) to `DirectoryQuery::apply()` using a strict per-controller column allowlist (never interpolating raw user input into `ORDER BY`), with deterministic `->orderBy('id', $dir)` tie-breaker and `NULLS LAST` for nullable columns (`email`, `expires_at`, `driver_user_id`):
+
+| Endpoint | Allowlisted `sort` keys |
+| :--- | :--- |
+| `GET /api/v1/customers` | `name`, `type`, `email` |
+| `GET /api/v1/vehicles` | `registration`, `make`, `daily_rate_minor`, `odometer`, `status` |
+| `GET /api/v1/quotations` | `id`, `customer_name`, `total_minor`, `status` |
+| `GET /api/v1/reservations` | `id`, `customer_name`, `vehicle_registration`, `starts_at`, `status` |
+| `GET /api/v1/rentals` | `id`, `vehicle_registration`, `customer_name`, `driver_name`, `status` |
+| `GET /api/v1/documents` | `original_name`, `size`, `expires_at` |
+| `GET /api/v1/users` | `name`, `email`, `role`, `is_active` |
+
+---
+
+## Milestone 8 — Live Finance, Invoicing, Payments, Refunds, Expenses, AR Ageing & GL (PR #11)
+*(Will be appended when Milestone 8 is implemented.)*
+
+## Milestone 9 — Live Maintenance, Inventory, Procurement & Vehicle 360 (PR #12)
+*(Will be appended when Milestone 9 is implemented.)*
+
+## Milestone 10 — Live Messaging/Chat Center, Dashboard KPIs/Infographics, Reports & Audit (PR #13)
+*(Will be appended when Milestone 10 is implemented.)*

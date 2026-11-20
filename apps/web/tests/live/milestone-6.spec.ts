@@ -1,7 +1,7 @@
 import { test, expect, type Page } from "@playwright/test";
 import { randomUUID } from "node:crypto";
 
-const fixture = "http://127.0.0.1:3201";
+const fixture = "http://127.0.0.1:4201";
 
 async function login(page: Page, role = "admin") {
   await page.goto("/login");

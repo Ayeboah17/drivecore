@@ -33,7 +33,7 @@ test("proxy allowlist excludes tokens, deletes, arbitrary URLs and unsupported d
     "https://elsewhere.test",
     "api/v1/../users",
     "api/v1/invoices",
-    "api/v1/quotations",
+    "api/v1/invoices",
   ])
     expect(allowedPath("GET", path)).toBe(false);
   expect(allowedPath("DELETE", "api/v1/customers/1")).toBe(false);
@@ -360,7 +360,7 @@ test("M6 reservations, rentals, and documents validate scoped queries, multipart
     "api/v1/rentals?company_id=1&status=unknown",
     "api/v1/documents",
     "api/v1/documents?company_id=1&entity_id=5",
-    "api/v1/documents?company_id=1&entity_type=invoice",
+    "api/v1/documents?company_id=1&entity_type=unknown",
   ]) {
     const [path] = invalid.split("?");
     const res = await proxy(make(invalid), path, config, async () => {
@@ -444,4 +444,85 @@ test("M6 reservations, rentals, and documents validate scoped queries, multipart
       }),
   );
   expect(htmlDownload.status).toBe(502);
+});
+
+test("M7 quotations, company settings, and PDF exports enforce scoped queries and binary streaming", async () => {
+  for (const invalid of [
+    "api/v1/quotations",
+    "api/v1/quotations?company_id=1&status=invalid",
+    "api/v1/quotations/1/pdf?foo=bar",
+  ]) {
+    const [path] = invalid.split("?");
+    const res = await proxy(make(invalid), path, config, async () => {
+      throw new Error("Must not reach upstream");
+    });
+    expect(res.status).toBe(400);
+  }
+
+  for (const valid of [
+    "api/v1/companies/1/settings",
+    "api/v1/quotations?company_id=1&status=pending_approval&page=1",
+    "api/v1/quotations/5",
+  ]) {
+    const [path] = valid.split("?");
+    const res = await proxy(make(valid), path, config, async () =>
+      Response.json({ data: {} }),
+    );
+    expect(res.status).toBe(200);
+  }
+
+  const pdfRes = await proxy(
+    make("api/v1/quotations/5/pdf?download=1"),
+    "api/v1/quotations/5/pdf",
+    config,
+    async () =>
+      new Response("%PDF-1.4\n%%EOF", {
+        status: 200,
+        headers: {
+          "Content-Type": "application/pdf",
+          "Content-Disposition": 'attachment; filename="quotation-5.pdf"',
+        },
+      }),
+  );
+  expect(pdfRes.status).toBe(200);
+  expect(pdfRes.headers.get("content-type")).toBe("application/pdf");
+  expect(pdfRes.headers.get("x-content-type-options")).toBe("nosniff");
+  expect(await pdfRes.text()).toContain("%PDF-1.4");
+});
+
+test("collection sorting enforces per-endpoint allowlists and valid direction pairs", async () => {
+  for (const invalid of [
+    "api/v1/customers?company_id=1&sort=password&dir=asc",
+    "api/v1/customers?company_id=1&dir=asc",
+    "api/v1/customers?company_id=1&sort=name&dir=sideways",
+    "api/v1/vehicles?company_id=1&sort=email&dir=asc",
+    "api/v1/quotations?company_id=1&sort=unknown&dir=desc",
+    "api/v1/reservations?company_id=1&sort=total_minor&dir=asc",
+    "api/v1/rentals?company_id=1&sort=email&dir=desc",
+    "api/v1/documents?company_id=1&sort=status&dir=asc",
+    "api/v1/users?company_id=1&sort=registration&dir=asc",
+  ]) {
+    const [path] = invalid.split("?");
+    const res = await proxy(make(invalid), path, config, async () => {
+      throw new Error("Must not reach upstream");
+    });
+    expect(res.status).toBe(400);
+  }
+
+  for (const valid of [
+    "api/v1/customers?company_id=1&sort=name&dir=asc",
+    "api/v1/vehicles?company_id=1&sort=daily_rate_minor&dir=desc",
+    "api/v1/quotations?company_id=1&sort=total_minor&dir=desc",
+    "api/v1/reservations?company_id=1&sort=starts_at&dir=asc",
+    "api/v1/rentals?company_id=1&sort=driver_name&dir=asc",
+    "api/v1/documents?company_id=1&sort=expires_at&dir=desc",
+    "api/v1/users?company_id=1&sort=is_active&dir=desc",
+  ]) {
+    const [path] = valid.split("?");
+    const res = await proxy(make(valid), path, config, async (url) => {
+      expect(String(url)).toBe(`https://api.example.test/${valid}`);
+      return Response.json({ data: [] });
+    });
+    expect(res.status).toBe(200);
+  }
 });

@@ -34,6 +34,8 @@ export async function listRecords(
     q: string;
     filter: string;
     page: number;
+    sort?: string;
+    dir?: string;
   },
   signal: AbortSignal,
 ) {
@@ -45,6 +47,12 @@ export async function listRecords(
     query.set(domain === "customers" ? "type" : "status", params.filter);
   }
   if (params.page > 1) query.set("page", String(params.page));
+  if (params.sort) {
+    query.set("sort", params.sort);
+    if (params.dir === "asc" || params.dir === "desc") {
+      query.set("dir", params.dir);
+    }
+  }
 
   const schema = domain === "customers" ? customerSchema : vehicleSchema;
   const payload = await read(

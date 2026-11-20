@@ -10,6 +10,7 @@ import { useLiveContext } from "@/features/live/context";
 import { canCreateBranch } from "@/features/setup/contracts";
 import {
   canAccessUserAdmin,
+  canManageCompanySettings,
   canManageUsers,
   managedRoleLabels,
   managedRoleNames,
@@ -19,21 +20,36 @@ import {
 import { errorText } from "@/lib/api/client";
 import {
   DataSearchForm,
+  DataTable,
+  DataTableBody,
+  DataTableCell,
   DataTableFrame,
+  DataTableHead,
+  DataTableHeaderCell,
+  DataTableRow,
+  DataTableSkeleton,
+  StatusDotBadge,
   type ActiveFilterChip,
 } from "@/components/data/data-table";
 import { StatePanel } from "@/components/layout/state-panel";
 import { ViewFadeIn } from "@/components/motion/primitives";
-import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { DriveCoreSelect } from "@/components/ui/drivecore-select";
-import { Skeleton } from "@/components/ui/skeleton";
 import {
   CreateUserDialog,
   EditUserDialog,
   RolesReferenceDialog,
 } from "./dialogs";
+import {
+  nextSortState,
+  parseSortParams,
+  sortRows,
+  type SortDirection,
+} from "@/lib/table-sort";
 import { listRoles, listUsers } from "./service";
+
+const USER_SORT_KEYS = ["name", "email", "role", "is_active"] as const;
+import { FinancialSettingsPanel } from "./settings-panel";
 
 const ROLE_FILTERS = [
   { value: "", label: "All roles" },
@@ -63,6 +79,12 @@ export function UsersAdminPage() {
   const allowed = !!user && canAccessUserAdmin(user, scope.companyId);
   const canManage = !!user && canManageUsers(user, scope.companyId);
   const canManageBranches = !!user && canCreateBranch(user, scope.companyId);
+  const canViewSettings =
+    !!user && canManageCompanySettings(user, scope.companyId);
+  const activeTab: "users" | "settings" =
+    searchParams.get("tab") === "settings" && canViewSettings
+      ? "settings"
+      : "users";
 
   const rawQ = (searchParams.get("q") ?? "").slice(0, 100);
   const rawRole = searchParams.get("role") ?? "";
@@ -76,6 +98,11 @@ export function UsersAdminPage() {
     Number.isInteger(parsedPage) && parsedPage >= 1 && parsedPage <= 1000000
       ? parsedPage
       : 1;
+  const { sort, dir } = parseSortParams(
+    searchParams.get("sort"),
+    searchParams.get("dir"),
+    USER_SORT_KEYS,
+  );
 
   const base = `/companies/${scope.companyId}/users`;
 
@@ -84,6 +111,8 @@ export function UsersAdminPage() {
     role?: string;
     isActive?: string;
     page?: number;
+    sort?: string;
+    dir?: SortDirection | "";
   }) {
     const params = new URLSearchParams();
     params.set("branch", scope.branch);
@@ -91,11 +120,22 @@ export function UsersAdminPage() {
     const nextRole = next.role !== undefined ? next.role : role;
     const nextActive = next.isActive !== undefined ? next.isActive : isActive;
     const nextPage = next.page !== undefined ? next.page : 1;
+    const nextSort = next.sort !== undefined ? next.sort : sort;
+    const nextDir = next.dir !== undefined ? next.dir : dir;
     if (nextQ) params.set("q", nextQ);
     if (nextRole) params.set("role", nextRole);
     if (nextActive) params.set("is_active", nextActive);
+    if (nextSort && nextDir) {
+      params.set("sort", nextSort);
+      params.set("dir", nextDir);
+    }
     if (nextPage > 1) params.set("page", String(nextPage));
     scope.navigate(`${base}?${params.toString()}`);
+  }
+
+  function handleSort(columnKey: string) {
+    const next = nextSortState(sort, dir, columnKey);
+    updateQuery({ sort: next.sort, dir: next.dir, page: 1 });
   }
 
   const users = useQuery({
@@ -103,7 +143,7 @@ export function UsersAdminPage() {
       ...scope.key,
       "users",
       "list",
-      { q: rawQ.trim(), role, isActive, page },
+      { q: rawQ.trim(), role, isActive, page, sort, dir },
     ],
     queryFn: ({ signal }) =>
       listUsers(
@@ -114,6 +154,8 @@ export function UsersAdminPage() {
           role,
           isActive,
           page,
+          sort: sort || undefined,
+          dir: dir || undefined,
         },
         signal,
       ),
@@ -213,6 +255,40 @@ export function UsersAdminPage() {
         </div>
       </div>
 
+      {canViewSettings ? (
+        <div
+          role="tablist"
+          aria-label="Administration sections"
+          className="inline-flex rounded-xl border bg-muted/40 p-1"
+        >
+          {(
+            [
+              ["users", "Users & Roles"],
+              ["settings", "Financial settings"],
+            ] as const
+          ).map(([key, label]) => (
+            <button
+              key={key}
+              type="button"
+              role="tab"
+              aria-selected={activeTab === key}
+              onClick={() => {
+                const params = new URLSearchParams({ branch: scope.branch });
+                if (key === "settings") params.set("tab", "settings");
+                scope.navigate(`${base}?${params.toString()}`);
+              }}
+              className={`rounded-lg px-3.5 py-1.5 text-xs font-medium transition-colors duration-150 focus-visible:outline-2 focus-visible:outline-ring ${
+                activeTab === key
+                  ? "bg-surface text-foreground shadow-2xs"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      ) : null}
+
       {notice ? (
         <div
           role="status"
@@ -232,159 +308,189 @@ export function UsersAdminPage() {
         </div>
       ) : null}
 
-      <DataTableFrame
-        ariaLabel="Users directory"
-        chips={chips}
-        onClearAll={
-          chips.length > 0
-            ? () => updateQuery({ q: "", role: "", isActive: "", page: 1 })
-            : undefined
-        }
-        toolbar={
-          <div className="flex flex-col gap-3 lg:flex-row lg:items-end">
-            <DataSearchForm
-              label="Search users"
-              placeholder="Search name or email…"
-              defaultValue={rawQ}
-              formKey={`${scope.companyId}:${scope.branch}:users:${rawQ}`}
-              onSubmitQuery={(nextQ) => updateQuery({ q: nextQ, page: 1 })}
-            />
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:w-96">
-              <div className="space-y-1.5">
-                <span className="block text-label font-semibold">Role</span>
-                <DriveCoreSelect
-                  ariaLabel="Filter by role"
-                  value={role}
-                  onValueChange={(nextRole) =>
-                    updateQuery({ role: nextRole, page: 1 })
-                  }
-                  options={ROLE_FILTERS}
-                />
-              </div>
-              <div className="space-y-1.5">
-                <span className="block text-label font-semibold">Status</span>
-                <DriveCoreSelect
-                  ariaLabel="Filter by account status"
-                  value={isActive}
-                  onValueChange={(nextActive) =>
-                    updateQuery({ isActive: nextActive, page: 1 })
-                  }
-                  options={STATUS_FILTERS}
-                />
+      {activeTab === "settings" ? (
+        <FinancialSettingsPanel />
+      ) : (
+        <DataTableFrame
+          ariaLabel="Users directory"
+          chips={chips}
+          onClearAll={
+            chips.length > 0
+              ? () => updateQuery({ q: "", role: "", isActive: "", page: 1 })
+              : undefined
+          }
+          toolbar={
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-end">
+              <DataSearchForm
+                label="Search users"
+                placeholder="Search name or email…"
+                defaultValue={rawQ}
+                formKey={`${scope.companyId}:${scope.branch}:users:${rawQ}`}
+                onSubmitQuery={(nextQ) => updateQuery({ q: nextQ, page: 1 })}
+              />
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:w-96">
+                <div className="space-y-1.5">
+                  <span className="block text-xs font-medium text-muted-foreground">
+                    Role
+                  </span>
+                  <DriveCoreSelect
+                    ariaLabel="Filter by role"
+                    value={role}
+                    onValueChange={(nextRole) =>
+                      updateQuery({ role: nextRole, page: 1 })
+                    }
+                    options={ROLE_FILTERS}
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <span className="block text-xs font-medium text-muted-foreground">
+                    Status
+                  </span>
+                  <DriveCoreSelect
+                    ariaLabel="Filter by account status"
+                    value={isActive}
+                    onValueChange={(nextActive) =>
+                      updateQuery({ isActive: nextActive, page: 1 })
+                    }
+                    options={STATUS_FILTERS}
+                  />
+                </div>
               </div>
             </div>
-          </div>
-        }
-        footer={
-          users.data ? (
-            <>
-              <span className="font-mono text-xs tabular-nums">
-                {users.data.total}{" "}
-                {users.data.total === 1 ? "user" : "users"} · Page{" "}
-                {users.data.page} of {users.data.lastPage}
-              </span>
-              <div className="flex items-center gap-2">
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  disabled={page <= 1 || users.isFetching}
-                  onClick={() => updateQuery({ page: Math.max(1, page - 1) })}
-                >
-                  Previous
-                </Button>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  disabled={page >= users.data.lastPage || users.isFetching}
-                  onClick={() => updateQuery({ page: page + 1 })}
-                >
-                  Next
-                </Button>
-              </div>
-            </>
-          ) : undefined
-        }
-      >
-        {users.isPending ? (
-          <div
-            role="status"
-            aria-label="Loading users"
-            className="space-y-3 p-card"
-          >
-            <p className="text-sm text-muted-foreground">Loading users…</p>
-            {[0, 1, 2].map((row) => (
-              <Skeleton key={row} className="h-11 w-full rounded-xl" />
-            ))}
-          </div>
-        ) : users.error ? (
-          <div className="p-card">
-            <StatePanel
-              title="Users unavailable"
-              onRetry={() => {
-                void users.refetch();
-              }}
-            >
-              {errorText(users.error)}
-            </StatePanel>
-          </div>
-        ) : users.data.items.length === 0 ? (
-          <div className="p-card">
-            {page > 1 && users.data.total > 0 ? (
-              <StatePanel title="Page out of range">
-                <div className="space-y-3">
-                  <p>No users exist on page {page}.</p>
+          }
+          footer={
+            users.data ? (
+              <>
+                <span className="font-mono text-xs tabular-nums">
+                  {users.data.total}{" "}
+                  {users.data.total === 1 ? "user" : "users"} · Page{" "}
+                  {users.data.page} of {users.data.lastPage}
+                </span>
+                <div className="flex items-center gap-2">
                   <Button
                     type="button"
-                    variant="outline"
                     size="sm"
-                    onClick={() => updateQuery({ page: 1 })}
+                    variant="outline"
+                    disabled={page <= 1 || users.isFetching}
+                    onClick={() => updateQuery({ page: Math.max(1, page - 1) })}
                   >
-                    Back to page 1
+                    Previous
                   </Button>
-                </div>
-              </StatePanel>
-            ) : chips.length > 0 ? (
-              <StatePanel title="No matching users">
-                <div className="space-y-3">
-                  <p>
-                    No users matched the active search or filter criteria in
-                    this workspace scope.
-                  </p>
                   <Button
                     type="button"
-                    variant="outline"
                     size="sm"
-                    onClick={() =>
-                      updateQuery({ q: "", role: "", isActive: "", page: 1 })
-                    }
+                    variant="outline"
+                    disabled={page >= users.data.lastPage || users.isFetching}
+                    onClick={() => updateQuery({ page: page + 1 })}
                   >
-                    Clear search and filters
+                    Next
                   </Button>
                 </div>
+              </>
+            ) : undefined
+          }
+        >
+          {users.isPending ? (
+            <DataTableSkeleton columns={6} label="Loading users" />
+          ) : users.error ? (
+            <div className="p-card">
+              <StatePanel
+                title="Users unavailable"
+                onRetry={() => {
+                  void users.refetch();
+                }}
+              >
+                {errorText(users.error)}
               </StatePanel>
-            ) : (
-              <StatePanel title="No users found">
-                <p>No company users are assigned in this workspace scope.</p>
-              </StatePanel>
-            )}
-          </div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full border-collapse text-left text-sm">
-              <thead className="bg-structural text-xs font-semibold uppercase tracking-wider text-structural-foreground">
+            </div>
+          ) : users.data.items.length === 0 ? (
+            <div className="p-card">
+              {page > 1 && users.data.total > 0 ? (
+                <StatePanel title="Page out of range">
+                  <div className="space-y-3">
+                    <p>No users exist on page {page}.</p>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => updateQuery({ page: 1 })}
+                    >
+                      Back to page 1
+                    </Button>
+                  </div>
+                </StatePanel>
+              ) : chips.length > 0 ? (
+                <StatePanel title="No matching users">
+                  <div className="space-y-3">
+                    <p>
+                      No users matched the active search or filter criteria in
+                      this workspace scope.
+                    </p>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() =>
+                        updateQuery({ q: "", role: "", isActive: "", page: 1 })
+                      }
+                    >
+                      Clear search and filters
+                    </Button>
+                  </div>
+                </StatePanel>
+              ) : (
+                <StatePanel title="No users found">
+                  <p>No company users are assigned in this workspace scope.</p>
+                </StatePanel>
+              )}
+            </div>
+          ) : (
+            <DataTable>
+              <DataTableHead>
                 <tr>
-                  <th className="px-4 py-3">Name</th>
-                  <th className="px-4 py-3">Email</th>
-                  <th className="px-4 py-3">Role</th>
-                  <th className="px-4 py-3">Branch scope</th>
-                  <th className="px-4 py-3">Status</th>
-                  <th className="px-4 py-3 text-right">Action</th>
+                  <DataTableHeaderCell
+                    sortKey="name"
+                    activeSort={sort}
+                    activeDir={dir}
+                    onSort={handleSort}
+                  >
+                    Name
+                  </DataTableHeaderCell>
+                  <DataTableHeaderCell
+                    sortKey="email"
+                    activeSort={sort}
+                    activeDir={dir}
+                    onSort={handleSort}
+                  >
+                    Email
+                  </DataTableHeaderCell>
+                  <DataTableHeaderCell
+                    sortKey="role"
+                    activeSort={sort}
+                    activeDir={dir}
+                    onSort={handleSort}
+                  >
+                    Role
+                  </DataTableHeaderCell>
+                  <DataTableHeaderCell>Branch scope</DataTableHeaderCell>
+                  <DataTableHeaderCell
+                    sortKey="is_active"
+                    activeSort={sort}
+                    activeDir={dir}
+                    onSort={handleSort}
+                  >
+                    Status
+                  </DataTableHeaderCell>
+                  <DataTableHeaderCell align="right">Action</DataTableHeaderCell>
                 </tr>
-              </thead>
-              <tbody className="divide-y">
-                {users.data.items.map((row) => {
+              </DataTableHead>
+              <DataTableBody>
+                {sortRows(users.data.items, sort, dir, {
+                  name: (u) => u.name,
+                  email: (u) => u.email,
+                  role: (u) => u.roles[0] ?? "",
+                  is_active: (u) => u.is_active,
+                }).map((row) => {
                   const isSelf = row.id === user!.id;
                   const roleName = row.roles[0] ?? "unassigned";
                   const roleDisplay = managedRoleNames.includes(
@@ -393,44 +499,36 @@ export function UsersAdminPage() {
                     ? managedRoleLabels[roleName as ManagedRoleName]
                     : roleName;
                   return (
-                    <tr
-                      key={row.id}
-                      className="transition-colors hover:bg-muted/35"
-                    >
-                      <td className="px-4 py-3 font-semibold">
+                    <DataTableRow key={row.id}>
+                      <DataTableCell className="font-medium">
                         <span className="inline-flex items-center gap-2">
                           <span>{row.name}</span>
                           {isSelf ? (
-                            <span className="rounded-md bg-structural px-1.5 py-0.5 font-mono text-[10px] font-bold uppercase text-structural-foreground">
+                            <span className="rounded-md border border-border/80 bg-muted/50 px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
                               You
                             </span>
                           ) : null}
                         </span>
-                      </td>
-                      <td className="px-4 py-3 font-mono text-xs text-muted-foreground">
+                      </DataTableCell>
+                      <DataTableCell className="font-mono text-xs text-muted-foreground">
                         {row.email}
-                      </td>
-                      <td className="px-4 py-3">
-                        <Badge variant="outline" className="font-mono text-xs">
+                      </DataTableCell>
+                      <DataTableCell>
+                        <StatusDotBadge tone="neutral">
                           {roleDisplay}
-                        </Badge>
-                      </td>
-                      <td className="px-4 py-3 text-muted-foreground">
+                        </StatusDotBadge>
+                      </DataTableCell>
+                      <DataTableCell className="text-muted-foreground">
                         {branchLabel(row.branch_id)}
-                      </td>
-                      <td className="px-4 py-3">
-                        <Badge
-                          variant="outline"
-                          className={
-                            row.is_active
-                              ? "border-success text-success-foreground"
-                              : "border-danger text-danger-foreground"
-                          }
+                      </DataTableCell>
+                      <DataTableCell>
+                        <StatusDotBadge
+                          tone={row.is_active ? "success" : "danger"}
                         >
                           {row.is_active ? "Active" : "Inactive"}
-                        </Badge>
-                      </td>
-                      <td className="px-4 py-3 text-right">
+                        </StatusDotBadge>
+                      </DataTableCell>
+                      <DataTableCell align="right">
                         {canManage ? (
                           isSelf ? (
                             <span className="text-xs text-muted-foreground">
@@ -442,6 +540,7 @@ export function UsersAdminPage() {
                               size="sm"
                               variant="outline"
                               onClick={() => setEditing(row)}
+                              className="transition-transform duration-150 ease-out active:scale-[0.98]"
                             >
                               Edit access
                             </Button>
@@ -451,15 +550,15 @@ export function UsersAdminPage() {
                             Read-only
                           </span>
                         )}
-                      </td>
-                    </tr>
+                      </DataTableCell>
+                    </DataTableRow>
                   );
                 })}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </DataTableFrame>
+              </DataTableBody>
+            </DataTable>
+          )}
+        </DataTableFrame>
+      )}
 
       <CreateUserDialog
         open={createOpen}

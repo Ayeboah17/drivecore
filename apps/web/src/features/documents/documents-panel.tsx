@@ -13,7 +13,15 @@ import {
 } from "@/lib/api/contracts";
 import {
   DataSearchForm,
+  DataTable,
+  DataTableBody,
+  DataTableCell,
   DataTableFrame,
+  DataTableHead,
+  DataTableHeaderCell,
+  DataTableRow,
+  DataTableSkeleton,
+  StatusDotBadge,
   type ActiveFilterChip,
 } from "@/components/data/data-table";
 import { StatePanel } from "@/components/layout/state-panel";
@@ -21,6 +29,12 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { DriveCoreSelect } from "@/components/ui/drivecore-select";
 import { Skeleton } from "@/components/ui/skeleton";
+import {
+  nextSortState,
+  parseSortParams,
+  sortRows,
+  type SortDirection,
+} from "@/lib/table-sort";
 import {
   documentDownloadUrl,
   documentExpiryState,
@@ -211,6 +225,8 @@ const ENTITY_FILTER_OPTIONS = [
   })),
 ] as const;
 
+const DOC_SORT_KEYS = ["original_name", "size", "expires_at"] as const;
+
 /** Full scoped Documents library rendered inside the Live Operations workspace. */
 export function DocumentsDirectory({ canUpload }: { canUpload: boolean }) {
   const scope = useLiveContext();
@@ -229,11 +245,18 @@ export function DocumentsDirectory({ canUpload }: { canUpload: boolean }) {
     Number.isInteger(parsedPage) && parsedPage >= 1 && parsedPage <= 1000000
       ? parsedPage
       : 1;
+  const { sort, dir } = parseSortParams(
+    searchParams.get("dsort"),
+    searchParams.get("ddir"),
+    DOC_SORT_KEYS,
+  );
 
   function updateQuery(next: {
     q?: string;
     entityType?: string;
     page?: number;
+    sort?: string;
+    dir?: SortDirection | "";
   }) {
     const params = new URLSearchParams();
     params.set("branch", scope.branch);
@@ -242,10 +265,21 @@ export function DocumentsDirectory({ canUpload }: { canUpload: boolean }) {
     const nextType =
       next.entityType !== undefined ? next.entityType : entityType;
     const nextPage = next.page !== undefined ? next.page : 1;
+    const nextSort = next.sort !== undefined ? next.sort : sort;
+    const nextDir = next.dir !== undefined ? next.dir : dir;
     if (nextQ) params.set("dq", nextQ);
     if (nextType) params.set("entity_type", nextType);
+    if (nextSort && nextDir) {
+      params.set("dsort", nextSort);
+      params.set("ddir", nextDir);
+    }
     if (nextPage > 1) params.set("dpage", String(nextPage));
     scope.navigate(`/companies/${scope.companyId}/operations?${params.toString()}`);
+  }
+
+  function handleSort(columnKey: string) {
+    const next = nextSortState(sort, dir, columnKey);
+    updateQuery({ sort: next.sort, dir: next.dir, page: 1 });
   }
 
   const docs = useQuery({
@@ -253,7 +287,7 @@ export function DocumentsDirectory({ canUpload }: { canUpload: boolean }) {
       ...scope.key,
       "documents",
       "list",
-      { q: rawQ.trim(), entityType, page },
+      { q: rawQ.trim(), entityType, page, sort, dir },
     ],
     queryFn: ({ signal }) =>
       listDocuments(
@@ -263,6 +297,8 @@ export function DocumentsDirectory({ canUpload }: { canUpload: boolean }) {
           entityType: entityType || undefined,
           q: rawQ,
           page,
+          sort: sort || undefined,
+          dir: dir || undefined,
         },
         signal,
       ),
@@ -337,7 +373,7 @@ export function DocumentsDirectory({ canUpload }: { canUpload: boolean }) {
               onSubmitQuery={(q) => updateQuery({ q, page: 1 })}
             />
             <div className="w-full space-y-1.5 sm:w-52">
-              <span className="block text-label font-semibold">
+              <span className="block text-xs font-medium text-muted-foreground">
                 Linked record
               </span>
               <DriveCoreSelect
@@ -384,16 +420,7 @@ export function DocumentsDirectory({ canUpload }: { canUpload: boolean }) {
         }
       >
         {docs.isPending ? (
-          <div
-            role="status"
-            aria-label="Loading documents"
-            className="space-y-3 p-card"
-          >
-            <p className="text-sm text-muted-foreground">Loading documents…</p>
-            {[0, 1, 2].map((idx) => (
-              <Skeleton key={idx} className="h-11 w-full rounded-xl" />
-            ))}
-          </div>
+          <DataTableSkeleton columns={5} label="Loading documents" />
         ) : docs.error ? (
           <div className="p-card">
             <StatePanel
@@ -430,61 +457,91 @@ export function DocumentsDirectory({ canUpload }: { canUpload: boolean }) {
             </StatePanel>
           </div>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full border-collapse text-left text-sm">
-              <thead className="bg-structural text-xs font-semibold uppercase tracking-wider text-structural-foreground">
-                <tr>
-                  <th className="px-4 py-3">File</th>
-                  <th className="px-4 py-3">Linked record</th>
-                  <th className="px-4 py-3">Size</th>
-                  <th className="px-4 py-3">Expiry</th>
-                  <th className="px-4 py-3 text-right">Download</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y">
-                {docs.data.items.map((doc) => (
-                  <tr
-                    key={doc.id}
-                    className="transition-colors hover:bg-muted/35"
+          <DataTable>
+            <DataTableHead>
+              <tr>
+                <DataTableHeaderCell
+                  sortKey="original_name"
+                  activeSort={sort}
+                  activeDir={dir}
+                  onSort={handleSort}
+                >
+                  File
+                </DataTableHeaderCell>
+                <DataTableHeaderCell>Linked record</DataTableHeaderCell>
+                <DataTableHeaderCell
+                  align="right"
+                  sortKey="size"
+                  activeSort={sort}
+                  activeDir={dir}
+                  onSort={handleSort}
+                >
+                  Size
+                </DataTableHeaderCell>
+                <DataTableHeaderCell
+                  sortKey="expires_at"
+                  activeSort={sort}
+                  activeDir={dir}
+                  onSort={handleSort}
+                >
+                  Expiry
+                </DataTableHeaderCell>
+                <DataTableHeaderCell align="right">Download</DataTableHeaderCell>
+              </tr>
+            </DataTableHead>
+            <DataTableBody>
+              {sortRows(docs.data.items, sort, dir, {
+                original_name: (d) => d.original_name,
+                size: (d) => d.size,
+                expires_at: (d) => (d.expires_at ? Date.parse(d.expires_at) : null),
+              }).map((doc) => (
+                <DataTableRow key={doc.id}>
+                  <DataTableCell className="max-w-[18rem]">
+                    <p
+                      title={doc.original_name}
+                      className="truncate font-medium text-foreground"
+                    >
+                      {doc.original_name}
+                    </p>
+                    <p className="font-mono text-xs text-muted-foreground">
+                      {doc.mime_type}
+                    </p>
+                  </DataTableCell>
+                  <DataTableCell>
+                    {doc.entity_type && doc.entity_id ? (
+                      <StatusDotBadge tone="info">
+                        {documentEntityLabels[doc.entity_type]} #{doc.entity_id}
+                      </StatusDotBadge>
+                    ) : (
+                      <span className="text-xs text-muted-foreground">
+                        Branch file
+                      </span>
+                    )}
+                  </DataTableCell>
+                  <DataTableCell
+                    align="right"
+                    numeric
+                    className="text-muted-foreground"
                   >
-                    <td className="px-4 py-3">
-                      <p className="font-semibold">{doc.original_name}</p>
-                      <p className="font-mono text-xs text-muted-foreground">
-                        {doc.mime_type}
-                      </p>
-                    </td>
-                    <td className="px-4 py-3">
-                      {doc.entity_type && doc.entity_id ? (
-                        <Badge variant="outline" className="font-mono text-xs">
-                          {documentEntityLabels[doc.entity_type]} #{doc.entity_id}
-                        </Badge>
-                      ) : (
-                        <span className="text-xs text-muted-foreground">
-                          Branch file
-                        </span>
-                      )}
-                    </td>
-                    <td className="px-4 py-3 font-mono text-xs text-muted-foreground tabular-nums">
-                      {formatFileSize(doc.size)}
-                    </td>
-                    <td className="px-4 py-3">
-                      <ExpiryBadge expiresAt={doc.expires_at} />
-                    </td>
-                    <td className="px-4 py-3 text-right">
-                      <a
-                        href={documentDownloadUrl(doc.id)}
-                        download={doc.original_name}
-                        className="inline-flex items-center gap-1.5 text-xs font-semibold text-link hover:underline"
-                      >
-                        <Download className="size-3.5" aria-hidden="true" />
-                        Download
-                      </a>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                    {formatFileSize(doc.size)}
+                  </DataTableCell>
+                  <DataTableCell>
+                    <ExpiryBadge expiresAt={doc.expires_at} />
+                  </DataTableCell>
+                  <DataTableCell align="right">
+                    <a
+                      href={documentDownloadUrl(doc.id)}
+                      download={doc.original_name}
+                      className="inline-flex items-center gap-1.5 text-xs font-medium text-link hover:underline"
+                    >
+                      <Download className="size-3.5" aria-hidden="true" />
+                      Download
+                    </a>
+                  </DataTableCell>
+                </DataTableRow>
+              ))}
+            </DataTableBody>
+          </DataTable>
         )}
       </DataTableFrame>
 

@@ -1,7 +1,7 @@
 import { signOut } from "./helpers";
 import { test, expect, type Page } from "@playwright/test";
 import { randomUUID } from "node:crypto";
-const fixture = "http://127.0.0.1:3201";
+const fixture = "http://127.0.0.1:4201";
 async function submitLogin(page: Page, profile = "operations") {
   const form = page.locator("form:visible");
   await form

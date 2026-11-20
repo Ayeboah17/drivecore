@@ -45,6 +45,8 @@ export async function listDocuments(
     entityId?: number;
     q?: string;
     page?: number;
+    sort?: string;
+    dir?: string;
   },
   signal: AbortSignal,
 ) {
@@ -57,6 +59,12 @@ export async function listDocuments(
   const trimmedQ = (params.q ?? "").trim().slice(0, 100);
   if (trimmedQ) query.set("q", trimmedQ);
   if (params.page && params.page > 1) query.set("page", String(params.page));
+  if (params.sort) {
+    query.set("sort", params.sort);
+    if (params.dir === "asc" || params.dir === "desc") {
+      query.set("dir", params.dir);
+    }
+  }
 
   const payload = await read(
     `api/v1/documents?${query.toString()}`,

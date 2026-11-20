@@ -9,6 +9,8 @@ import {
   CarFront,
   CheckCircle2,
   Clock,
+  FileSpreadsheet,
+  FileText,
   UserCheck,
   X,
   XCircle,
@@ -16,6 +18,12 @@ import {
 import { useSession } from "@/features/auth/session-provider";
 import { useLiveContext } from "@/features/live/context";
 import { EntityDocumentsPanel } from "@/features/documents/documents-panel";
+import {
+  LiveDocumentPdfModal,
+  type LivePdfDocument,
+} from "@/features/pdf/live-pdf-modal";
+import { CreateQuotationDialog } from "@/features/quotations/create-quotation-dialog";
+import { QuotationsDirectorySection } from "@/features/quotations/quotations-page";
 import {
   can,
   canAccessRentals,
@@ -26,12 +34,21 @@ import {
 import { ApiError, errorText } from "@/lib/api/client";
 import {
   DataSearchForm,
+  DataTable,
+  DataTableBody,
+  DataTableCell,
   DataTableFrame,
+  DataTableHead,
+  DataTableHeaderCell,
+  DataTableRow,
+  DataTableSkeleton,
+  PlateTag,
+  StatusDotBadge,
   type ActiveFilterChip,
+  type StatusDotTone,
 } from "@/components/data/data-table";
 import { StatePanel } from "@/components/layout/state-panel";
 import { ViewFadeIn } from "@/components/motion/primitives";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { DriveCoreSelect } from "@/components/ui/drivecore-select";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -44,6 +61,12 @@ import {
 } from "./dialogs";
 import { useLiveEntityLookup } from "./entity-lookup";
 import {
+  nextSortState,
+  parseSortParams,
+  sortRows,
+  type SortDirection,
+} from "@/lib/table-sort";
+import {
   cancelReservation,
   getRental,
   getReservation,
@@ -51,17 +74,38 @@ import {
   listReservations,
 } from "./service";
 
-const RESERVATION_STATUS_STYLES: Record<Reservation["status"], string> = {
-  confirmed: "border-success text-success-foreground",
-  completed: "border-border text-foreground",
-  cancelled: "border-danger text-danger-foreground",
+const RESERVATION_STATUS_TONES: Record<Reservation["status"], StatusDotTone> = {
+  confirmed: "success",
+  completed: "neutral",
+  cancelled: "danger",
 };
 
-const RENTAL_STATUS_STYLES: Record<Rental["status"], string> = {
-  draft: "border-warning text-warning-foreground",
-  active: "border-success text-success-foreground",
-  returned: "border-border text-foreground",
+const RENTAL_STATUS_TONES: Record<Rental["status"], StatusDotTone> = {
+  draft: "warning",
+  active: "success",
+  returned: "neutral",
 };
+
+const QUOTATION_SORT_KEYS = [
+  "id",
+  "customer_name",
+  "total_minor",
+  "status",
+] as const;
+const RESERVATION_SORT_KEYS = [
+  "id",
+  "customer_name",
+  "vehicle_registration",
+  "starts_at",
+  "status",
+] as const;
+const RENTAL_SORT_KEYS = [
+  "id",
+  "vehicle_registration",
+  "customer_name",
+  "driver_name",
+  "status",
+] as const;
 
 function fmtDate(value?: string | null) {
   if (!value) return "—";
@@ -69,41 +113,73 @@ function fmtDate(value?: string | null) {
   return Number.isNaN(d.getTime()) ? "—" : d.toLocaleString();
 }
 
-export function RentalsDirectoryPage() {
+export function RentalsDirectoryPage({
+  defaultTab = "reservations",
+}: {
+  defaultTab?: "quotations" | "reservations" | "contracts";
+} = {}) {
   const { user } = useSession();
   const scope = useLiveContext();
   const searchParams = useSearchParams();
   const client = useQueryClient();
 
   const driverOnly = !!user && isDriverRole(user);
+  const canViewQuotations = !!user && can(user, "quotations.view");
+  const canManageQuotations = !!user && can(user, "quotations.manage");
   const canViewReservations = !!user && can(user, "reservations.view");
   const canManageReservations = !!user && can(user, "reservations.manage");
   const canViewRentals = !!user && (can(user, "rentals.view") || driverOnly);
   const canManageRentals = !!user && can(user, "rentals.manage");
   const allowed = !!user && canAccessRentals(user);
 
-  const requestedTab = searchParams.get("tab") ?? "";
-  const activeTab: "reservations" | "contracts" =
-    driverOnly || !canViewReservations
-      ? "contracts"
-      : requestedTab === "contracts"
+  const requestedTab = searchParams.get("tab") ?? defaultTab;
+  const activeTab: "quotations" | "reservations" | "contracts" = driverOnly
+    ? "contracts"
+    : requestedTab === "quotations" && canViewQuotations
+      ? "quotations"
+      : requestedTab === "contracts" && canViewRentals
         ? "contracts"
-        : "reservations";
+        : canViewReservations
+          ? "reservations"
+          : canViewQuotations
+            ? "quotations"
+            : "contracts";
 
   const rawQ = (searchParams.get("q") ?? "").slice(0, 100);
   const rawStatus = searchParams.get("status") ?? "";
   const validStatuses =
-    activeTab === "reservations"
-      ? ["confirmed", "cancelled", "completed"]
-      : ["draft", "active", "returned"];
+    activeTab === "quotations"
+      ? [
+          "draft",
+          "pending_approval",
+          "approved",
+          "rejected",
+          "cancelled",
+          "converted",
+        ]
+      : activeTab === "reservations"
+        ? ["confirmed", "cancelled", "completed"]
+        : ["draft", "active", "returned"];
   const status = validStatuses.includes(rawStatus) ? rawStatus : "";
   const parsedPage = Number(searchParams.get("page") ?? "1");
   const page =
     Number.isInteger(parsedPage) && parsedPage >= 1 && parsedPage <= 1000000
       ? parsedPage
       : 1;
+  const allowedSortKeys =
+    activeTab === "quotations"
+      ? QUOTATION_SORT_KEYS
+      : activeTab === "reservations"
+        ? RESERVATION_SORT_KEYS
+        : RENTAL_SORT_KEYS;
+  const { sort, dir } = parseSortParams(
+    searchParams.get("sort"),
+    searchParams.get("dir"),
+    allowedSortKeys,
+  );
 
   const [createOpen, setCreateOpen] = useState(false);
+  const [createQuoteOpen, setCreateQuoteOpen] = useState(false);
   const [startTarget, setStartTarget] = useState<Reservation | null>(null);
   const [notice, setNotice] = useState("");
 
@@ -111,22 +187,44 @@ export function RentalsDirectoryPage() {
   const branchSuffix = `?branch=${scope.branch}`;
 
   function updateQuery(next: {
-    tab?: "reservations" | "contracts";
+    tab?: "quotations" | "reservations" | "contracts";
     q?: string;
     status?: string;
     page?: number;
+    sort?: string;
+    dir?: SortDirection | "";
   }) {
     const params = new URLSearchParams();
     params.set("branch", scope.branch);
     const nextTab = next.tab ?? activeTab;
     params.set("tab", nextTab);
+    const tabChanged = next.tab !== undefined && next.tab !== activeTab;
     const nextQ = (next.q !== undefined ? next.q : rawQ).trim().slice(0, 100);
     const nextStatus = next.status !== undefined ? next.status : status;
     const nextPage = next.page !== undefined ? next.page : 1;
+    const nextSort = tabChanged
+      ? ""
+      : next.sort !== undefined
+        ? next.sort
+        : sort;
+    const nextDir = tabChanged
+      ? ""
+      : next.dir !== undefined
+        ? next.dir
+        : dir;
     if (nextQ) params.set("q", nextQ);
     if (nextStatus) params.set("status", nextStatus);
+    if (nextSort && nextDir) {
+      params.set("sort", nextSort);
+      params.set("dir", nextDir);
+    }
     if (nextPage > 1) params.set("page", String(nextPage));
     scope.navigate(`${base}?${params.toString()}`);
+  }
+
+  function handleSort(columnKey: string) {
+    const next = nextSortState(sort, dir, columnKey);
+    updateQuery({ sort: next.sort, dir: next.dir, page: 1 });
   }
 
   const reservationsQuery = useQuery({
@@ -134,7 +232,7 @@ export function RentalsDirectoryPage() {
       ...scope.key,
       "reservations",
       "list",
-      { q: rawQ.trim(), status, page },
+      { q: rawQ.trim(), status, page, sort, dir },
     ],
     queryFn: ({ signal }) =>
       listReservations(
@@ -144,6 +242,8 @@ export function RentalsDirectoryPage() {
           q: rawQ,
           status: status || undefined,
           page,
+          sort: sort || undefined,
+          dir: dir || undefined,
         },
         signal,
       ),
@@ -156,7 +256,7 @@ export function RentalsDirectoryPage() {
       ...scope.key,
       "rentals",
       "list",
-      { q: rawQ.trim(), status, page, driverOnly },
+      { q: rawQ.trim(), status, page, driverOnly, sort, dir },
     ],
     queryFn: ({ signal }) =>
       listRentals(
@@ -166,6 +266,8 @@ export function RentalsDirectoryPage() {
           q: rawQ,
           status: status || undefined,
           page,
+          sort: sort || undefined,
+          dir: dir || undefined,
         },
         signal,
       ),
@@ -256,23 +358,41 @@ export function RentalsDirectoryPage() {
           <p className="text-sm text-muted-foreground">
             {driverOnly
               ? "Assigned rental contracts for handover, return, and photo uploads"
-              : "Live vehicle reservations, rental contracts, driver assignment, extensions, and returns"}{" "}
+              : "Live quotations, vehicle reservations, rental contracts, driver assignment, extensions, and returns"}{" "}
             for {scope.company?.name}.
           </p>
         </div>
-        {canManageReservations && !driverOnly ? (
-          <Button
-            type="button"
-            onClick={() => setCreateOpen(true)}
-            className="gap-1.5"
-          >
-            <CalendarPlus className="size-4" aria-hidden="true" />
-            Create reservation
-          </Button>
+        {!driverOnly ? (
+          <div className="flex flex-wrap items-center gap-2">
+            {canManageQuotations ? (
+              <Button
+                type="button"
+                variant={activeTab === "quotations" ? "default" : "outline"}
+                onClick={() => setCreateQuoteOpen(true)}
+                className="gap-1.5"
+              >
+                <FileSpreadsheet className="size-4" aria-hidden="true" />
+                Create quotation
+              </Button>
+            ) : null}
+            {canManageReservations ? (
+              <Button
+                type="button"
+                variant={activeTab === "quotations" ? "outline" : "default"}
+                onClick={() => setCreateOpen(true)}
+                className="gap-1.5"
+              >
+                <CalendarPlus className="size-4" aria-hidden="true" />
+                Create reservation
+              </Button>
+            ) : null}
+          </div>
         ) : null}
       </div>
 
-      {!driverOnly && canViewReservations && canViewRentals ? (
+      {!driverOnly &&
+      [canViewQuotations, canViewReservations, canViewRentals].filter(Boolean)
+        .length > 1 ? (
         <div
           role="tablist"
           aria-label="Rentals sections"
@@ -280,8 +400,13 @@ export function RentalsDirectoryPage() {
         >
           {(
             [
-              ["reservations", "Reservations"],
-              ["contracts", "Rental contracts"],
+              ...(canViewQuotations ? ([["quotations", "Quotations"]] as const) : []),
+              ...(canViewReservations
+                ? ([["reservations", "Reservations"]] as const)
+                : []),
+              ...(canViewRentals
+                ? ([["contracts", "Rental contracts"]] as const)
+                : []),
             ] as const
           ).map(([key, text]) => (
             <button
@@ -292,7 +417,7 @@ export function RentalsDirectoryPage() {
               onClick={() =>
                 updateQuery({ tab: key, q: "", status: "", page: 1 })
               }
-              className={`rounded-lg px-3.5 py-1.5 text-xs font-semibold transition-colors focus-visible:outline-2 focus-visible:outline-ring ${
+              className={`rounded-lg px-3.5 py-1.5 text-xs font-medium transition-colors duration-150 focus-visible:outline-2 focus-visible:outline-ring ${
                 activeTab === key
                   ? "bg-surface text-foreground shadow-2xs"
                   : "text-muted-foreground hover:text-foreground"
@@ -320,6 +445,16 @@ export function RentalsDirectoryPage() {
         </div>
       ) : null}
 
+      {activeTab === "quotations" ? (
+        <QuotationsDirectorySection
+          q={rawQ}
+          status={status}
+          page={page}
+          sort={sort}
+          dir={dir}
+          onUpdateQuery={(next) => updateQuery({ tab: "quotations", ...next })}
+        />
+      ) : (
       <DataTableFrame
         ariaLabel={
           activeTab === "reservations"
@@ -393,12 +528,7 @@ export function RentalsDirectoryPage() {
         }
       >
         {activeQuery.isPending ? (
-          <div role="status" className="space-y-3 p-card">
-            <p className="text-sm text-muted-foreground">Loading records…</p>
-            {[0, 1, 2].map((i) => (
-              <Skeleton key={i} className="h-11 w-full rounded-xl" />
-            ))}
-          </div>
+          <DataTableSkeleton columns={6} label="Loading records" />
         ) : activeQuery.error ? (
           <div className="p-card">
             <StatePanel
@@ -445,254 +575,334 @@ export function RentalsDirectoryPage() {
             </StatePanel>
           </div>
         ) : activeTab === "reservations" ? (
-          <div className="overflow-x-auto">
-            <table className="w-full border-collapse text-left text-sm">
-              <thead className="bg-structural text-xs font-semibold uppercase tracking-wider text-structural-foreground">
-                <tr>
-                  <th className="px-4 py-3">Reservation</th>
-                  <th className="px-4 py-3">Customer</th>
-                  <th className="px-4 py-3">Vehicle</th>
-                  <th className="px-4 py-3">Period</th>
-                  <th className="px-4 py-3">Status</th>
-                  <th className="px-4 py-3 text-right">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y">
-                {reservationItems.map((res) => {
-                  const custName = lookup.customerName(res);
-                  const custHref = lookup.customerHref(res);
-                  const veh = lookup.vehicleDisplay(res);
-                  const vehHref = lookup.vehicleHref(res.vehicle_id);
-                  return (
-                    <tr
-                      key={res.id}
-                      className="transition-colors hover:bg-muted/35"
-                    >
-                      <td className="px-4 py-3 font-mono text-xs font-bold">
+          <DataTable>
+            <DataTableHead>
+              <tr>
+                <DataTableHeaderCell
+                  sortKey="id"
+                  activeSort={sort}
+                  activeDir={dir}
+                  onSort={handleSort}
+                >
+                  Reservation
+                </DataTableHeaderCell>
+                <DataTableHeaderCell
+                  sortKey="customer_name"
+                  activeSort={sort}
+                  activeDir={dir}
+                  onSort={handleSort}
+                >
+                  Customer
+                </DataTableHeaderCell>
+                <DataTableHeaderCell
+                  sortKey="vehicle_registration"
+                  activeSort={sort}
+                  activeDir={dir}
+                  onSort={handleSort}
+                >
+                  Vehicle
+                </DataTableHeaderCell>
+                <DataTableHeaderCell
+                  sortKey="starts_at"
+                  activeSort={sort}
+                  activeDir={dir}
+                  onSort={handleSort}
+                >
+                  Period
+                </DataTableHeaderCell>
+                <DataTableHeaderCell
+                  sortKey="status"
+                  activeSort={sort}
+                  activeDir={dir}
+                  onSort={handleSort}
+                >
+                  Status
+                </DataTableHeaderCell>
+                <DataTableHeaderCell align="right">Actions</DataTableHeaderCell>
+              </tr>
+            </DataTableHead>
+            <DataTableBody>
+              {sortRows(reservationItems, sort, dir, {
+                id: (r) => r.id,
+                customer_name: (r) => lookup.customerName(r),
+                vehicle_registration: (r) => lookup.vehicleDisplay(r).registration,
+                starts_at: (r) => Date.parse(r.starts_at),
+                status: (r) => r.status,
+              }).map((res) => {
+                const custName = lookup.customerName(res);
+                const custHref = lookup.customerHref(res);
+                const veh = lookup.vehicleDisplay(res);
+                const vehHref = lookup.vehicleHref(res.vehicle_id);
+                return (
+                  <DataTableRow key={res.id}>
+                    <DataTableCell numeric>
+                      <Link
+                        href={`/companies/${scope.companyId}/reservations/${res.id}${branchSuffix}`}
+                        className="font-semibold text-foreground hover:text-link hover:underline"
+                      >
+                        #{res.id}
+                      </Link>
+                    </DataTableCell>
+                    <DataTableCell className="max-w-[14rem]">
+                      {custHref ? (
+                        <Link
+                          href={custHref}
+                          title={custName}
+                          className="block truncate font-medium text-link hover:underline"
+                        >
+                          {custName}
+                        </Link>
+                      ) : (
+                        <span
+                          title={custName}
+                          className="block truncate font-medium"
+                        >
+                          {custName}
+                        </span>
+                      )}
+                    </DataTableCell>
+                    <DataTableCell className="max-w-[16rem]">
+                      {vehHref ? (
+                        <Link
+                          href={vehHref}
+                          title={veh.full}
+                          className="group/veh flex min-w-0 flex-col gap-0.5"
+                        >
+                          <PlateTag className="group-hover/veh:border-link/50 group-hover/veh:text-link">
+                            {veh.registration}
+                          </PlateTag>
+                          {veh.makeModel ? (
+                            <span className="truncate text-xs text-muted-foreground group-hover/veh:text-link group-hover/veh:underline">
+                              {veh.makeModel}
+                            </span>
+                          ) : null}
+                        </Link>
+                      ) : (
+                        <div className="flex min-w-0 flex-col gap-0.5">
+                          <PlateTag>{veh.registration}</PlateTag>
+                          {veh.makeModel ? (
+                            <span
+                              title={veh.makeModel}
+                              className="truncate text-xs text-muted-foreground"
+                            >
+                              {veh.makeModel}
+                            </span>
+                          ) : null}
+                        </div>
+                      )}
+                    </DataTableCell>
+                    <DataTableCell numeric className="text-muted-foreground">
+                      <div>{fmtDate(res.starts_at)}</div>
+                      <div>→ {fmtDate(res.ends_at)}</div>
+                    </DataTableCell>
+                    <DataTableCell>
+                      <StatusDotBadge tone={RESERVATION_STATUS_TONES[res.status]}>
+                        {res.status.charAt(0).toUpperCase() +
+                          res.status.slice(1)}
+                      </StatusDotBadge>
+                    </DataTableCell>
+                    <DataTableCell align="right">
+                      <div className="inline-flex items-center gap-2">
+                        {res.status === "confirmed" &&
+                        !res.has_rental &&
+                        canManageRentals ? (
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            onClick={() => setStartTarget(res)}
+                            className="transition-transform duration-150 ease-out active:scale-[0.98]"
+                          >
+                            Start contract
+                          </Button>
+                        ) : null}
                         <Link
                           href={`/companies/${scope.companyId}/reservations/${res.id}${branchSuffix}`}
-                          className="text-foreground hover:text-link hover:underline"
+                          className="text-xs font-medium text-link hover:underline"
                         >
-                          #{res.id}
+                          Open
                         </Link>
-                      </td>
-                      <td className="max-w-[14rem] px-4 py-3">
-                        {custHref ? (
-                          <Link
-                            href={custHref}
-                            title={custName}
-                            className="block truncate font-medium text-link hover:underline"
-                          >
-                            {custName}
-                          </Link>
-                        ) : (
-                          <span
-                            title={custName}
-                            className="block truncate font-medium"
-                          >
-                            {custName}
-                          </span>
-                        )}
-                      </td>
-                      <td className="max-w-[16rem] px-4 py-3">
-                        {vehHref ? (
-                          <Link
-                            href={vehHref}
-                            title={veh.full}
-                            className="group flex min-w-0 flex-col gap-0.5"
-                          >
-                            <span className="inline-block w-fit rounded-md bg-structural px-2 py-0.5 font-mono text-xs font-bold text-structural-foreground group-hover:text-link group-hover:underline">
-                              {veh.registration}
-                            </span>
-                            {veh.makeModel ? (
-                              <span className="truncate text-xs text-muted-foreground group-hover:text-link group-hover:underline">
-                                {veh.makeModel}
-                              </span>
-                            ) : null}
-                          </Link>
-                        ) : (
-                          <div className="flex min-w-0 flex-col gap-0.5">
-                            <span className="inline-block w-fit rounded-md bg-structural px-2 py-0.5 font-mono text-xs font-bold text-structural-foreground">
-                              {veh.registration}
-                            </span>
-                            {veh.makeModel ? (
-                              <span
-                                title={veh.makeModel}
-                                className="truncate text-xs text-muted-foreground"
-                              >
-                                {veh.makeModel}
-                              </span>
-                            ) : null}
-                          </div>
-                        )}
-                      </td>
-                      <td className="px-4 py-3 font-mono text-xs text-muted-foreground tabular-nums">
-                        <div>{fmtDate(res.starts_at)}</div>
-                        <div>→ {fmtDate(res.ends_at)}</div>
-                      </td>
-                      <td className="px-4 py-3">
-                        <Badge
-                          variant="outline"
-                          className={RESERVATION_STATUS_STYLES[res.status]}
-                        >
-                          {res.status.charAt(0).toUpperCase() +
-                            res.status.slice(1)}
-                        </Badge>
-                      </td>
-                      <td className="px-4 py-3 text-right">
-                        <div className="inline-flex items-center gap-2">
-                          {res.status === "confirmed" &&
-                          !res.has_rental &&
-                          canManageRentals ? (
-                            <Button
-                              type="button"
-                              size="sm"
-                              variant="outline"
-                              onClick={() => setStartTarget(res)}
-                            >
-                              Start contract
-                            </Button>
-                          ) : null}
-                          <Link
-                            href={`/companies/${scope.companyId}/reservations/${res.id}${branchSuffix}`}
-                            className="text-xs font-semibold text-link hover:underline"
-                          >
-                            Open
-                          </Link>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
+                      </div>
+                    </DataTableCell>
+                  </DataTableRow>
+                );
+              })}
+            </DataTableBody>
+          </DataTable>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full border-collapse text-left text-sm">
-              <thead className="bg-structural text-xs font-semibold uppercase tracking-wider text-structural-foreground">
-                <tr>
-                  <th className="px-4 py-3">Contract</th>
-                  <th className="px-4 py-3">Vehicle</th>
-                  <th className="px-4 py-3">Customer</th>
-                  <th className="px-4 py-3">Driver</th>
-                  <th className="px-4 py-3">Status</th>
-                  <th className="px-4 py-3 text-right">Action</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y">
-                {rentalItems.map((rental) => {
-                  const custName = lookup.customerName(rental);
-                  const custHref = lookup.customerHref(rental);
-                  const veh = lookup.vehicleDisplay(rental);
-                  const vehHref = lookup.vehicleHref(rental.vehicle_id);
-                  const driver = lookup.driverDisplay(rental);
-                  return (
-                    <tr
-                      key={rental.id}
-                      className="transition-colors hover:bg-muted/35"
-                    >
-                      <td className="px-4 py-3 font-mono text-xs font-bold">
+          <DataTable>
+            <DataTableHead>
+              <tr>
+                <DataTableHeaderCell
+                  sortKey="id"
+                  activeSort={sort}
+                  activeDir={dir}
+                  onSort={handleSort}
+                >
+                  Contract
+                </DataTableHeaderCell>
+                <DataTableHeaderCell
+                  sortKey="vehicle_registration"
+                  activeSort={sort}
+                  activeDir={dir}
+                  onSort={handleSort}
+                >
+                  Vehicle
+                </DataTableHeaderCell>
+                <DataTableHeaderCell
+                  sortKey="customer_name"
+                  activeSort={sort}
+                  activeDir={dir}
+                  onSort={handleSort}
+                >
+                  Customer
+                </DataTableHeaderCell>
+                <DataTableHeaderCell
+                  sortKey="driver_name"
+                  activeSort={sort}
+                  activeDir={dir}
+                  onSort={handleSort}
+                >
+                  Driver
+                </DataTableHeaderCell>
+                <DataTableHeaderCell
+                  sortKey="status"
+                  activeSort={sort}
+                  activeDir={dir}
+                  onSort={handleSort}
+                >
+                  Status
+                </DataTableHeaderCell>
+                <DataTableHeaderCell align="right">Action</DataTableHeaderCell>
+              </tr>
+            </DataTableHead>
+            <DataTableBody>
+              {sortRows(rentalItems, sort, dir, {
+                id: (r) => r.id,
+                vehicle_registration: (r) => lookup.vehicleDisplay(r).registration,
+                customer_name: (r) => lookup.customerName(r),
+                driver_name: (r) => {
+                  const name = lookup.driverDisplay(r).name;
+                  return name === "Unassigned" ? null : name;
+                },
+                status: (r) => r.status,
+              }).map((rental) => {
+                const custName = lookup.customerName(rental);
+                const custHref = lookup.customerHref(rental);
+                const veh = lookup.vehicleDisplay(rental);
+                const vehHref = lookup.vehicleHref(rental.vehicle_id);
+                const driver = lookup.driverDisplay(rental);
+                return (
+                  <DataTableRow key={rental.id}>
+                    <DataTableCell numeric>
+                      <Link
+                        href={`${base}/${rental.id}${branchSuffix}`}
+                        className="font-semibold text-foreground hover:text-link hover:underline"
+                      >
+                        Rental #{rental.id}
+                      </Link>
+                    </DataTableCell>
+                    <DataTableCell className="max-w-[16rem]">
+                      {vehHref ? (
                         <Link
-                          href={`${base}/${rental.id}${branchSuffix}`}
-                          className="text-foreground hover:text-link hover:underline"
+                          href={vehHref}
+                          title={veh.full}
+                          className="group/veh flex min-w-0 flex-col gap-0.5"
                         >
-                          Rental #{rental.id}
+                          <PlateTag className="group-hover/veh:border-link/50 group-hover/veh:text-link">
+                            {veh.registration}
+                          </PlateTag>
+                          {veh.makeModel ? (
+                            <span className="truncate text-xs text-muted-foreground group-hover/veh:text-link group-hover/veh:underline">
+                              {veh.makeModel}
+                            </span>
+                          ) : null}
                         </Link>
-                      </td>
-                      <td className="max-w-[16rem] px-4 py-3">
-                        {vehHref ? (
-                          <Link
-                            href={vehHref}
-                            title={veh.full}
-                            className="group flex min-w-0 flex-col gap-0.5"
-                          >
-                            <span className="inline-block w-fit rounded-md bg-structural px-2 py-0.5 font-mono text-xs font-bold text-structural-foreground group-hover:text-link group-hover:underline">
-                              {veh.registration}
+                      ) : (
+                        <div className="flex min-w-0 flex-col gap-0.5">
+                          <PlateTag>{veh.registration}</PlateTag>
+                          {veh.makeModel ? (
+                            <span
+                              title={veh.makeModel}
+                              className="truncate text-xs text-muted-foreground"
+                            >
+                              {veh.makeModel}
                             </span>
-                            {veh.makeModel ? (
-                              <span className="truncate text-xs text-muted-foreground group-hover:text-link group-hover:underline">
-                                {veh.makeModel}
-                              </span>
-                            ) : null}
-                          </Link>
-                        ) : (
-                          <div className="flex min-w-0 flex-col gap-0.5">
-                            <span className="inline-block w-fit rounded-md bg-structural px-2 py-0.5 font-mono text-xs font-bold text-structural-foreground">
-                              {veh.registration}
-                            </span>
-                            {veh.makeModel ? (
-                              <span
-                                title={veh.makeModel}
-                                className="truncate text-xs text-muted-foreground"
-                              >
-                                {veh.makeModel}
-                              </span>
-                            ) : null}
-                          </div>
-                        )}
-                      </td>
-                      <td className="max-w-[14rem] px-4 py-3">
-                        {custHref ? (
-                          <Link
-                            href={custHref}
-                            title={custName}
-                            className="block truncate font-medium text-link hover:underline"
-                          >
-                            {custName}
-                          </Link>
-                        ) : (
-                          <span
-                            title={custName}
-                            className="block truncate font-medium"
-                          >
-                            {custName}
-                          </span>
-                        )}
-                      </td>
-                      <td className="max-w-[12rem] px-4 py-3 text-xs text-muted-foreground">
-                        {driver.href ? (
-                          <Link
-                            href={driver.href}
-                            title={driver.name}
-                            className="block truncate font-medium text-link hover:underline"
-                          >
-                            {driver.name}
-                          </Link>
-                        ) : (
-                          <span
-                            title={driver.name}
-                            className="block truncate"
-                          >
-                            {driver.name}
-                          </span>
-                        )}
-                      </td>
-                      <td className="px-4 py-3">
-                        <Badge
-                          variant="outline"
-                          className={RENTAL_STATUS_STYLES[rental.status]}
-                        >
-                          {rental.status.charAt(0).toUpperCase() +
-                            rental.status.slice(1)}
-                        </Badge>
-                      </td>
-                      <td className="px-4 py-3 text-right">
+                          ) : null}
+                        </div>
+                      )}
+                    </DataTableCell>
+                    <DataTableCell className="max-w-[14rem]">
+                      {custHref ? (
                         <Link
-                          href={`${base}/${rental.id}${branchSuffix}`}
-                          className="text-xs font-semibold text-link hover:underline"
+                          href={custHref}
+                          title={custName}
+                          className="block truncate font-medium text-link hover:underline"
                         >
-                          Manage
+                          {custName}
                         </Link>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
+                      ) : (
+                        <span
+                          title={custName}
+                          className="block truncate font-medium"
+                        >
+                          {custName}
+                        </span>
+                      )}
+                    </DataTableCell>
+                    <DataTableCell className="max-w-[12rem] text-xs text-muted-foreground">
+                      {driver.href ? (
+                        <Link
+                          href={driver.href}
+                          title={driver.name}
+                          className="block truncate font-medium text-link hover:underline"
+                        >
+                          {driver.name}
+                        </Link>
+                      ) : (
+                        <span
+                          title={driver.name}
+                          className="block truncate"
+                        >
+                          {driver.name}
+                        </span>
+                      )}
+                    </DataTableCell>
+                    <DataTableCell>
+                      <StatusDotBadge tone={RENTAL_STATUS_TONES[rental.status]}>
+                        {rental.status.charAt(0).toUpperCase() +
+                          rental.status.slice(1)}
+                      </StatusDotBadge>
+                    </DataTableCell>
+                    <DataTableCell align="right">
+                      <Link
+                        href={`${base}/${rental.id}${branchSuffix}`}
+                        className="text-xs font-medium text-link hover:underline"
+                      >
+                        Manage
+                      </Link>
+                    </DataTableCell>
+                  </DataTableRow>
+                );
+              })}
+            </DataTableBody>
+          </DataTable>
         )}
       </DataTableFrame>
+      )}
+
+      <CreateQuotationDialog
+        open={createQuoteOpen}
+        onOpenChange={setCreateQuoteOpen}
+        onCreated={(created) => {
+          void client.invalidateQueries({
+            queryKey: [...scope.key, "quotations"],
+          });
+          scope.navigate(
+            `/companies/${scope.companyId}/quotations/${created.id}${branchSuffix}`,
+          );
+        }}
+      />
 
       <CreateReservationDialog
         open={createOpen}
@@ -745,6 +955,7 @@ export function ReservationDetailPage() {
   const canCreateRental = !!user && can(user, "rentals.manage");
 
   const [startOpen, setStartOpen] = useState(false);
+  const [pdfOpen, setPdfOpen] = useState(false);
   const [cancelling, setCancelling] = useState(false);
   const [error, setError] = useState<unknown>(null);
   const [notice, setNotice] = useState("");
@@ -802,6 +1013,28 @@ export function ReservationDetailPage() {
   const res = query.data;
   const resCustomerName = lookup.customerName(res);
   const resVehicle = lookup.vehicleDisplay(res);
+  const resBranchName = scope.directory?.branches.find(
+    (b) => b.id === res.branch_id,
+  )?.name;
+  const resPdfDoc: LivePdfDocument = {
+    kind: "reservation",
+    id: res.id,
+    status: res.status,
+    companyName: scope.company?.name ?? `Company #${res.company_id}`,
+    branchName: resBranchName,
+    currency: scope.company?.currency || "ZMW",
+    customerName: resCustomerName,
+    createdAt: res.created_at,
+    startsAt: res.starts_at,
+    endsAt: res.ends_at,
+    lines: [
+      {
+        label: resVehicle.full,
+        detail: `Reservation #${res.id}`,
+      },
+    ],
+    serverPdfPath: `api/v1/reservations/${res.id}/pdf`,
+  };
 
   async function handleCancel() {
     if (cancelling) return;
@@ -833,9 +1066,9 @@ export function ReservationDetailPage() {
             <h1 className="text-page-title font-extrabold tracking-tight">
               Reservation #{res.id}
             </h1>
-            <Badge variant="outline" className={RESERVATION_STATUS_STYLES[res.status]}>
+            <StatusDotBadge tone={RESERVATION_STATUS_TONES[res.status]}>
               {res.status.charAt(0).toUpperCase() + res.status.slice(1)}
-            </Badge>
+            </StatusDotBadge>
           </div>
           <p
             title={`${resCustomerName} · ${resVehicle.full}`}
@@ -846,6 +1079,15 @@ export function ReservationDetailPage() {
         </div>
 
         <div className="flex flex-wrap gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => setPdfOpen(true)}
+            className="gap-1.5"
+          >
+            <FileText className="size-4" aria-hidden="true" />
+            Export PDF
+          </Button>
           {res.rental_id ? (
             <Link
               href={`/companies/${scope.companyId}/rentals/${res.rental_id}?branch=${scope.branch}`}
@@ -971,6 +1213,11 @@ export function ReservationDetailPage() {
           );
         }}
       />
+
+      <LiveDocumentPdfModal
+        doc={pdfOpen ? resPdfDoc : null}
+        onClose={() => setPdfOpen(false)}
+      />
     </ViewFadeIn>
   );
 }
@@ -992,6 +1239,7 @@ export function RentalDetailPage() {
   >(null);
   const [extendOpen, setExtendOpen] = useState(false);
   const [assignOpen, setAssignOpen] = useState(false);
+  const [pdfOpen, setPdfOpen] = useState(false);
   const [notice, setNotice] = useState("");
 
   const query = useQuery({
@@ -1059,6 +1307,45 @@ export function RentalDetailPage() {
   const rentalVehicleHref = lookup.vehicleHref(rental.vehicle_id);
   const rentalDriver = lookup.driverDisplay(rental);
   const rentalWindow = lookup.reservationWindow(rental);
+  const rentalBranchName = scope.directory?.branches.find(
+    (b) => b.id === rental.branch_id,
+  )?.name;
+  const rentalPdfDoc: LivePdfDocument = {
+    kind: "rental",
+    id: rental.id,
+    status: rental.status,
+    companyName: scope.company?.name ?? `Company #${rental.company_id}`,
+    branchName: rentalBranchName,
+    currency: scope.company?.currency || "ZMW",
+    customerName: rentalCustomerName,
+    createdAt: rental.created_at,
+    startsAt: rentalWindow.starts_at,
+    endsAt: rentalWindow.ends_at,
+    lines: [
+      {
+        label: rentalVehicle.full,
+        detail: `Driver: ${rentalDriver.name} · Reservation #${rental.reservation_id}`,
+      },
+      ...(rental.handover_odometer !== null
+        ? [
+            {
+              label: "Handover odometer",
+              detail: `${rental.handover_odometer.toLocaleString()} ${rental.odometer_unit}`,
+            },
+          ]
+        : []),
+      ...(rental.return_odometer !== null
+        ? [
+            {
+              label: "Return odometer",
+              detail: `${rental.return_odometer.toLocaleString()} ${rental.odometer_unit}`,
+            },
+          ]
+        : []),
+    ],
+    notes: rental.return_notes || rental.handover_notes,
+    serverPdfPath: `api/v1/rentals/${rental.id}/pdf`,
+  };
   const isAssignedDriver = driverOnly && rental.driver_user_id === user!.id;
   const canHandoverOrReturn = canManage || isAssignedDriver;
   const canViewDocs = can(user!, "documents.view") || isAssignedDriver;
@@ -1085,18 +1372,18 @@ export function RentalDetailPage() {
             <h1 className="text-page-title font-extrabold tracking-tight">
               Rental #{rental.id}
             </h1>
-            <Badge variant="outline" className={RENTAL_STATUS_STYLES[rental.status]}>
+            <StatusDotBadge tone={RENTAL_STATUS_TONES[rental.status]}>
               {rental.status.charAt(0).toUpperCase() + rental.status.slice(1)}
-            </Badge>
+            </StatusDotBadge>
             {rentalVehicleHref ? (
               <Link
                 href={rentalVehicleHref}
                 title={rentalVehicle.full}
                 className="group inline-flex min-w-0 items-center gap-2"
               >
-                <span className="rounded-md bg-structural px-2 py-0.5 font-mono text-xs font-bold text-structural-foreground group-hover:text-link group-hover:underline">
+                <PlateTag className="group-hover:border-link/50 group-hover:text-link">
                   {rentalVehicle.registration}
-                </span>
+                </PlateTag>
                 {rentalVehicle.makeModel ? (
                   <span className="max-w-[16rem] truncate text-sm font-medium text-muted-foreground group-hover:text-link group-hover:underline">
                     {rentalVehicle.makeModel}
@@ -1105,9 +1392,7 @@ export function RentalDetailPage() {
               </Link>
             ) : (
               <>
-                <span className="rounded-md bg-structural px-2 py-0.5 font-mono text-xs font-bold text-structural-foreground">
-                  {rentalVehicle.registration}
-                </span>
+                <PlateTag>{rentalVehicle.registration}</PlateTag>
                 {rentalVehicle.makeModel ? (
                   <span
                     title={rentalVehicle.makeModel}
@@ -1153,6 +1438,15 @@ export function RentalDetailPage() {
         </div>
 
         <div className="flex flex-wrap gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => setPdfOpen(true)}
+            className="gap-1.5"
+          >
+            <FileText className="size-4" aria-hidden="true" />
+            Export PDF
+          </Button>
           {canManage && rental.status !== "returned" ? (
             <Button
               type="button"
@@ -1350,6 +1644,11 @@ export function RentalDetailPage() {
           );
           void refreshAll();
         }}
+      />
+
+      <LiveDocumentPdfModal
+        doc={pdfOpen ? rentalPdfDoc : null}
+        onClose={() => setPdfOpen(false)}
       />
     </ViewFadeIn>
   );

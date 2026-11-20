@@ -6,7 +6,7 @@ import {
   type APIRequestContext,
 } from "@playwright/test";
 import { randomUUID } from "node:crypto";
-const fixture = "http://127.0.0.1:3201";
+const fixture = "http://127.0.0.1:4201";
 async function control(request: APIRequestContext, data: object) {
   await request.post(`${fixture}/__test/control`, { data });
 }

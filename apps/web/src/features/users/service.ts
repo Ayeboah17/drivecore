@@ -18,6 +18,8 @@ export async function listUsers(
     role: string;
     isActive: string;
     page: number;
+    sort?: string;
+    dir?: string;
   },
   signal: AbortSignal,
 ) {
@@ -30,6 +32,12 @@ export async function listUsers(
     query.set("is_active", params.isActive);
   }
   if (params.page > 1) query.set("page", String(params.page));
+  if (params.sort) {
+    query.set("sort", params.sort);
+    if (params.dir === "asc" || params.dir === "desc") {
+      query.set("dir", params.dir);
+    }
+  }
 
   const payload = await read(
     `api/v1/users?${query.toString()}`,

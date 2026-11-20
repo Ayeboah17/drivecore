@@ -7,6 +7,8 @@ let vehicles = new Map();
 let companies = new Map();
 let branches = new Map();
 let managedUsers = new Map();
+let companySettings = new Map();
+let quotations = new Map();
 let reservations = new Map();
 let rentals = new Map();
 let documents = new Map();
@@ -42,9 +44,27 @@ const ROLE_DEFS = [
       "documents.manage",
       "users.view",
       "users.manage",
+      "settings.manage",
+      "quotations.view",
+      "quotations.manage",
+      "quotations.approve_discount",
     ],
   },
   { name: "driver", permissions: ["companies.view", "branches.view"] },
+  {
+    name: "finance",
+    permissions: [
+      "companies.view",
+      "branches.view",
+      "customers.view",
+      "vehicles.view",
+      "reservations.view",
+      "rentals.view",
+      "documents.view",
+      "quotations.view",
+      "quotations.approve_discount",
+    ],
+  },
   {
     name: "operations",
     permissions: [
@@ -52,6 +72,8 @@ const ROLE_DEFS = [
       "customers.manage",
       "vehicles.view",
       "vehicles.manage",
+      "quotations.view",
+      "quotations.manage",
       "reservations.view",
       "reservations.manage",
       "rentals.view",
@@ -67,6 +89,7 @@ const ROLE_DEFS = [
       "branches.view",
       "customers.view",
       "vehicles.view",
+      "quotations.view",
       "reservations.view",
       "rentals.view",
       "documents.view",
@@ -79,6 +102,27 @@ function reset() {
     [1, { id: 1, name: "Synthetic One", currency: "ZMW" }],
     [3, { id: 3, name: "Synthetic Three", currency: "EUR" }],
   ]);
+  companySettings = new Map([
+    [
+      1,
+      {
+        company_id: 1,
+        currency: "ZMW",
+        vat_rate_pct: 15,
+        discount_approval_threshold_pct: 10,
+      },
+    ],
+    [
+      3,
+      {
+        company_id: 3,
+        currency: "EUR",
+        vat_rate_pct: 15,
+        discount_approval_threshold_pct: 10,
+      },
+    ],
+  ]);
+  quotations = new Map();
   branches = new Map([
     [2, { id: 2, company_id: 1, name: "Synthetic branch" }],
     [4, { id: 4, company_id: 3, name: "Other branch" }],
@@ -444,8 +488,9 @@ function seedMany(domain) {
   }
 }
 
+const fixturePort = Number(process.env.DRIVECORE_FIXTURE_PORT ?? 4201);
 createServer(async (req, res) => {
-  const url = new URL(req.url, "http://127.0.0.1:3201");
+  const url = new URL(req.url, `http://127.0.0.1:${fixturePort}`);
   const json = (status, value) => {
     res.writeHead(status, { "Content-Type": "application/json" });
     res.end(JSON.stringify(value));
@@ -497,6 +542,34 @@ createServer(async (req, res) => {
     if (input.seedMany) {
       seedMany(input.seedMany);
     }
+    if (input.seedExtraAvailableVehicle) {
+      vehicles.set(14, {
+        ...base,
+        id: 14,
+        registration: "SYN-14",
+        make: "Toyota",
+        model: "Prado",
+        year: 2025,
+        odometer: 1200,
+        odometer_unit: "km",
+        daily_rate_minor: 65000,
+        functions: ["awd_4x4"],
+        status: "available",
+      });
+      vehicles.set(15, {
+        ...base,
+        id: 15,
+        registration: "SYN-15",
+        make: "Unpriced",
+        model: "Sedan",
+        year: 2024,
+        odometer: 500,
+        odometer_unit: "km",
+        daily_rate_minor: 0,
+        functions: [],
+        status: "available",
+      });
+    }
     if (input.expire) sessions.clear();
     json(200, {});
     return;
@@ -538,11 +611,24 @@ createServer(async (req, res) => {
     const permissions =
       role === "driver" || role === "activedriver"
         ? ["companies.view", "branches.view"]
+        : role === "finance"
+          ? [
+              "companies.view",
+              "branches.view",
+              "customers.view",
+              "vehicles.view",
+              "quotations.view",
+              "quotations.approve_discount",
+              "reservations.view",
+              "rentals.view",
+              "documents.view",
+            ]
         : role === "viewer"
           ? [
               "customers.view",
               "vehicles.view",
               "branches.view",
+              "quotations.view",
               "reservations.view",
               "rentals.view",
               "documents.view",
@@ -552,6 +638,8 @@ createServer(async (req, res) => {
               "customers.manage",
               "vehicles.view",
               "vehicles.manage",
+              "quotations.view",
+              "quotations.manage",
               "reservations.view",
               "reservations.manage",
               "rentals.view",
@@ -565,6 +653,8 @@ createServer(async (req, res) => {
                     "companies.manage",
                     "users.view",
                     "users.manage",
+                    "settings.manage",
+                    "quotations.approve_discount",
                   ]
                 : []),
             ];
@@ -634,6 +724,35 @@ createServer(async (req, res) => {
   }
 
   const page = Number(url.searchParams.get("page") ?? 1);
+  const sortItems = (items, accessors) => {
+    const sortKey = url.searchParams.get("sort");
+    const dir = url.searchParams.get("dir") === "desc" ? "desc" : "asc";
+    if (!sortKey || !accessors[sortKey]) return items;
+    const accessor = accessors[sortKey];
+    const mult = dir === "desc" ? -1 : 1;
+    return [...items].sort((a, b) => {
+      const av = accessor(a);
+      const bv = accessor(b);
+      const aEmpty = av === null || av === undefined || av === "";
+      const bEmpty = bv === null || bv === undefined || bv === "";
+      if (aEmpty && bEmpty) return (a.id ?? 0) - (b.id ?? 0);
+      if (aEmpty) return 1;
+      if (bEmpty) return -1;
+      let cmp = 0;
+      if (typeof av === "number" && typeof bv === "number") {
+        cmp = av - bv;
+      } else if (typeof av === "boolean" && typeof bv === "boolean") {
+        cmp = Number(av) - Number(bv);
+      } else {
+        cmp = String(av).localeCompare(String(bv), undefined, {
+          numeric: true,
+          sensitivity: "base",
+        });
+      }
+      if (cmp !== 0) return cmp * mult;
+      return (a.id ?? 0) - (b.id ?? 0);
+    });
+  };
   const paginateSlice = (items) => {
     const perPage = 25;
     const total = items.length;
@@ -838,7 +957,15 @@ createServer(async (req, res) => {
             branch_id: m?.branch_id ?? null,
           };
         });
-      paginateSlice(items);
+      paginateSlice(
+        sortItems(items, {
+          name: (u) => u.name,
+          email: (u) => u.email,
+          role: (u) => u.roles[0] ?? "",
+          is_active: (u) => u.is_active,
+          id: (u) => u.id,
+        }),
+      );
       return;
     }
 
@@ -956,6 +1083,361 @@ createServer(async (req, res) => {
     return;
   }
 
+  // --- M7 Company Settings, Quotations & PDFs ---
+  const settingsMatch = url.pathname.match(/^\/api\/v1\/companies\/(\d+)\/settings$/);
+  if (settingsMatch) {
+    const companyId = Number(settingsMatch[1]);
+    const membership = user.companies.find((c) => c.id === companyId);
+    if (!user.is_platform_admin && !membership) {
+      fail(404);
+      return;
+    }
+    const existing = companySettings.get(companyId);
+    if (!existing) {
+      fail(404);
+      return;
+    }
+    if (req.method === "GET") {
+      json(200, { data: existing });
+      return;
+    }
+    if (req.method === "PATCH") {
+      if (
+        !user.is_platform_admin &&
+        (!user.permissions.includes("settings.manage") ||
+          membership?.branch_id !== null)
+      ) {
+        fail(403);
+        return;
+      }
+      const vat = Number(input.vat_rate_pct);
+      const threshold = Number(input.discount_approval_threshold_pct);
+      if (Number.isNaN(vat) || vat < 0 || vat > 100) {
+        fail(422, { vat_rate_pct: ["VAT rate must be between 0 and 100."] });
+        return;
+      }
+      if (Number.isNaN(threshold) || threshold < 0 || threshold > 100) {
+        fail(422, {
+          discount_approval_threshold_pct: [
+            "Discount approval threshold must be between 0 and 100.",
+          ],
+        });
+        return;
+      }
+      const updated = {
+        ...existing,
+        vat_rate_pct: vat,
+        discount_approval_threshold_pct: threshold,
+      };
+      companySettings.set(companyId, updated);
+      completedWrites++;
+      json(200, { data: updated });
+      return;
+    }
+    fail(405);
+    return;
+  }
+
+  const pdfMatch = url.pathname.match(
+    /^\/api\/v1\/(quotations|reservations|rentals)\/(\d+)\/pdf$/,
+  );
+  if (pdfMatch && req.method === "GET") {
+    const domain = pdfMatch[1];
+    const targetId = Number(pdfMatch[2]);
+    const pdfBytes = Buffer.from(
+      `%PDF-1.4\n% DriveCore Synthetic ${domain} #${targetId}\n%%EOF`,
+    );
+    res.writeHead(200, {
+      "Content-Type": "application/pdf",
+      "Content-Disposition": `inline; filename="${domain}-${targetId}.pdf"`,
+      "Cache-Control": "private, no-store, max-age=0",
+      "X-Content-Type-Options": "nosniff",
+    });
+    res.end(pdfBytes);
+    return;
+  }
+
+  const quoteMatch = url.pathname.match(
+    /^\/api\/v1\/quotations(?:\/(\d+)(?:\/(approve-discount|reject-discount|cancel|convert))?)?$/,
+  );
+  if (quoteMatch) {
+    const quoteId = quoteMatch[1] ? Number(quoteMatch[1]) : null;
+    const action = quoteMatch[2] ?? null;
+    if (req.method === "GET" && !quoteId) {
+      if (
+        !user.is_platform_admin &&
+        !user.permissions.includes("quotations.view")
+      ) {
+        fail(403);
+        return;
+      }
+      const companyId = Number(url.searchParams.get("company_id"));
+      const branchId = url.searchParams.get("branch_id")
+        ? Number(url.searchParams.get("branch_id"))
+        : null;
+      const statusFilter = url.searchParams.get("status");
+      const q = (url.searchParams.get("q") ?? "").trim().toLowerCase();
+      const items = [...quotations.values()].filter((item) => {
+        if (item.company_id !== companyId) return false;
+        if (branchId !== null && item.branch_id !== branchId) return false;
+        if (statusFilter && item.status !== statusFilter) return false;
+        if (
+          q &&
+          ![
+            String(item.id),
+            item.customer_name ?? "",
+            ...item.vehicles.map((v) => v.registration),
+          ].some((s) => s.toLowerCase().includes(q))
+        ) {
+          return false;
+        }
+        return true;
+      });
+      paginateSlice(
+        sortItems(items, {
+          id: (item) => item.id,
+          customer_name: (item) => item.customer_name,
+          starts_at: (item) => item.starts_at,
+          total_minor: (item) => item.total_minor,
+          status: (item) => item.status,
+          created_at: (item) => item.created_at,
+        }),
+      );
+      return;
+    }
+    if (req.method === "GET" && quoteId && !action) {
+      if (
+        !user.is_platform_admin &&
+        !user.permissions.includes("quotations.view")
+      ) {
+        fail(403);
+        return;
+      }
+      const rec = quotations.get(quoteId);
+      if (!rec) fail(404);
+      else json(200, { data: rec });
+      return;
+    }
+    if (req.method === "POST" && !quoteId) {
+      if (
+        !user.is_platform_admin &&
+        !user.permissions.includes("quotations.manage")
+      ) {
+        fail(403);
+        return;
+      }
+      const companyId = Number(input.company_id);
+      const branchId = Number(input.branch_id);
+      const customerId = Number(input.customer_id);
+      const vehicleIds = Array.isArray(input.vehicle_ids)
+        ? [...new Set(input.vehicle_ids.map(Number))]
+        : [];
+      if (vehicleIds.length === 0) {
+        fail(422, { vehicle_ids: ["Select at least one vehicle."] });
+        return;
+      }
+      const startMs = Date.parse(input.starts_at);
+      const endMs = Date.parse(input.ends_at);
+      if (Number.isNaN(startMs) || Number.isNaN(endMs) || endMs <= startMs) {
+        fail(422, { ends_at: ["Expected return must be after departure."] });
+        return;
+      }
+      const rentalDays = Math.max(1, Math.ceil((endMs - startMs) / 86_400_000));
+      const picked = [];
+      for (const vId of vehicleIds) {
+        const v = vehicles.get(vId);
+        if (!v || v.company_id !== companyId || v.branch_id !== branchId || v.status !== "available") {
+          fail(422, { vehicle_ids: ["One or more selected vehicles are unavailable."] });
+          return;
+        }
+        if (v.daily_rate_minor <= 0) {
+          fail(422, { vehicle_ids: ["All quoted vehicles must have a daily rate greater than zero."] });
+          return;
+        }
+        picked.push(v);
+      }
+      const settings = companySettings.get(companyId) ?? {
+        vat_rate_pct: 15,
+        discount_approval_threshold_pct: 10,
+      };
+      const discountPct = Number(input.discount_pct ?? 0);
+      if (Number.isNaN(discountPct) || discountPct < 0 || discountPct > 100) {
+        fail(422, { discount_pct: ["Discount must be between 0 and 100."] });
+        return;
+      }
+      const quoteVehicles = picked.map((v) => ({
+        vehicle_id: v.id,
+        registration: v.registration,
+        make: v.make,
+        model: v.model,
+        daily_rate_minor: v.daily_rate_minor,
+        line_subtotal_minor: v.daily_rate_minor * rentalDays,
+        reservation_id: null,
+      }));
+      const subtotalMinor = quoteVehicles.reduce(
+        (sum, v) => sum + v.line_subtotal_minor,
+        0,
+      );
+      const discountMinor = Math.round(subtotalMinor * (discountPct / 100));
+      const taxableMinor = Math.max(0, subtotalMinor - discountMinor);
+      const vatMinor = Math.round(taxableMinor * (settings.vat_rate_pct / 100));
+      const totalMinor = taxableMinor + vatMinor;
+      const needsApproval =
+        discountPct > settings.discount_approval_threshold_pct;
+      const customer = customers.get(customerId);
+      const id = nextId++;
+      const created = {
+        id,
+        company_id: companyId,
+        branch_id: branchId,
+        customer_id: customerId,
+        created_by: user.id,
+        customer_name: customer?.name ?? null,
+        starts_at: new Date(startMs).toISOString(),
+        ends_at: new Date(endMs).toISOString(),
+        rental_days: rentalDays,
+        status: needsApproval ? "pending_approval" : "approved",
+        discount_pct: discountPct,
+        discount_status: needsApproval ? "pending" : "not_required",
+        discount_decided_by: null,
+        discount_decided_by_name: null,
+        discount_decided_at: null,
+        discount_decision_notes: null,
+        subtotal_minor: subtotalMinor,
+        discount_minor: discountMinor,
+        vat_rate_pct: settings.vat_rate_pct,
+        vat_minor: vatMinor,
+        total_minor: totalMinor,
+        notes: input.notes ? String(input.notes) : null,
+        converted_at: null,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        vehicles: quoteVehicles,
+        reservation_ids: [],
+      };
+      quotations.set(id, created);
+      completedWrites++;
+      json(201, { data: created });
+      return;
+    }
+    if (req.method === "POST" && quoteId && (action === "approve-discount" || action === "reject-discount")) {
+      if (
+        !user.is_platform_admin &&
+        !user.permissions.includes("quotations.approve_discount")
+      ) {
+        fail(403);
+        return;
+      }
+      const rec = quotations.get(quoteId);
+      if (!rec) {
+        fail(404);
+        return;
+      }
+      if (rec.status !== "pending_approval" || rec.discount_status !== "pending") {
+        fail(409);
+        return;
+      }
+      const approve = action === "approve-discount";
+      rec.status = approve ? "approved" : "rejected";
+      rec.discount_status = approve ? "approved" : "rejected";
+      rec.discount_decided_by = user.id;
+      rec.discount_decided_by_name = user.name;
+      rec.discount_decided_at = new Date().toISOString();
+      rec.discount_decision_notes = input.notes ? String(input.notes) : null;
+      rec.updated_at = new Date().toISOString();
+      completedWrites++;
+      json(200, { data: rec });
+      return;
+    }
+    if (req.method === "POST" && quoteId && action === "cancel") {
+      if (
+        !user.is_platform_admin &&
+        !user.permissions.includes("quotations.manage")
+      ) {
+        fail(403);
+        return;
+      }
+      const rec = quotations.get(quoteId);
+      if (!rec) {
+        fail(404);
+        return;
+      }
+      if (rec.status !== "pending_approval" && rec.status !== "approved") {
+        fail(409);
+        return;
+      }
+      rec.status = "cancelled";
+      rec.updated_at = new Date().toISOString();
+      completedWrites++;
+      json(200, { data: rec });
+      return;
+    }
+    if (req.method === "POST" && quoteId && action === "convert") {
+      if (
+        !user.is_platform_admin &&
+        (!user.permissions.includes("quotations.manage") ||
+          !user.permissions.includes("reservations.manage"))
+      ) {
+        fail(403);
+        return;
+      }
+      const rec = quotations.get(quoteId);
+      if (!rec) {
+        fail(404);
+        return;
+      }
+      if (rec.status !== "approved") {
+        fail(409);
+        return;
+      }
+      const startMs = Date.parse(rec.starts_at);
+      const endMs = Date.parse(rec.ends_at);
+      // Verify ALL vehicles before creating ANY reservation (atomic rollback semantics)
+      for (const qv of rec.vehicles) {
+        const v = vehicles.get(qv.vehicle_id);
+        const overlap = [...reservations.values()].some(
+          (r) =>
+            r.vehicle_id === qv.vehicle_id &&
+            r.status === "confirmed" &&
+            Date.parse(r.starts_at) < endMs &&
+            Date.parse(r.ends_at) > startMs,
+        );
+        if (!v || v.status !== "available" || overlap) {
+          fail(409);
+          return;
+        }
+      }
+      const createdIds = [];
+      for (const qv of rec.vehicles) {
+        const resId = nextId++;
+        reservations.set(resId, {
+          id: resId,
+          company_id: rec.company_id,
+          branch_id: rec.branch_id,
+          customer_id: rec.customer_id,
+          vehicle_id: qv.vehicle_id,
+          created_by: user.id,
+          starts_at: rec.starts_at,
+          ends_at: rec.ends_at,
+          status: "confirmed",
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        });
+        qv.reservation_id = resId;
+        createdIds.push(resId);
+      }
+      rec.status = "converted";
+      rec.converted_at = new Date().toISOString();
+      rec.reservation_ids = createdIds;
+      rec.updated_at = new Date().toISOString();
+      completedWrites++;
+      json(200, { data: rec });
+      return;
+    }
+    fail(404);
+    return;
+  }
+
   // --- M6 Reservations, Rentals & Documents ---
   const isDriverSelf =
     !user.is_platform_admin &&
@@ -1000,7 +1482,16 @@ createServer(async (req, res) => {
           return true;
         })
         .map(decorateReservation);
-      paginateSlice(items);
+      paginateSlice(
+        sortItems(items, {
+          id: (r) => r.id,
+          customer_name: (r) => r.customer_name,
+          vehicle_registration: (r) => r.vehicle_registration,
+          starts_at: (r) => r.starts_at,
+          ends_at: (r) => r.ends_at,
+          status: (r) => r.status,
+        }),
+      );
       return;
     }
     if (req.method === "GET" && resId && !action) {
@@ -1135,7 +1626,16 @@ createServer(async (req, res) => {
           return true;
         })
         .map(decorateRental);
-      paginateSlice(items);
+      paginateSlice(
+        sortItems(items, {
+          id: (r) => r.id,
+          vehicle_registration: (r) => r.vehicle_registration,
+          customer_name: (r) => r.customer_name,
+          driver_name: (r) => r.driver_name,
+          status: (r) => r.status,
+          handed_over_at: (r) => r.handed_over_at,
+        }),
+      );
       return;
     }
     if (req.method === "GET" && rentalId && !action) {
@@ -1354,7 +1854,14 @@ createServer(async (req, res) => {
           return false;
         return true;
       });
-      paginateSlice(items);
+      paginateSlice(
+        sortItems(items, {
+          original_name: (d) => d.original_name,
+          size: (d) => d.size,
+          expires_at: (d) => d.expires_at,
+          created_at: (d) => d.created_at,
+        }),
+      );
       return;
     }
     if (req.method === "GET" && docId) {
@@ -1514,7 +2021,26 @@ createServer(async (req, res) => {
       }
       return true;
     });
-    paginateSlice(items);
+    paginateSlice(
+      sortItems(
+        items,
+        domain === "customers"
+          ? {
+              name: (r) => r.name,
+              type: (r) => r.type,
+              email: (r) => r.email,
+              id: (r) => r.id,
+            }
+          : {
+              registration: (r) => r.registration,
+              make: (r) => `${r.make} ${r.model}`,
+              daily_rate_minor: (r) => r.daily_rate_minor,
+              odometer: (r) => r.odometer,
+              status: (r) => r.status,
+              id: (r) => r.id,
+            },
+      ),
+    );
     return;
   }
   if (req.method === "GET") {
@@ -1609,4 +2135,4 @@ createServer(async (req, res) => {
     await new Promise((resolve) => setTimeout(resolve, control.mutationDelay));
   completedWrites++;
   json(id ? 200 : 201, { data: record });
-}).listen(3201, "127.0.0.1");
+}).listen(fixturePort, "127.0.0.1");

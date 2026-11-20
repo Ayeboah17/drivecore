@@ -16,8 +16,14 @@ import {
   evaluateTransitionTiming,
   generateDriverPassword,
 } from "../../src/features/rentals/timing";
+import { calculateQuotationPreview } from "../../src/features/quotations/pricing";
 import { resolveScope } from "../../src/features/live/context";
 import { assertRecordScope } from "../../src/features/records/service";
+import {
+  nextSortState,
+  parseSortParams,
+  sortRows,
+} from "../../src/lib/table-sort";
 const user: User = {
   id: 1,
   name: "Synthetic",
@@ -204,4 +210,92 @@ test("evaluateTransitionTiming warns strictly outside ±30 minutes and generateD
   expect(/[a-zA-Z]/.test(pw1)).toBe(true);
   expect(/\d/.test(pw1)).toBe(true);
   expect(pw1).not.toBe(pw2);
+});
+test("calculateQuotationPreview bills started 24h blocks, applies VAT after discount, and flags threshold approval", () => {
+  // 25 hours -> 2 started days; 2 vehicles @ 450.00 + 650.00 = 1,100.00/day -> 2,200.00 subtotal
+  // 12% discount = 264.00 -> taxable 1,936.00 -> 15% VAT = 290.40 -> total 2,226.40
+  const result = calculateQuotationPreview({
+    dailyRatesMinor: [45000, 65000],
+    startsAt: "2026-12-01T08:00:00Z",
+    endsAt: "2026-12-02T09:00:00Z",
+    discountPct: 12,
+    vatRatePct: 15,
+    thresholdPct: 10,
+  });
+  expect(result).toEqual({
+    rentalDays: 2,
+    subtotalMinor: 220000,
+    discountMinor: 26400,
+    taxableMinor: 193600,
+    vatMinor: 29040,
+    totalMinor: 222640,
+    requiresApproval: true,
+  });
+
+  const withinThreshold = calculateQuotationPreview({
+    dailyRatesMinor: [45000],
+    startsAt: "2026-12-01T08:00:00Z",
+    endsAt: "2026-12-01T14:00:00Z",
+    discountPct: 10,
+    vatRatePct: 15,
+    thresholdPct: 10,
+  });
+  expect(withinThreshold.rentalDays).toBe(1);
+  expect(withinThreshold.requiresApproval).toBe(false);
+});
+
+test("table-sort helper supports 3-state cycling, strict allowlist parsing, and nulls-last sorting", () => {
+  // 3-state cycle on same column + reset on column switch
+  expect(nextSortState("", "", "name")).toEqual({
+    sort: "name",
+    dir: "asc",
+  });
+  expect(nextSortState("name", "asc", "name")).toEqual({
+    sort: "name",
+    dir: "desc",
+  });
+  expect(nextSortState("name", "desc", "name")).toEqual({
+    sort: "",
+    dir: "",
+  });
+  expect(nextSortState("name", "desc", "email")).toEqual({
+    sort: "email",
+    dir: "asc",
+  });
+
+  // Allowlist parsing
+  const allowed = ["name", "email"] as const;
+  expect(parseSortParams("name", "desc", allowed)).toEqual({
+    sort: "name",
+    dir: "desc",
+  });
+  expect(parseSortParams("name", "bogus", allowed)).toEqual({
+    sort: "name",
+    dir: "asc",
+  });
+  expect(parseSortParams("password", "asc", allowed)).toEqual({
+    sort: "",
+    dir: "",
+  });
+  expect(parseSortParams(null, "desc", allowed)).toEqual({
+    sort: "",
+    dir: "",
+  });
+
+  // Deterministic nulls-last sorting across numbers and strings
+  const rows = [
+    { id: 1, name: "Bravo", rate: 200 },
+    { id: 2, name: null as string | null, rate: null as number | null },
+    { id: 3, name: "alpha", rate: 50 },
+    { id: 4, name: "Charlie", rate: 100 },
+  ];
+  const byNameAsc = sortRows(rows, "name", "asc", { name: (r) => r.name });
+  expect(byNameAsc.map((r) => r.id)).toEqual([3, 1, 4, 2]);
+  const byNameDesc = sortRows(rows, "name", "desc", { name: (r) => r.name });
+  expect(byNameDesc.map((r) => r.id)).toEqual([4, 1, 3, 2]);
+
+  const byRateAsc = sortRows(rows, "rate", "asc", { rate: (r) => r.rate });
+  expect(byRateAsc.map((r) => r.id)).toEqual([3, 4, 1, 2]);
+  const byRateDesc = sortRows(rows, "rate", "desc", { rate: (r) => r.rate });
+  expect(byRateDesc.map((r) => r.id)).toEqual([1, 4, 3, 2]);
 });
