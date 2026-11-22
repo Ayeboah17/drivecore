@@ -8,7 +8,7 @@
 
 ---
 
-## Master Quick-Reference Index (M6–M11)
+## Master Quick-Reference Index (M6–M12)
 
 ### A. Endpoint Index
 
@@ -62,6 +62,10 @@
 | M11 | `GET` | `/api/v1/vehicles` & `/api/v1/stats/vehicles` | `vehicles.view` (monetary sorts/fields require `invoices.view`) | Multi-facet filtering (`from`, `to`, `status`, `functions`, `min_rate_minor`, `max_rate_minor`, `idle_days_min`, `unpriced_only`, `include_stats=1`) + multi-page sort (`rental_count`, `utilization_pct`, `idle_days`, `revenue_minor`, `net_roi_minor`) |
 | M11 | `GET` | `/api/v1/stats/branches` | `reports.view` (monetary columns require `invoices.view`) | Per-branch comparison rollup (`company_id`, optional `branch_id`, `from`, `to`); branch-restricted users see only their assigned branch |
 | M11 | `GET/POST/DELETE` | `/api/v1/saved-filters` & `/api/v1/saved-filters/{id}` | Authenticated company member (`is_shared=true` requires `company-admin` / platform admin) | Personal & company-shared filter views per `module`; omits shared views with `requires_finance=true` when caller lacks `invoices.view`; max 50 per `(company_id, module)` |
+| M12 | `GET/POST` | `/api/v1/invitations` & `/{id}/{resend\|revoke}` | `users.manage` (whole-company only) | Admin email invitations with SHA-256 hashed 72h single-use tokens; `resend` rotates & invalidates old token; rejects duplicate same-company member/invite (`422`) |
+| M12 | `GET/POST` | `/api/v1/invitations/preview` & `/api/v1/invitations/accept` | Public (rate-limited) | `preview?token=...` returns invite metadata & `account_exists` (`410` expired/revoked/used); `accept` creates new user or verifies existing password for multi-company join, auto-signs in & returns `User` |
+| M12 | `POST` | `/api/v1/auth/forgot-password` & `/api/v1/auth/reset-password` | Public (rate-limited) | `forgot-password` always returns identical generic `200` (zero enumeration); `reset-password` enforces `>=10` chars + letters + numbers, clears `must_change_password`, and revokes all active sessions |
+| M12 | `PATCH/POST` | `/api/v1/auth/profile` & `/api/v1/auth/change-password` | Authenticated user | `profile` updates `name` only (email read-only); `change-password` requires `current_password`, optional `revoke_other_sessions`, clears `must_change_password`; non-auth routes return `403` while `must_change_password=true` |
 
 ### B. Spatie Role & Permission Matrix (M6–M10 Additions)
 
@@ -905,7 +909,69 @@ Schema::create('saved_filters', function (Blueprint $table): void {
 5. `saved-filters` enforces `is_shared` admin-only creation, delete ownership (`403` on another user's personal view), and the 50-view cap (`422`).
 
 ## Milestone 12 — Authentication, Admin Email Invitations & Account Lifecycle (PR #15)
-*(Will be appended when Milestone 12 is implemented.)*
+
+### 12.1 Security & Password Policy Invariants
+- **No Public Self-Registration:** Accounts are created ONLY via Admin Email Invitations (`POST /api/v1/invitations`) or the admin `"Create directly"` fallback (`POST /api/v1/users`, which sets `must_change_password = true`).
+- **Password Strength Policy:** All password creation/reset/change flows enforce `min:10` characters containing at least one letter and one digit (`Password::min(10)->letters()->numbers()`), plus `confirmed`. Change-password rejects reusing the current password (`422`).
+- **Token Storage:** Raw invitation tokens (32 random bytes, hex/base64url) are emailed to the invitee and **never** stored in plaintext; the DB stores `hash('sha256', $rawToken)` in `token_hash`.
+- **Single-Use & Atomic Redemption:** `POST /api/v1/invitations/accept` MUST lock the invitation row (`lockForUpdate()`) inside a DB transaction so concurrent requests cannot redeem the same token twice.
+- **Multi-Company Existing-User Safety:** When `account_exists = true`, `POST /api/v1/invitations/accept` MUST verify the user's existing password (`Hash::check`) before attaching membership and logging them in — preventing account takeover via an intercepted invite link.
+- **Zero Account Enumeration:** `POST /api/v1/auth/forgot-password` ALWAYS returns `200 { "message": "If an account matches that email, a reset link has been sent." }` with consistent timing regardless of whether the email exists.
+- **Mandatory Password Rotation Gate:** While `users.must_change_password === true`, middleware rejects all non-auth API requests (`/api/v1/*` except `auth/me`, `auth/logout`, `auth/change-password`) with `403 Forbidden`.
+
+### 12.2 Database Migrations
+```php
+Schema::table('users', function (Blueprint $table): void {
+    $table->boolean('must_change_password')->default(false)->after('is_active');
+});
+
+Schema::create('invitations', function (Blueprint $table): void {
+    $table->id();
+    $table->foreignId('company_id')->constrained()->cascadeOnDelete();
+    $table->foreignId('branch_id')->nullable()->constrained()->nullOnDelete();
+    $table->foreignId('invited_by')->nullable()->constrained('users')->nullOnDelete();
+    $table->string('email', 255);
+    $table->string('role', 64);
+    $table->string('token_hash', 64)->unique();
+    $table->timestampTz('expires_at');
+    $table->timestampTz('accepted_at')->nullable();
+    $table->timestampTz('revoked_at')->nullable();
+    $table->timestamps();
+    $table->index(['company_id', 'email']);
+    $table->index(['company_id', 'accepted_at', 'revoked_at']);
+});
+```
+
+### 12.3 Endpoints & Contracts
+
+#### A. Admin Invitations (`users.manage`, whole-company only)
+- `GET /api/v1/invitations?company_id={id}&status={pending|accepted|revoked|expired}&q=&page=`: Paginated list of invitations (`id`, `company_id`, `branch_id`, `branch_name`, `email`, `role`, `status`, `invited_by_name`, `expires_at`, `accepted_at`, `revoked_at`, `created_at`). Never returns `token_hash`.
+- `POST /api/v1/invitations`: `{ company_id, branch_id?, email, role }` → `201`. Rejects if email is already a member of `company_id` or already has a pending unexpired invitation in `company_id` (`422`). Generates 72-hour token, stores `token_hash`, queues invite email.
+- `POST /api/v1/invitations/{id}/resend`: Rotates `token_hash` (immediately invalidating prior link), resets `expires_at` to `now()->addHours(72)`, re-sends email → `200`. Returns `409` if already accepted or revoked.
+- `POST /api/v1/invitations/{id}/revoke`: Sets `revoked_at = now()` → `200`. Returns `409` if already accepted or revoked.
+
+#### B. Public Invitation Preview & Acceptance (Rate-Limited)
+- `GET /api/v1/invitations/preview?token={raw}`: Looks up `hash('sha256', $token)`. Returns `200 { data: { email, company_name, branch_name, role, expires_at, account_exists } }`. Returns `410` if expired, revoked, or already accepted; `404` if unknown.
+- `POST /api/v1/invitations/accept`:
+  - If `account_exists = false`: `{ token, name, password, password_confirmation }` → creates active user (`must_change_password = false`), attaches role & company/branch membership, marks `accepted_at`, logs user into Sanctum session, returns `200 { data: User, company_id }`.
+  - If `account_exists = true`: `{ token, password }` → verifies existing password (`422` if wrong), attaches membership to `company_id`, marks `accepted_at`, logs user into Sanctum session, returns `200 { data: User, company_id }`.
+
+#### C. Public Forgot & Reset Password (Rate-Limited)
+- `POST /api/v1/auth/forgot-password`: `{ email }` → `200 { message: "If an account matches that email, a reset link has been sent." }`.
+- `POST /api/v1/auth/reset-password`: `{ token, email, password, password_confirmation }` → validates reset token & strength policy, updates password, sets `must_change_password = false`, revokes all active sessions/tokens → `200 { message: "Password reset successfully." }` (`410`/`422` on invalid/expired token).
+
+#### D. Authenticated Profile & Security (`/api/v1/auth/profile`, `/api/v1/auth/change-password`)
+- `GET /api/v1/auth/me` & `POST /api/v1/auth/login`: Include `must_change_password: boolean` on the `User` payload.
+- `PATCH /api/v1/auth/profile`: `{ name (1..120) }` → updates display name only (ignores/rejects email changes) → `200 { data: User }`.
+- `POST /api/v1/auth/change-password`: `{ current_password, password, password_confirmation, revoke_other_sessions?: boolean }` → verifies `current_password` (`422` if wrong), rejects same password (`422`), updates password, sets `must_change_password = false`, optionally revokes other sessions → `200 { data: User }`.
+
+### 12.4 Required Feature Tests (`tests/Feature/MilestoneTwelveTest.php`)
+1. Admin invites user → `preview` returns `200`; `resend` rotates token so old token returns `410` and new token returns `200`; `revoke` makes token return `410`.
+2. New user accepts invite → creates user, auto-signs in, and second redemption returns `410`.
+3. Existing user in Company A invited to Company B → wrong existing password returns `422`; correct existing password attaches Company B membership and auto-signs in.
+4. Direct-created user (`must_change_password = true`) receives `403` on `/api/v1/customers` until calling `POST /api/v1/auth/change-password`, after which `/api/v1/customers` returns `200`.
+5. `forgot-password` returns identical `200` for existing & nonexistent emails; `reset-password` updates password and invalidates prior sessions.
+6. `PATCH /api/v1/auth/profile` updates `name` without permitting email changes.
 
 ## Milestone 13 — Car Tracker / GPS Telematics API Integration (PR #16 — TBD)
 *(Will be appended once GPS tracker vendor API details are available.)*

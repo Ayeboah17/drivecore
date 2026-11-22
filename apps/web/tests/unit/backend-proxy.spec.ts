@@ -33,7 +33,7 @@ test("proxy allowlist excludes tokens, deletes, arbitrary URLs and unsupported d
     "https://elsewhere.test",
     "api/v1/../users",
     "api/v1/gps-trackers",
-    "api/v1/invitations",
+    "api/v1/telematics",
   ])
     expect(allowedPath("GET", path)).toBe(false);
   expect(allowedPath("DELETE", "api/v1/customers/1")).toBe(false);
@@ -701,4 +701,47 @@ test("M11 detailed stats, customer 360, and saved-filters routes enforce allowli
     },
   );
   expect(delBlocked.status).toBe(404);
+});
+
+test("M12 invitations, password reset, and account profile/security routes enforce allowlists and token validation", async () => {
+  for (const invalid of [
+    "api/v1/invitations",
+    "api/v1/invitations?company_id=1&status=bogus",
+    "api/v1/invitations/preview",
+    "api/v1/invitations/preview?token=short",
+    "api/v1/invitations/preview?token=bad!token$chars1234567890",
+  ]) {
+    const [path] = invalid.split("?");
+    const res = await proxy(make(invalid), path, config, async () => {
+      throw new Error("Must not reach upstream");
+    });
+    expect(res.status).toBe(400);
+  }
+
+  for (const valid of [
+    "api/v1/invitations?company_id=1&status=pending",
+    "api/v1/invitations/preview?token=abcdef1234567890abcdef1234567890",
+  ]) {
+    const [path] = valid.split("?");
+    const res = await proxy(make(valid), path, config, async () =>
+      Response.json({ data: {} }),
+    );
+    expect(res.status).toBe(200);
+  }
+
+  for (const [method, path] of [
+    ["POST", "api/v1/invitations"],
+    ["POST", "api/v1/invitations/accept"],
+    ["POST", "api/v1/invitations/7/resend"],
+    ["POST", "api/v1/invitations/7/revoke"],
+    ["POST", "api/v1/auth/forgot-password"],
+    ["POST", "api/v1/auth/reset-password"],
+    ["POST", "api/v1/auth/change-password"],
+    ["PATCH", "api/v1/auth/profile"],
+  ] as const) {
+    const res = await proxy(make(path, method), path, config, async () =>
+      Response.json({ data: {} }),
+    );
+    expect(res.status).toBe(200);
+  }
 });

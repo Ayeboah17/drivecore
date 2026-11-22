@@ -24,6 +24,7 @@ interface Session {
   notice: string | null;
   epoch: number;
   login: (email: string, password: string) => Promise<void>;
+  adoptUser: (user: User, resetSession?: boolean) => Promise<void>;
   logout: () => Promise<void>;
   expire: () => void;
   refresh: () => void;
@@ -151,6 +152,19 @@ function SessionState({ children }: { children: React.ReactNode }) {
           client.clear();
           client.setQueryData(["identity", nextEpoch], parsed.data.data);
           setEpoch(nextEpoch);
+        },
+        adoptUser: async (nextUser, resetSession = false) => {
+          setNotice(null);
+          if (resetSession) {
+            const nextEpoch = epoch + 1;
+            justSignedInEpoch.current = nextEpoch;
+            await client.cancelQueries();
+            client.clear();
+            client.setQueryData(["identity", nextEpoch], nextUser);
+            setEpoch(nextEpoch);
+          } else {
+            client.setQueryData(["identity", epoch], nextUser);
+          }
         },
         logout: async () => {
           justSignedInEpoch.current = null;

@@ -1,7 +1,11 @@
 // Synthetic contract server, loopback only. Not Laravel and never a staging substitute.
 import { createServer } from "node:http";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 let sessions = new Map();
+let invitations = new Map();
+let lastInviteToken = "";
+let passwordResets = new Map();
+let lastResetToken = "";
 let customers = new Map();
 let vehicles = new Map();
 let companies = new Map();
@@ -244,6 +248,10 @@ function reset() {
     ],
   ]);
   savedFilters = new Map();
+  invitations = new Map();
+  lastInviteToken = "";
+  passwordResets = new Map();
+  lastResetToken = "";
   branches = new Map([
     [2, { id: 2, company_id: 1, name: "Synthetic branch" }],
     [4, { id: 4, company_id: 3, name: "Other branch" }],
@@ -835,6 +843,44 @@ createServer(async (req, res) => {
     fail(419);
     return;
   }
+  if (url.pathname === "/__test/last-invite-token" && req.method === "GET") {
+    json(200, { token: lastInviteToken });
+    return;
+  }
+  if (url.pathname === "/__test/last-reset-token" && req.method === "GET") {
+    json(200, { token: lastResetToken });
+    return;
+  }
+  if (url.pathname === "/api/v1/invitations/preview" && req.method === "GET") {
+    const raw = url.searchParams.get("token") ?? "";
+    const hash = createHash("sha256").update(raw).digest("hex");
+    const inv = [...invitations.values()].find((i) => i.token_hash === hash);
+    if (!inv) {
+      fail(404);
+      return;
+    }
+    const expired = Date.parse(inv.expires_at) <= Date.now();
+    if (inv.accepted_at || inv.revoked_at || expired) {
+      fail(410);
+      return;
+    }
+    const comp = companies.get(inv.company_id);
+    const br = inv.branch_id ? branches.get(inv.branch_id) : null;
+    const accountExists = [...managedUsers.values()].some(
+      (u) => u.email.toLowerCase() === inv.email.toLowerCase(),
+    );
+    json(200, {
+      data: {
+        email: inv.email,
+        company_name: comp?.name ?? `Company #${inv.company_id}`,
+        branch_name: br?.name ?? null,
+        role: inv.role,
+        expires_at: inv.expires_at,
+        account_exists: accountExists,
+      },
+    });
+    return;
+  }
   if (url.pathname === "/api/v1/auth/login") {
     if (control.loginStatus) {
       fail(control.loginStatus);
@@ -945,6 +991,7 @@ createServer(async (req, res) => {
           : "synthetic@example.test",
       roles: [role === "activedriver" ? "driver" : role],
       is_platform_admin: role === "admin",
+      must_change_password: role === "mustrotate",
       permissions,
       companies:
         role === "admin"
@@ -973,6 +1020,122 @@ createServer(async (req, res) => {
     json(200, { data: user });
     return;
   }
+  if (url.pathname === "/api/v1/invitations/accept" && req.method === "POST") {
+    const raw = String(input.token ?? "");
+    const hash = createHash("sha256").update(raw).digest("hex");
+    const inv = [...invitations.values()].find((i) => i.token_hash === hash);
+    if (!inv) {
+      fail(404);
+      return;
+    }
+    if (
+      inv.accepted_at ||
+      inv.revoked_at ||
+      Date.parse(inv.expires_at) <= Date.now()
+    ) {
+      fail(410);
+      return;
+    }
+    const existing = [...managedUsers.values()].find(
+      (u) => u.email.toLowerCase() === inv.email.toLowerCase(),
+    );
+    const pw = String(input.password ?? "");
+    if (!existing) {
+      const name = String(input.name ?? "").trim();
+      if (!name) {
+        fail(422, { name: ["Name is required."] });
+        return;
+      }
+      if (pw.length < 10 || !/[A-Za-z]/.test(pw) || !/\d/.test(pw)) {
+        fail(422, {
+          password: [
+            "Password must be at least 10 characters and include a letter and a number.",
+          ],
+        });
+        return;
+      }
+    } else if (!pw || pw === "wrong-password") {
+      fail(422, { password: ["The provided credentials are incorrect."] });
+      return;
+    }
+
+    inv.accepted_at = new Date().toISOString();
+    inv.status = "accepted";
+    const comp = companies.get(inv.company_id);
+    const uid = existing ? existing.id : nextId++;
+    const userObj = {
+      id: uid,
+      name: existing ? existing.name : String(input.name).trim(),
+      email: inv.email,
+      is_platform_admin: false,
+      must_change_password: false,
+      roles: [inv.role],
+      permissions: [
+        "companies.view",
+        "branches.view",
+        "customers.view",
+        "vehicles.view",
+        "reservations.view",
+        "rentals.view",
+        "messages.view",
+        "messages.send",
+        "reports.view",
+      ],
+      companies: [
+        ...(existing?.companies ?? []),
+        {
+          id: inv.company_id,
+          name: comp?.name ?? `Company #${inv.company_id}`,
+          branch_id: inv.branch_id ?? null,
+        },
+      ],
+    };
+    const session = randomUUID();
+    sessions.set(session, userObj);
+    res.setHeader("Set-Cookie", [
+      `drivecore_test=${session}; Path=/; HttpOnly; SameSite=Lax`,
+      `XSRF-TOKEN=${encodeURIComponent(randomUUID() + "=")}; Path=/; SameSite=Lax`,
+    ]);
+    completedWrites++;
+    json(200, { data: userObj, company_id: inv.company_id });
+    return;
+  }
+  if (url.pathname === "/api/v1/auth/forgot-password" && req.method === "POST") {
+    const email = String(input.email ?? "").trim().toLowerCase();
+    const raw = randomUUID().replace(/-/g, "") + randomUUID().replace(/-/g, "");
+    lastResetToken = raw;
+    passwordResets.set(raw, {
+      email,
+      expires_at: Date.now() + 3_600_000,
+      used: false,
+    });
+    json(200, {
+      message: "If an account matches that email, a reset link has been sent.",
+    });
+    return;
+  }
+  if (url.pathname === "/api/v1/auth/reset-password" && req.method === "POST") {
+    const raw = String(input.token ?? "");
+    const email = String(input.email ?? "").trim().toLowerCase();
+    const pw = String(input.password ?? "");
+    const rec = passwordResets.get(raw);
+    if (!rec || rec.used || rec.expires_at <= Date.now() || rec.email !== email) {
+      fail(422, { token: ["This password reset token is invalid or expired."] });
+      return;
+    }
+    if (pw.length < 10 || !/[A-Za-z]/.test(pw) || !/\d/.test(pw)) {
+      fail(422, {
+        password: [
+          "Password must be at least 10 characters and include a letter and a number.",
+        ],
+      });
+      return;
+    }
+    rec.used = true;
+    completedWrites++;
+    json(200, { message: "Password reset successfully." });
+    return;
+  }
   const user = sessions.get(cookies.drivecore_test);
   if (!user) {
     fail(401);
@@ -999,6 +1162,183 @@ createServer(async (req, res) => {
     res.setHeader("Set-Cookie", "drivecore_test=; Max-Age=0; Path=/; HttpOnly");
     json(200, { data: { message: "Signed out." } });
     return;
+  }
+  if (url.pathname === "/api/v1/auth/profile" && req.method === "PATCH") {
+    if (user.must_change_password) {
+      fail(403);
+      return;
+    }
+    const name = String(input.name ?? "").trim();
+    if (!name || name.length > 120) {
+      fail(422, { name: ["Display name is required."] });
+      return;
+    }
+    user.name = name;
+    completedWrites++;
+    json(200, { data: user });
+    return;
+  }
+  if (url.pathname === "/api/v1/auth/change-password" && req.method === "POST") {
+    const cur = String(input.current_password ?? "");
+    const nextPw = String(input.password ?? "");
+    if (!cur || cur === "wrong-password") {
+      fail(422, { current_password: ["Current password is incorrect."] });
+      return;
+    }
+    if (nextPw.length < 10 || !/[A-Za-z]/.test(nextPw) || !/\d/.test(nextPw)) {
+      fail(422, {
+        password: [
+          "Password must be at least 10 characters and include a letter and a number.",
+        ],
+      });
+      return;
+    }
+    if (nextPw === cur) {
+      fail(422, {
+        password: ["New password must be different from current password."],
+      });
+      return;
+    }
+    user.must_change_password = false;
+    completedWrites++;
+    json(200, { data: user });
+    return;
+  }
+  if (user.must_change_password) {
+    fail(403);
+    return;
+  }
+
+  const invMatch = url.pathname.match(
+    /^\/api\/v1\/invitations(?:\/(\d+)(?:\/(resend|revoke))?)?$/,
+  );
+  if (invMatch) {
+    if (!user.is_platform_admin && !user.permissions.includes("users.manage")) {
+      fail(403);
+      return;
+    }
+    const invId = invMatch[1] ? Number(invMatch[1]) : null;
+    const action = invMatch[2] ?? null;
+    const decorateInv = (i) => {
+      const br = i.branch_id ? branches.get(i.branch_id) : null;
+      const status = i.accepted_at
+        ? "accepted"
+        : i.revoked_at
+          ? "revoked"
+          : Date.parse(i.expires_at) <= Date.now()
+            ? "expired"
+            : "pending";
+      return {
+        id: i.id,
+        company_id: i.company_id,
+        branch_id: i.branch_id,
+        branch_name: br?.name ?? null,
+        email: i.email,
+        role: i.role,
+        status,
+        invited_by_name: i.invited_by_name ?? null,
+        expires_at: i.expires_at,
+        accepted_at: i.accepted_at,
+        revoked_at: i.revoked_at,
+        created_at: i.created_at,
+      };
+    };
+    if (req.method === "GET" && !invId) {
+      const companyId = Number(url.searchParams.get("company_id"));
+      const stFilter = url.searchParams.get("status");
+      const q = (url.searchParams.get("q") ?? "").trim().toLowerCase();
+      const items = [...invitations.values()]
+        .filter((i) => i.company_id === companyId)
+        .map(decorateInv)
+        .filter((i) => {
+          if (stFilter && i.status !== stFilter) return false;
+          if (q && !i.email.toLowerCase().includes(q)) return false;
+          return true;
+        })
+        .sort((a, b) => b.id - a.id);
+      json(200, {
+        data: items,
+        meta: { current_page: 1, last_page: 1, per_page: 25, total: items.length },
+      });
+      return;
+    }
+    if (req.method === "POST" && !invId) {
+      const companyId = Number(input.company_id);
+      const email = String(input.email ?? "").trim().toLowerCase();
+      const roleName = String(input.role ?? "operations");
+      const branchId = input.branch_id ? Number(input.branch_id) : null;
+      const dupPending = [...invitations.values()].some(
+        (i) =>
+          i.company_id === companyId &&
+          i.email.toLowerCase() === email &&
+          !i.accepted_at &&
+          !i.revoked_at &&
+          Date.parse(i.expires_at) > Date.now(),
+      );
+      if (!email || !email.includes("@") || dupPending) {
+        fail(422, {
+          email: [
+            dupPending
+              ? "A pending invitation already exists for this email."
+              : "Enter a valid email address.",
+          ],
+        });
+        return;
+      }
+      const raw = randomUUID().replace(/-/g, "") + randomUUID().replace(/-/g, "");
+      lastInviteToken = raw;
+      const id = nextId++;
+      const rec = {
+        id,
+        company_id: companyId,
+        branch_id: branchId,
+        email,
+        role: roleName,
+        invited_by_name: user.name,
+        token_hash: createHash("sha256").update(raw).digest("hex"),
+        expires_at: new Date(Date.now() + 72 * 3_600_000).toISOString(),
+        accepted_at: null,
+        revoked_at: null,
+        created_at: new Date().toISOString(),
+      };
+      invitations.set(id, rec);
+      completedWrites++;
+      json(201, { data: decorateInv(rec) });
+      return;
+    }
+    if (req.method === "POST" && invId && action === "resend") {
+      const rec = invitations.get(invId);
+      if (!rec) {
+        fail(404);
+        return;
+      }
+      if (rec.accepted_at || rec.revoked_at) {
+        fail(409);
+        return;
+      }
+      const raw = randomUUID().replace(/-/g, "") + randomUUID().replace(/-/g, "");
+      lastInviteToken = raw;
+      rec.token_hash = createHash("sha256").update(raw).digest("hex");
+      rec.expires_at = new Date(Date.now() + 72 * 3_600_000).toISOString();
+      completedWrites++;
+      json(200, { data: decorateInv(rec) });
+      return;
+    }
+    if (req.method === "POST" && invId && action === "revoke") {
+      const rec = invitations.get(invId);
+      if (!rec) {
+        fail(404);
+        return;
+      }
+      if (rec.accepted_at || rec.revoked_at) {
+        fail(409);
+        return;
+      }
+      rec.revoked_at = new Date().toISOString();
+      completedWrites++;
+      json(200, { data: decorateInv(rec) });
+      return;
+    }
   }
 
   const page = Number(url.searchParams.get("page") ?? 1);

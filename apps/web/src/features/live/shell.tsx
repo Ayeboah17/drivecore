@@ -45,10 +45,18 @@ export function Protected({ children }: { children: React.ReactNode }) {
   const path = usePathname();
   const search = useSearchParams();
   useEffect(() => {
-    if (!session.pending && !session.error && !session.user)
+    if (!session.pending && !session.error && !session.user) {
       router.replace(
         `/login?next=${encodeURIComponent(path + (search.size ? `?${search}` : ""))}`,
       );
+    } else if (
+      !session.pending &&
+      !session.error &&
+      session.user?.must_change_password &&
+      path !== "/account"
+    ) {
+      router.replace("/account?force_password_change=1");
+    }
   }, [session.pending, session.error, session.user, router, path, search]);
   if (session.pending)
     return (
@@ -73,6 +81,12 @@ export function Protected({ children }: { children: React.ReactNode }) {
     return (
       <p className="p-page" role="status">
         Opening sign in…
+      </p>
+    );
+  if (session.user.must_change_password && path !== "/account")
+    return (
+      <p className="p-page" role="status">
+        Password update required before continuing…
       </p>
     );
   return children;

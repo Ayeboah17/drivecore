@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ShieldCheck, UserPlus, X } from "lucide-react";
+import { MailPlus, ShieldCheck, UserPlus, X } from "lucide-react";
 import { useSession } from "@/features/auth/session-provider";
 import { useLiveContext } from "@/features/live/context";
 import { canCreateBranch } from "@/features/setup/contracts";
@@ -50,6 +50,7 @@ import { listRoles, listUsers } from "./service";
 
 const USER_SORT_KEYS = ["name", "email", "role", "is_active"] as const;
 import { FinancialSettingsPanel } from "./settings-panel";
+import { InvitationsPanel, InviteUserDialog } from "./invitations-panel";
 
 const ROLE_FILTERS = [
   { value: "", label: "All roles" },
@@ -71,6 +72,7 @@ export function UsersAdminPage() {
   const searchParams = useSearchParams();
   const client = useQueryClient();
 
+  const [inviteOpen, setInviteOpen] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
   const [rolesOpen, setRolesOpen] = useState(false);
   const [editing, setEditing] = useState<ManagedUser | null>(null);
@@ -81,10 +83,13 @@ export function UsersAdminPage() {
   const canManageBranches = !!user && canCreateBranch(user, scope.companyId);
   const canViewSettings =
     !!user && canManageCompanySettings(user, scope.companyId);
-  const activeTab: "users" | "settings" =
-    searchParams.get("tab") === "settings" && canViewSettings
+  const rawTab = searchParams.get("tab");
+  const activeTab: "users" | "invitations" | "settings" =
+    rawTab === "settings" && canViewSettings
       ? "settings"
-      : "users";
+      : rawTab === "invitations"
+        ? "invitations"
+        : "users";
 
   const rawQ = (searchParams.get("q") ?? "").slice(0, 100);
   const rawRole = searchParams.get("role") ?? "";
@@ -231,10 +236,20 @@ export function UsersAdminPage() {
 
         <div className="flex flex-wrap items-center gap-2.5">
           {canManage ? (
-            <Button type="button" onClick={() => setCreateOpen(true)}>
-              <UserPlus className="size-4" aria-hidden="true" />
-              Create user
-            </Button>
+            <>
+              <Button type="button" onClick={() => setInviteOpen(true)}>
+                <MailPlus className="size-4" aria-hidden="true" />
+                Invite user
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setCreateOpen(true)}
+              >
+                <UserPlus className="size-4" aria-hidden="true" />
+                Create user
+              </Button>
+            </>
           ) : null}
           <Button
             type="button"
@@ -255,18 +270,20 @@ export function UsersAdminPage() {
         </div>
       </div>
 
-      {canViewSettings ? (
-        <div
-          role="tablist"
-          aria-label="Administration sections"
-          className="inline-flex rounded-xl border bg-muted/40 p-1"
-        >
-          {(
-            [
-              ["users", "Users & Roles"],
-              ["settings", "Financial settings"],
-            ] as const
-          ).map(([key, label]) => (
+      <div
+        role="tablist"
+        aria-label="Administration sections"
+        className="inline-flex flex-wrap rounded-xl border bg-muted/40 p-1"
+      >
+        {(
+          [
+            ["users", "Users & Roles", true],
+            ["invitations", "Pending invitations", true],
+            ["settings", "Financial settings", canViewSettings],
+          ] as const
+        )
+          .filter(([, , visible]) => visible)
+          .map(([key, label]) => (
             <button
               key={key}
               type="button"
@@ -274,7 +291,7 @@ export function UsersAdminPage() {
               aria-selected={activeTab === key}
               onClick={() => {
                 const params = new URLSearchParams({ branch: scope.branch });
-                if (key === "settings") params.set("tab", "settings");
+                if (key !== "users") params.set("tab", key);
                 scope.navigate(`${base}?${params.toString()}`);
               }}
               className={`rounded-lg px-3.5 py-1.5 text-xs font-medium transition-colors duration-150 focus-visible:outline-2 focus-visible:outline-ring ${
@@ -286,8 +303,7 @@ export function UsersAdminPage() {
               {label}
             </button>
           ))}
-        </div>
-      ) : null}
+      </div>
 
       {notice ? (
         <div
@@ -310,6 +326,8 @@ export function UsersAdminPage() {
 
       {activeTab === "settings" ? (
         <FinancialSettingsPanel />
+      ) : activeTab === "invitations" ? (
+        <InvitationsPanel canManage={canManage} onNotice={setNotice} />
       ) : (
         <DataTableFrame
           ariaLabel="Users directory"
@@ -559,6 +577,17 @@ export function UsersAdminPage() {
           )}
         </DataTableFrame>
       )}
+
+      <InviteUserDialog
+        open={inviteOpen}
+        onOpenChange={setInviteOpen}
+        onInvited={(email) => {
+          setNotice(`Invitation sent to ${email}.`);
+          void client.invalidateQueries({
+            queryKey: [...scope.key, "invitations"],
+          });
+        }}
+      />
 
       <CreateUserDialog
         open={createOpen}

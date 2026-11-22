@@ -22,6 +22,7 @@ export const userSchema = z.object({
   name: z.string(),
   email: z.string(),
   is_platform_admin: z.boolean(),
+  must_change_password: z.boolean().optional(),
   roles: z.array(z.string()),
   permissions: z.array(z.string()),
   companies: z.array(
@@ -1002,6 +1003,52 @@ export const savedFilterSchema = z.object({
   created_at: z.string().nullable().optional().default(null),
 });
 export type SavedFilter = z.infer<typeof savedFilterSchema>;
+
+export const invitationStatuses = [
+  "pending",
+  "accepted",
+  "revoked",
+  "expired",
+] as const;
+export type InvitationStatus = (typeof invitationStatuses)[number];
+
+export const invitationSchema = z.object({
+  id: numericId,
+  company_id: numericId,
+  branch_id: numericId.nullable().optional().default(null),
+  branch_name: z.string().nullable().optional().default(null),
+  email: z.string(),
+  role: z.string(),
+  status: z.enum(invitationStatuses),
+  invited_by_name: z.string().nullable().optional().default(null),
+  expires_at: z.string(),
+  accepted_at: z.string().nullable().optional().default(null),
+  revoked_at: z.string().nullable().optional().default(null),
+  created_at: z.string().nullable().optional().default(null),
+});
+export type Invitation = z.infer<typeof invitationSchema>;
+
+export const invitationPreviewSchema = z.object({
+  email: z.string(),
+  company_name: z.string(),
+  branch_name: z.string().nullable().optional().default(null),
+  role: z.string(),
+  expires_at: z.string(),
+  account_exists: z.boolean(),
+});
+export type InvitationPreview = z.infer<typeof invitationPreviewSchema>;
+
+export function checkPasswordStrength(password: string) {
+  const minLength = password.length >= 10;
+  const hasLetter = /[A-Za-z]/.test(password);
+  const hasNumber = /\d/.test(password);
+  return {
+    minLength,
+    hasLetter,
+    hasNumber,
+    valid: minLength && hasLetter && hasNumber,
+  };
+}
 
 export function safeLoginReturn(raw: string | null) {
   if (!raw || raw.length > 2000 || /[\\\x00-\x20]/.test(raw))

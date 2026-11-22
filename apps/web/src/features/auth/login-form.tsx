@@ -30,9 +30,15 @@ export function LoginForm() {
     formState: { errors, isSubmitting },
   } = useForm<z.infer<typeof schema>>({ resolver: zodResolver(schema) });
   const target = safeLoginReturn(search.get("next"));
+  const wasReset = search.get("reset") === "1";
   useEffect(() => {
-    if (!session.pending && !session.error && session.user)
-      router.replace(target);
+    if (!session.pending && !session.error && session.user) {
+      router.replace(
+        session.user.must_change_password
+          ? "/account?force_password_change=1"
+          : target,
+      );
+    }
   }, [session.pending, session.error, session.user, router, target]);
   return (
     <DriveCoreMotionProvider>
@@ -100,7 +106,15 @@ export function LoginForm() {
               </p>
             </div>
             <div className="space-y-2">
-              <label htmlFor="password">Password</label>
+              <div className="flex items-center justify-between gap-2">
+                <label htmlFor="password">Password</label>
+                <Link
+                  href="/forgot-password"
+                  className="text-xs font-medium text-link hover:text-link-hover hover:underline"
+                >
+                  Forgot password?
+                </Link>
+              </div>
               <Input
                 id="password"
                 type="password"
@@ -113,6 +127,14 @@ export function LoginForm() {
                 {errors.password?.message}
               </p>
             </div>
+            {wasReset && !error ? (
+              <div
+                role="status"
+                className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-3 text-sm text-emerald-800 dark:text-emerald-300"
+              >
+                Your password has been reset. Sign in with your new password.
+              </div>
+            ) : null}
             {session.notice && !error ? (
               <div
                 role="alert"

@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRef, useState } from "react";
-import { Building2, ChevronDown, LogOut, ShieldCheck } from "lucide-react";
+import { Building2, ChevronDown, LogOut, ShieldCheck, UserCog } from "lucide-react";
 import { useSession } from "@/features/auth/session-provider";
 import { ApiError, errorText, initializeCsrf } from "@/lib/api/client";
 import { Button } from "@/components/ui/button";
@@ -155,6 +155,13 @@ export function LiveAccountMenu({
           </div>
         </DropdownMenuGroup>
         <DropdownMenuSeparator />
+        <DropdownMenuItem
+          className="min-h-control rounded-xl"
+          render={<Link href="/account" />}
+        >
+          <UserCog aria-hidden="true" />
+          Account &amp; security
+        </DropdownMenuItem>
         {showWorkspacesLink ? (
           <DropdownMenuItem
             className="min-h-control rounded-xl"
