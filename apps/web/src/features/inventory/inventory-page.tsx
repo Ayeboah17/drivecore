@@ -6,6 +6,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AlertTriangle,
   ArrowLeftRight,
+  BatteryCharging,
   Package,
   Plus,
   SlidersHorizontal,
@@ -13,6 +14,7 @@ import {
 } from "lucide-react";
 import { useSession } from "@/features/auth/session-provider";
 import { useLiveContext } from "@/features/live/context";
+import { TyresBatteriesPanel } from "@/features/operations-srs/tyres-batteries-panel";
 import {
   adjustPartStock,
   createPart,
@@ -54,7 +56,7 @@ import {
 import { DriveCoreSelect } from "@/components/ui/drivecore-select";
 import { Input } from "@/components/ui/input";
 
-type InventoryTab = "parts" | "movements";
+type InventoryTab = "parts" | "components" | "movements";
 
 const PART_SORT_KEYS = [
   "sku",
@@ -88,8 +90,13 @@ export function LiveInventoryPage() {
   const canManage = !!user && can(user, "parts.manage");
   const currency = scope.company?.currency || "ZMW";
 
+  const rawTab = searchParams.get("tab");
   const activeTab: InventoryTab =
-    searchParams.get("tab") === "movements" ? "movements" : "parts";
+    rawTab === "movements"
+      ? "movements"
+      : rawTab === "components"
+        ? "components"
+        : "parts";
   const rawQ = searchParams.get("q") ?? "";
   const lowOnly = searchParams.get("low") === "1";
   const rawPage = Number(searchParams.get("page") ?? "1");
@@ -247,6 +254,22 @@ export function LiveInventoryPage() {
         <button
           type="button"
           role="tab"
+          aria-selected={activeTab === "components"}
+          onClick={() =>
+            updateQuery({ tab: "components", low: "", q: "", sort: "", dir: "", page: 1 })
+          }
+          className={`inline-flex items-center gap-1.5 rounded-xl px-3.5 py-2 text-xs font-semibold transition-colors ${
+            activeTab === "components"
+              ? "bg-primary text-primary-foreground shadow-xs"
+              : "text-muted-foreground hover:bg-muted/80 hover:text-foreground"
+          }`}
+        >
+          <BatteryCharging className="size-3.5" aria-hidden="true" />
+          Tyres &amp; batteries
+        </button>
+        <button
+          type="button"
+          role="tab"
           aria-selected={activeTab === "movements"}
           onClick={() =>
             updateQuery({
@@ -306,7 +329,9 @@ export function LiveInventoryPage() {
         </div>
       ) : null}
 
-      {activeTab === "parts" ? (
+      {activeTab === "components" ? (
+        <TyresBatteriesPanel canManage={canManage} />
+      ) : activeTab === "parts" ? (
         <DataTableFrame
           ariaLabel="Spare parts table"
           toolbar={

@@ -219,11 +219,33 @@ const nonNegNumber = z.union([
     .pipe(z.number().nonnegative()),
 ]);
 
+export const distanceUnits = ["km", "mi"] as const;
+export type DistanceUnit = (typeof distanceUnits)[number];
+export const volumeUnits = ["l", "gal_us"] as const;
+export type VolumeUnit = (typeof volumeUnits)[number];
+export const fuelEfficiencyUnits = [
+  "l_per_100km",
+  "km_per_l",
+  "mpg_us",
+  "mpg_uk",
+] as const;
+export type FuelEfficiencyUnit = (typeof fuelEfficiencyUnits)[number];
+export const weightUnits = ["kg", "lb"] as const;
+export type WeightUnit = (typeof weightUnits)[number];
+
 export const companySettingsSchema = z.object({
   company_id: numericId,
   currency: z.string(),
   vat_rate_pct: nonNegNumber.pipe(z.number().max(100)),
   discount_approval_threshold_pct: nonNegNumber.pipe(z.number().max(100)),
+  require_inspection_photos: z.boolean().optional().default(false),
+  distance_unit: z.enum(distanceUnits).optional().default("km"),
+  volume_unit: z.enum(volumeUnits).optional().default("l"),
+  fuel_efficiency_unit: z
+    .enum(fuelEfficiencyUnits)
+    .optional()
+    .default("l_per_100km"),
+  weight_unit: z.enum(weightUnits).optional().default("kg"),
 });
 
 export const quotationVehicleSchema = z.object({
@@ -1037,6 +1059,132 @@ export const invitationPreviewSchema = z.object({
   account_exists: z.boolean(),
 });
 export type InvitationPreview = z.infer<typeof invitationPreviewSchema>;
+
+export const fuelPolicies = [
+  "full_to_full",
+  "same_to_same",
+  "prepaid",
+] as const;
+export type FuelPolicy = (typeof fuelPolicies)[number];
+
+export const rateCardSchema = z.object({
+  id: numericId,
+  company_id: numericId,
+  branch_id: numericId.nullable().optional().default(null),
+  customer_id: numericId.nullable().optional().default(null),
+  customer_name: z.string().nullable().optional().default(null),
+  name: z.string(),
+  vehicle_category: z.string().nullable().optional().default(null),
+  daily_rate_minor: nonNegInt,
+  weekly_rate_minor: nonNegInt.nullable().optional().default(null),
+  monthly_rate_minor: nonNegInt.nullable().optional().default(null),
+  chauffeur_daily_minor: nonNegInt.nullable().optional().default(null),
+  daily_km_limit: nonNegInt.nullable().optional().default(null),
+  excess_km_rate_minor: nonNegInt.optional().default(0),
+  security_deposit_minor: nonNegInt.optional().default(0),
+  late_return_hourly_minor: nonNegInt.optional().default(0),
+  fuel_policy: z.enum(fuelPolicies).optional().default("full_to_full"),
+  is_active: z.boolean().optional().default(true),
+  created_at: z.string().nullable().optional().default(null),
+});
+export type RateCard = z.infer<typeof rateCardSchema>;
+
+export const vehicleInspectionSchema = z.object({
+  id: numericId,
+  company_id: numericId,
+  branch_id: numericId,
+  rental_id: numericId,
+  vehicle_id: numericId,
+  recorded_by_name: z.string().nullable().optional().default(null),
+  type: z.enum(["handover", "return"]),
+  odometer: nonNegInt,
+  fuel_level_pct: z.number().int().min(0).max(100),
+  exterior_ok: z.boolean(),
+  interior_ok: z.boolean(),
+  tyres_ok: z.boolean(),
+  spare_tyre_ok: z.boolean(),
+  tools_ok: z.boolean(),
+  accessories_ok: z.boolean(),
+  documents_ok: z.boolean(),
+  damage_notes: z.string().nullable().optional().default(null),
+  customer_acknowledged_by: z.string().nullable().optional().default(null),
+  customer_acknowledged_at: z.string().nullable().optional().default(null),
+  created_at: z.string().nullable().optional().default(null),
+});
+export type VehicleInspection = z.infer<typeof vehicleInspectionSchema>;
+
+export const maintenanceScheduleSchema = z.object({
+  id: numericId,
+  company_id: numericId,
+  branch_id: numericId,
+  vehicle_id: numericId,
+  vehicle_registration: z.string().nullable().optional().default(null),
+  vehicle_label: z.string().nullable().optional().default(null),
+  current_odometer: nonNegInt.optional().default(0),
+  service_name: z.string(),
+  interval_km: nonNegInt.nullable().optional().default(null),
+  interval_days: nonNegInt.nullable().optional().default(null),
+  last_service_odometer: nonNegInt.optional().default(0),
+  last_service_at: z.string().nullable().optional().default(null),
+  next_due_odometer: nonNegInt.nullable().optional().default(null),
+  next_due_at: z.string().nullable().optional().default(null),
+  status: z.enum(["ok", "due_soon", "overdue"]),
+  is_active: z.boolean().optional().default(true),
+});
+export type MaintenanceSchedule = z.infer<typeof maintenanceScheduleSchema>;
+
+export const componentPositions = [
+  "FL",
+  "FR",
+  "RL",
+  "RR",
+  "SPARE",
+  "BATTERY",
+] as const;
+export type ComponentPosition = (typeof componentPositions)[number];
+
+export const vehicleComponentSchema = z.object({
+  id: numericId,
+  company_id: numericId,
+  branch_id: numericId,
+  vehicle_id: numericId,
+  vehicle_registration: z.string().nullable().optional().default(null),
+  component_type: z.enum(["tyre", "battery"]),
+  serial_number: z.string(),
+  brand_model: z.string(),
+  position: z.enum(componentPositions),
+  installed_at: z.string(),
+  installed_odometer: nonNegInt.optional().default(0),
+  warranty_expires_at: z.string().nullable().optional().default(null),
+  status: z.enum(["active", "replaced", "scrapped"]),
+  replaced_at: z.string().nullable().optional().default(null),
+  notes: z.string().nullable().optional().default(null),
+});
+export type VehicleComponent = z.infer<typeof vehicleComponentSchema>;
+
+export const fuelTransactionSchema = z.object({
+  id: numericId,
+  company_id: numericId,
+  branch_id: numericId,
+  vehicle_id: numericId,
+  vehicle_registration: z.string().nullable().optional().default(null),
+  driver_user_id: numericId.nullable().optional().default(null),
+  driver_name: z.string().nullable().optional().default(null),
+  rental_id: numericId.nullable().optional().default(null),
+  expense_id: numericId.nullable().optional().default(null),
+  fuel_date: z.string(),
+  station: z.string().nullable().optional().default(null),
+  litres: nonNegNumber,
+  amount_minor: nonNegInt,
+  odometer: nonNegInt,
+  payment_method: z.string().optional().default("cash"),
+  km_since_last: nonNegInt.nullable().optional().default(null),
+  litres_per_100km: nonNegNumber.nullable().optional().default(null),
+  cost_per_km_minor: nonNegInt.nullable().optional().default(null),
+  is_abnormal: z.boolean().optional().default(false),
+  created_at: z.string().nullable().optional().default(null),
+});
+export type FuelTransaction = z.infer<typeof fuelTransactionSchema>;
 
 export function checkPasswordStrength(password: string) {
   const minLength = password.length >= 10;

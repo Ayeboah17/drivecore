@@ -247,6 +247,19 @@ export async function transitionRental(
     vehicle_status?: "available" | "maintenance" | "damaged";
     extra_charge_minor?: number;
     extra_charge_description?: string;
+    inspection?: {
+      fuel_level_pct: number;
+      exterior_ok: boolean;
+      interior_ok: boolean;
+      tyres_ok: boolean;
+      spare_tyre_ok: boolean;
+      tools_ok: boolean;
+      accessories_ok: boolean;
+      documents_ok: boolean;
+      damage_notes?: string | null;
+      customer_acknowledged_by?: string | null;
+      customer_acknowledged?: boolean;
+    };
   },
   signal: AbortSignal,
 ): Promise<Rental> {

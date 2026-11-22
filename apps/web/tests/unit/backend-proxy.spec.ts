@@ -745,3 +745,33 @@ test("M12 invitations, password reset, and account profile/security routes enfor
     expect(res.status).toBe(200);
   }
 });
+
+test("M13 rate cards, inspections, preventive schedules, vehicle components, and fuel log enforce scoped allowlists", async () => {
+  for (const invalid of [
+    "api/v1/rate-cards",
+    "api/v1/inspections",
+    "api/v1/maintenance-schedules?company_id=1&status=bogus",
+    "api/v1/vehicle-components?company_id=1&component_type=engine",
+    "api/v1/fuel-transactions?company_id=1&from=bad-date",
+  ]) {
+    const [path] = invalid.split("?");
+    const res = await proxy(make(invalid), path, config, async () => {
+      throw new Error("Must not reach upstream");
+    });
+    expect(res.status).toBe(400);
+  }
+
+  for (const valid of [
+    "api/v1/rate-cards?company_id=1&is_active=1",
+    "api/v1/inspections?company_id=1&rental_id=600",
+    "api/v1/maintenance-schedules?company_id=1&status=overdue",
+    "api/v1/vehicle-components?company_id=1&component_type=tyre&status=active",
+    "api/v1/fuel-transactions?company_id=1&abnormal_only=1&from=2026-10-01&to=2026-11-22",
+  ]) {
+    const [path] = valid.split("?");
+    const res = await proxy(make(valid), path, config, async () =>
+      Response.json({ data: [] }),
+    );
+    expect(res.status).toBe(200);
+  }
+});

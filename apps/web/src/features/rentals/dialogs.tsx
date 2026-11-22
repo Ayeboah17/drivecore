@@ -49,6 +49,9 @@ import { DriveCoreSelect } from "@/components/ui/drivecore-select";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import {
+  listInspections,
+} from "@/features/operations-srs/service";
+import {
   assignRentalDriver,
   createRental,
   createReservation,
@@ -1406,6 +1409,7 @@ function HandoverReturnForm({
   onCompleted: (updated: Rental) => void;
 }) {
   const session = useSession();
+  const scope = useLiveContext();
   const formId = useId();
   const [odometer, setOdometer] = useState(
     String(rental.handover_odometer ?? 0),
@@ -1413,9 +1417,55 @@ function HandoverReturnForm({
   const [vehicleStatus, setVehicleStatus] = useState<
     "available" | "maintenance" | "damaged"
   >("available");
+  const [fuelPct, setFuelPct] = useState("100");
+  const [checks, setChecks] = useState({
+    exterior_ok: true,
+    interior_ok: true,
+    tyres_ok: true,
+    spare_tyre_ok: true,
+    tools_ok: true,
+    accessories_ok: true,
+    documents_ok: true,
+  });
+  const [signatoryName, setSignatoryName] = useState("");
+  const [customerAck, setCustomerAck] = useState(false);
   const [notes, setNotes] = useState("");
   const [extraCharge, setExtraCharge] = useState("");
   const [extraChargeDesc, setExtraChargeDesc] = useState("");
+
+  const handoverInspectionQuery = useQuery({
+    queryKey: [...scope.key, "inspections", "rental", rental.id],
+    queryFn: ({ signal }) =>
+      listInspections(
+        { companyId: scope.companyId, rentalId: rental.id },
+        signal,
+      ),
+    enabled: mode === "return" && !!scope.companyId,
+    retry: false,
+  });
+  const handoverInsp = handoverInspectionQuery.data?.find(
+    (i) => i.type === "handover",
+  );
+  const fuelShortagePct =
+    mode === "return" && handoverInsp
+      ? Math.max(0, handoverInsp.fuel_level_pct - Number(fuelPct))
+      : 0;
+  const newlyFailedItems =
+    mode === "return" && handoverInsp
+      ? (
+          [
+            ["exterior_ok", "Exterior"],
+            ["interior_ok", "Interior"],
+            ["tyres_ok", "Tyres"],
+            ["spare_tyre_ok", "Spare tyre"],
+            ["tools_ok", "Tools"],
+            ["accessories_ok", "Accessories"],
+            ["documents_ok", "Documents"],
+          ] as const
+        )
+          .filter(([k]) => handoverInsp[k] && !checks[k])
+          .map(([, label]) => label)
+      : [];
   const [timing, setTiming] = useState(() =>
     evaluateTransitionTiming(mode, scheduledAt),
   );
@@ -1492,6 +1542,13 @@ function HandoverReturnForm({
                 extra_charge_description: extraChargeDesc.trim(),
               }
             : {}),
+          inspection: {
+            fuel_level_pct: Number(fuelPct),
+            ...checks,
+            damage_notes: notes.trim(),
+            customer_acknowledged_by: signatoryName.trim() || null,
+            customer_acknowledged: customerAck,
+          },
         },
         controller.current.signal,
       );
@@ -1587,6 +1644,108 @@ function HandoverReturnForm({
             />
           </div>
         ) : null}
+
+        <div className="space-y-3 rounded-xl border border-border/80 bg-muted/20 p-3.5">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              Digital inspection checklist
+            </p>
+            <div className="w-36">
+              <DriveCoreSelect
+                ariaLabel="Fuel level"
+                value={fuelPct}
+                onValueChange={setFuelPct}
+                options={[
+                  { value: "100", label: "Fuel: 100% (Full)" },
+                  { value: "75", label: "Fuel: 75% (3/4)" },
+                  { value: "50", label: "Fuel: 50% (1/2)" },
+                  { value: "25", label: "Fuel: 25% (1/4)" },
+                  { value: "0", label: "Fuel: 0% (Empty)" },
+                ]}
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+            {(
+              [
+                ["exterior_ok", "Exterior"],
+                ["interior_ok", "Interior"],
+                ["tyres_ok", "Tyres"],
+                ["spare_tyre_ok", "Spare tyre"],
+                ["tools_ok", "Tools"],
+                ["accessories_ok", "Accessories"],
+                ["documents_ok", "Documents"],
+              ] as const
+            ).map(([k, label]) => (
+              <label
+                key={k}
+                className="flex cursor-pointer items-center gap-1.5 text-xs"
+              >
+                <input
+                  type="checkbox"
+                  checked={checks[k]}
+                  onChange={(e) =>
+                    setChecks((prev) => ({ ...prev, [k]: e.target.checked }))
+                  }
+                  className="size-3.5 rounded border"
+                />
+                <span>{label}</span>
+              </label>
+            ))}
+          </div>
+
+          {mode === "return" && (fuelShortagePct > 0 || newlyFailedItems.length > 0) ? (
+            <div
+              role="status"
+              className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-2.5 text-xs text-amber-900 dark:text-amber-200"
+            >
+              <p className="font-semibold">Return vs. handover diff detected:</p>
+              <ul className="mt-1 list-disc pl-4">
+                {fuelShortagePct > 0 ? (
+                  <li>Fuel shortage: -{fuelShortagePct}% below handover level</li>
+                ) : null}
+                {newlyFailedItems.length > 0 ? (
+                  <li>
+                    New condition issues: {newlyFailedItems.join(", ")}
+                  </li>
+                ) : null}
+              </ul>
+            </div>
+          ) : null}
+
+          <div className="grid gap-2 border-t pt-2.5 sm:grid-cols-2">
+            <div className="space-y-1">
+              <label
+                htmlFor={`${formId}-signatory`}
+                className="text-xs font-medium"
+              >
+                Customer signatory name (optional)
+              </label>
+              <Input
+                id={`${formId}-signatory`}
+                maxLength={120}
+                placeholder="Full name"
+                value={signatoryName}
+                onChange={(e) => setSignatoryName(e.target.value)}
+              />
+            </div>
+            <div className="flex flex-col justify-end gap-1">
+              <label className="flex cursor-pointer items-center gap-1.5 text-xs">
+                <input
+                  type="checkbox"
+                  checked={customerAck}
+                  onChange={(e) => setCustomerAck(e.target.checked)}
+                  className="size-3.5 rounded border"
+                />
+                <span>Customer acknowledges condition &amp; fuel reading</span>
+              </label>
+              <p className="text-[11px] text-muted-foreground">
+                Touch/canvas signature pad will be added in a future update.
+              </p>
+            </div>
+          </div>
+        </div>
 
         <div className="space-y-1.5">
           <label htmlFor={`${formId}-notes`} className="text-sm font-medium">

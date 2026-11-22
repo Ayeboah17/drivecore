@@ -10,36 +10,59 @@ import {
   updateCompanySettings,
 } from "@/features/quotations/service";
 import { ApiError, errorText } from "@/lib/api/client";
-import { canManageCompanySettings } from "@/lib/api/contracts";
+import {
+  canManageCompanySettings,
+  type CompanySettings,
+  type DistanceUnit,
+  type FuelEfficiencyUnit,
+  type VolumeUnit,
+  type WeightUnit,
+} from "@/lib/api/contracts";
 import {
   humanizeFieldLabel,
   humanizeFieldMessage,
 } from "@/lib/api/error-format";
 import { StatePanel } from "@/components/layout/state-panel";
 import { Button } from "@/components/ui/button";
+import { DriveCoreSelect } from "@/components/ui/drivecore-select";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 
 function SettingsForm({
-  initialVat,
-  initialThreshold,
+  initial,
   currency,
   canEdit,
   notice,
   onSaved,
 }: {
-  initialVat: number;
-  initialThreshold: number;
+  initial: CompanySettings;
   currency: string;
   canEdit: boolean;
   notice: string;
-  onSaved: (vat: number, threshold: number) => void;
+  onSaved: () => void;
 }) {
   const scope = useLiveContext();
   const session = useSession();
   const formId = useId();
-  const [vat, setVat] = useState(String(initialVat));
-  const [threshold, setThreshold] = useState(String(initialThreshold));
+  const [vat, setVat] = useState(String(initial.vat_rate_pct));
+  const [threshold, setThreshold] = useState(
+    String(initial.discount_approval_threshold_pct),
+  );
+  const [fuelUnit, setFuelUnit] = useState<FuelEfficiencyUnit>(
+    initial.fuel_efficiency_unit ?? "l_per_100km",
+  );
+  const [distUnit, setDistUnit] = useState<DistanceUnit>(
+    initial.distance_unit ?? "km",
+  );
+  const [volUnit, setVolUnit] = useState<VolumeUnit>(
+    initial.volume_unit ?? "l",
+  );
+  const [weightUnit, setWeightUnit] = useState<WeightUnit>(
+    initial.weight_unit ?? "kg",
+  );
+  const [requirePhotos, setRequirePhotos] = useState(
+    Boolean(initial.require_inspection_photos),
+  );
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<unknown>(null);
   const lock = useRef(false);
@@ -82,15 +105,20 @@ function SettingsForm({
     setError(null);
     controller.current = new AbortController();
     try {
-      const updated = await updateCompanySettings(
+      await updateCompanySettings(
         scope.companyId,
         {
           vat_rate_pct: vatNum,
           discount_approval_threshold_pct: thresholdNum,
+          fuel_efficiency_unit: fuelUnit,
+          distance_unit: distUnit,
+          volume_unit: volUnit,
+          weight_unit: weightUnit,
+          require_inspection_photos: requirePhotos,
         },
         controller.current.signal,
       );
-      onSaved(updated.vat_rate_pct, updated.discount_approval_threshold_pct);
+      onSaved();
     } catch (failure) {
       if (failure instanceof ApiError && failure.status === 401) {
         session.expire();
@@ -163,6 +191,77 @@ function SettingsForm({
             approval.
           </p>
         </div>
+
+        <div className="sm:col-span-2 border-t pt-4">
+          <h3 className="text-sm font-semibold">
+            Measurement units (client-side display conversion)
+          </h3>
+          <p className="text-xs text-muted-foreground">
+            Records are stored canonically in metric (km, L, kg) and converted
+            instantly in your browser.
+          </p>
+        </div>
+
+        <div className="space-y-1.5">
+          <span className="block text-sm font-medium">Fuel efficiency unit</span>
+          <DriveCoreSelect
+            ariaLabel="Fuel efficiency unit"
+            value={fuelUnit}
+            onValueChange={(v) => setFuelUnit(v as FuelEfficiencyUnit)}
+            options={[
+              { value: "l_per_100km", label: "L/100km (default)" },
+              { value: "km_per_l", label: "km/L" },
+              { value: "mpg_us", label: "MPG (US)" },
+              { value: "mpg_uk", label: "MPG (UK)" },
+            ]}
+          />
+        </div>
+        <div className="space-y-1.5">
+          <span className="block text-sm font-medium">Distance unit</span>
+          <DriveCoreSelect
+            ariaLabel="Distance unit"
+            value={distUnit}
+            onValueChange={(v) => setDistUnit(v as DistanceUnit)}
+            options={[
+              { value: "km", label: "Kilometres (km)" },
+              { value: "mi", label: "Miles (mi)" },
+            ]}
+          />
+        </div>
+        <div className="space-y-1.5">
+          <span className="block text-sm font-medium">Fuel volume unit</span>
+          <DriveCoreSelect
+            ariaLabel="Fuel volume unit"
+            value={volUnit}
+            onValueChange={(v) => setVolUnit(v as VolumeUnit)}
+            options={[
+              { value: "l", label: "Litres (L)" },
+              { value: "gal_us", label: "US Gallons (gal)" },
+            ]}
+          />
+        </div>
+        <div className="space-y-1.5">
+          <span className="block text-sm font-medium">Weight unit</span>
+          <DriveCoreSelect
+            ariaLabel="Weight unit"
+            value={weightUnit}
+            onValueChange={(v) => setWeightUnit(v as WeightUnit)}
+            options={[
+              { value: "kg", label: "Kilograms (kg)" },
+              { value: "lb", label: "Pounds (lb)" },
+            ]}
+          />
+        </div>
+
+        <label className="sm:col-span-2 flex items-center gap-2 pt-1 text-xs text-muted-foreground">
+          <input
+            type="checkbox"
+            checked={requirePhotos}
+            onChange={(e) => setRequirePhotos(e.target.checked)}
+            className="size-3.5 rounded border"
+          />
+          Require inspection photos before completing handover/return
+        </label>
       </fieldset>
 
       {notice ? (
@@ -241,9 +340,8 @@ export function FinancialSettingsPanel() {
 
   return (
     <SettingsForm
-      key={`${query.data.company_id}:${query.data.vat_rate_pct}:${query.data.discount_approval_threshold_pct}`}
-      initialVat={query.data.vat_rate_pct}
-      initialThreshold={query.data.discount_approval_threshold_pct}
+      key={`${query.data.company_id}:${query.data.vat_rate_pct}:${query.data.discount_approval_threshold_pct}:${query.data.fuel_efficiency_unit}:${query.data.distance_unit}:${query.data.volume_unit}:${query.data.weight_unit}:${query.data.require_inspection_photos}`}
+      initial={query.data}
       currency={query.data.currency || scope.company?.currency || "ZMW"}
       canEdit={canEdit}
       notice={notice}
@@ -251,6 +349,9 @@ export function FinancialSettingsPanel() {
         setNotice("Financial settings updated.");
         void client.invalidateQueries({
           queryKey: [...scope.key, "company-settings"],
+        });
+        void client.invalidateQueries({
+          queryKey: ["live", "company-settings", scope.companyId],
         });
       }}
     />

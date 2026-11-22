@@ -29,6 +29,13 @@ import {
   sortRows,
 } from "../../src/lib/table-sort";
 import { buildCsv, escapeCsvCell } from "../../src/lib/csv";
+import {
+  formatCostPerDistance,
+  formatDistance,
+  formatFuelEfficiency,
+  formatVolume,
+  formatWeight,
+} from "../../src/lib/units";
 const user: User = {
   id: 1,
   name: "Synthetic",
@@ -381,4 +388,16 @@ test("CSV encoder follows RFC-4180 and neutralizes spreadsheet formula injection
   expect(buildCsv(["Name", "Note"], [["=Evil", "Normal"]])).toBe(
     "Name,Note\r\n'=Evil,Normal",
   );
+});
+
+test("Client-side measurement unit helpers default to L/100km & metric and convert accurately", () => {
+  expect(formatFuelEfficiency(10, "l_per_100km")).toBe("10.0 L/100km");
+  expect(formatFuelEfficiency(10, "km_per_l")).toBe("10.0 km/L");
+  expect(formatFuelEfficiency(10, "mpg_us")).toBe("23.5 MPG (US)");
+  expect(formatFuelEfficiency(10, "mpg_uk")).toBe("28.2 MPG (UK)");
+  expect(formatFuelEfficiency(null, "l_per_100km")).toBe("—");
+  expect(formatDistance(160.9344, "mi")).toBe("100 mi");
+  expect(formatVolume(3.785411784, "gal_us")).toBe("1.0 gal");
+  expect(formatWeight(10, "lb")).toBe("22.0 lb");
+  expect(formatCostPerDistance(100, "ZMW", "km")).toBe("ZMW 1.00/km");
 });

@@ -24,6 +24,7 @@ import {
 } from "@/features/pdf/live-pdf-modal";
 import { CreateQuotationDialog } from "@/features/quotations/create-quotation-dialog";
 import { QuotationsDirectorySection } from "@/features/quotations/quotations-page";
+import { RateCardsPanel } from "@/features/operations-srs/rate-cards-panel";
 import {
   can,
   canAccessRentals,
@@ -133,17 +134,20 @@ export function RentalsDirectoryPage({
   const allowed = !!user && canAccessRentals(user);
 
   const requestedTab = searchParams.get("tab") ?? defaultTab;
-  const activeTab: "quotations" | "reservations" | "contracts" = driverOnly
-    ? "contracts"
-    : requestedTab === "quotations" && canViewQuotations
-      ? "quotations"
-      : requestedTab === "contracts" && canViewRentals
-        ? "contracts"
-        : canViewReservations
-          ? "reservations"
-          : canViewQuotations
-            ? "quotations"
-            : "contracts";
+  const activeTab: "quotations" | "reservations" | "contracts" | "rate_cards" =
+    driverOnly
+      ? "contracts"
+      : requestedTab === "rate_cards" && (canViewRentals || canViewQuotations)
+        ? "rate_cards"
+        : requestedTab === "quotations" && canViewQuotations
+          ? "quotations"
+          : requestedTab === "contracts" && canViewRentals
+            ? "contracts"
+            : canViewReservations
+              ? "reservations"
+              : canViewQuotations
+                ? "quotations"
+                : "contracts";
 
   const rawQ = (searchParams.get("q") ?? "").slice(0, 100);
   const rawStatus = searchParams.get("status") ?? "";
@@ -187,7 +191,7 @@ export function RentalsDirectoryPage({
   const branchSuffix = `?branch=${scope.branch}`;
 
   function updateQuery(next: {
-    tab?: "quotations" | "reservations" | "contracts";
+    tab?: "quotations" | "reservations" | "contracts" | "rate_cards";
     q?: string;
     status?: string;
     page?: number;
@@ -407,6 +411,9 @@ export function RentalsDirectoryPage({
               ...(canViewRentals
                 ? ([["contracts", "Rental contracts"]] as const)
                 : []),
+              ...(canViewRentals || canViewQuotations
+                ? ([["rate_cards", "Rate cards"]] as const)
+                : []),
             ] as const
           ).map(([key, text]) => (
             <button
@@ -445,7 +452,11 @@ export function RentalsDirectoryPage({
         </div>
       ) : null}
 
-      {activeTab === "quotations" ? (
+      {activeTab === "rate_cards" ? (
+        <RateCardsPanel
+          canManage={canManageRentals || canManageQuotations}
+        />
+      ) : activeTab === "quotations" ? (
         <QuotationsDirectorySection
           q={rawQ}
           status={status}

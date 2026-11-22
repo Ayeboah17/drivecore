@@ -6,6 +6,11 @@ let invitations = new Map();
 let lastInviteToken = "";
 let passwordResets = new Map();
 let lastResetToken = "";
+let rateCards = new Map();
+let inspections = new Map();
+let maintenanceSchedules = new Map();
+let vehicleComponents = new Map();
+let fuelTransactions = new Map();
 let customers = new Map();
 let vehicles = new Map();
 let companies = new Map();
@@ -252,6 +257,11 @@ function reset() {
   lastInviteToken = "";
   passwordResets = new Map();
   lastResetToken = "";
+  rateCards = new Map();
+  inspections = new Map();
+  maintenanceSchedules = new Map();
+  vehicleComponents = new Map();
+  fuelTransactions = new Map();
   branches = new Map([
     [2, { id: 2, company_id: 1, name: "Synthetic branch" }],
     [4, { id: 4, company_id: 3, name: "Other branch" }],
@@ -1746,6 +1756,17 @@ createServer(async (req, res) => {
         ...existing,
         vat_rate_pct: vat,
         discount_approval_threshold_pct: threshold,
+        ...(input.fuel_efficiency_unit
+          ? { fuel_efficiency_unit: String(input.fuel_efficiency_unit) }
+          : {}),
+        ...(input.distance_unit
+          ? { distance_unit: String(input.distance_unit) }
+          : {}),
+        ...(input.volume_unit ? { volume_unit: String(input.volume_unit) } : {}),
+        ...(input.weight_unit ? { weight_unit: String(input.weight_unit) } : {}),
+        ...(input.require_inspection_photos !== undefined
+          ? { require_inspection_photos: Boolean(input.require_inspection_photos) }
+          : {}),
       };
       companySettings.set(companyId, updated);
       completedWrites++;
@@ -2054,6 +2075,293 @@ createServer(async (req, res) => {
     }
     fail(404);
     return;
+  }
+
+  // --- M13 Inspections, Rate Cards, Preventive Schedules, Tyres/Batteries & Fuel ---
+  const rcMatch = url.pathname.match(/^\/api\/v1\/rate-cards(?:\/(\d+))?$/);
+  if (rcMatch) {
+    const rcId = rcMatch[1] ? Number(rcMatch[1]) : null;
+    if (req.method === "GET" && !rcId) {
+      const companyId = Number(url.searchParams.get("company_id"));
+      const items = [...rateCards.values()]
+        .filter((r) => r.company_id === companyId)
+        .sort((a, b) => b.id - a.id);
+      json(200, {
+        data: items,
+        meta: { current_page: 1, last_page: 1, per_page: 25, total: items.length },
+      });
+      return;
+    }
+    if (req.method === "POST" && !rcId) {
+      const id = nextId++;
+      const rec = {
+        id,
+        company_id: Number(input.company_id),
+        branch_id: input.branch_id ? Number(input.branch_id) : null,
+        customer_id: input.customer_id ? Number(input.customer_id) : null,
+        customer_name: null,
+        name: String(input.name ?? "").trim(),
+        vehicle_category: input.vehicle_category ? String(input.vehicle_category) : null,
+        daily_rate_minor: Number(input.daily_rate_minor ?? 0),
+        weekly_rate_minor:
+          input.weekly_rate_minor != null ? Number(input.weekly_rate_minor) : null,
+        monthly_rate_minor:
+          input.monthly_rate_minor != null ? Number(input.monthly_rate_minor) : null,
+        chauffeur_daily_minor:
+          input.chauffeur_daily_minor != null ? Number(input.chauffeur_daily_minor) : null,
+        daily_km_limit:
+          input.daily_km_limit != null ? Number(input.daily_km_limit) : null,
+        excess_km_rate_minor: Number(input.excess_km_rate_minor ?? 0),
+        security_deposit_minor: Number(input.security_deposit_minor ?? 0),
+        late_return_hourly_minor: Number(input.late_return_hourly_minor ?? 0),
+        fuel_policy: String(input.fuel_policy ?? "full_to_full"),
+        is_active: input.is_active !== false,
+        created_at: new Date().toISOString(),
+      };
+      rateCards.set(id, rec);
+      completedWrites++;
+      json(201, { data: rec });
+      return;
+    }
+  }
+
+  if (url.pathname === "/api/v1/inspections" && req.method === "GET") {
+    const companyId = Number(url.searchParams.get("company_id"));
+    const rentalId = url.searchParams.get("rental_id")
+      ? Number(url.searchParams.get("rental_id"))
+      : null;
+    const vehicleId = url.searchParams.get("vehicle_id")
+      ? Number(url.searchParams.get("vehicle_id"))
+      : null;
+    const items = [...inspections.values()].filter((i) => {
+      if (i.company_id !== companyId) return false;
+      if (rentalId !== null && i.rental_id !== rentalId) return false;
+      if (vehicleId !== null && i.vehicle_id !== vehicleId) return false;
+      return true;
+    });
+    json(200, {
+      data: items,
+      meta: { current_page: 1, last_page: 1, per_page: 25, total: items.length },
+    });
+    return;
+  }
+
+  const schedMatch = url.pathname.match(
+    /^\/api\/v1\/maintenance-schedules(?:\/(\d+))?$/,
+  );
+  if (schedMatch) {
+    const scId = schedMatch[1] ? Number(schedMatch[1]) : null;
+    const decorateSched = (s) => {
+      const v = vehicles.get(s.vehicle_id);
+      const curOdo = v?.odometer ?? 0;
+      const nextOdo = s.interval_km ? s.last_service_odometer + s.interval_km : null;
+      let status = "ok";
+      if (nextOdo !== null && curOdo >= nextOdo) status = "overdue";
+      else if (nextOdo !== null && curOdo >= nextOdo - 1000) status = "due_soon";
+      return {
+        ...s,
+        vehicle_registration: v?.registration ?? null,
+        vehicle_label: v ? `${v.make} ${v.model}` : null,
+        current_odometer: curOdo,
+        next_due_odometer: nextOdo,
+        next_due_at: s.next_due_at ?? null,
+        status,
+      };
+    };
+    if (req.method === "GET" && !scId) {
+      const companyId = Number(url.searchParams.get("company_id"));
+      const stFilter = url.searchParams.get("status");
+      const items = [...maintenanceSchedules.values()]
+        .filter((s) => s.company_id === companyId)
+        .map(decorateSched)
+        .filter((s) => !stFilter || s.status === stFilter)
+        .sort((a, b) => b.id - a.id);
+      json(200, {
+        data: items,
+        meta: { current_page: 1, last_page: 1, per_page: 25, total: items.length },
+      });
+      return;
+    }
+    if (req.method === "POST" && !scId) {
+      const id = nextId++;
+      const rec = {
+        id,
+        company_id: Number(input.company_id),
+        branch_id: Number(input.branch_id ?? 2),
+        vehicle_id: Number(input.vehicle_id),
+        service_name: String(input.service_name ?? "").trim(),
+        interval_km: input.interval_km ? Number(input.interval_km) : null,
+        interval_days: input.interval_days ? Number(input.interval_days) : null,
+        last_service_odometer: Number(input.last_service_odometer ?? 0),
+        last_service_at: input.last_service_at ?? null,
+        next_due_at: null,
+        is_active: true,
+      };
+      maintenanceSchedules.set(id, rec);
+      completedWrites++;
+      json(201, { data: decorateSched(rec) });
+      return;
+    }
+  }
+
+  const compMatch = url.pathname.match(
+    /^\/api\/v1\/vehicle-components(?:\/(\d+))?$/,
+  );
+  if (compMatch) {
+    const cid = compMatch[1] ? Number(compMatch[1]) : null;
+    const decorateComp = (c) => ({
+      ...c,
+      vehicle_registration: vehicles.get(c.vehicle_id)?.registration ?? null,
+    });
+    if (req.method === "GET" && !cid) {
+      const companyId = Number(url.searchParams.get("company_id"));
+      const ct = url.searchParams.get("component_type");
+      const items = [...vehicleComponents.values()]
+        .filter((c) => c.company_id === companyId && (!ct || c.component_type === ct))
+        .map(decorateComp)
+        .sort((a, b) => b.id - a.id);
+      json(200, {
+        data: items,
+        meta: { current_page: 1, last_page: 1, per_page: 25, total: items.length },
+      });
+      return;
+    }
+    if (req.method === "POST" && !cid) {
+      const id = nextId++;
+      const rec = {
+        id,
+        company_id: Number(input.company_id),
+        branch_id: Number(input.branch_id ?? 2),
+        vehicle_id: Number(input.vehicle_id),
+        component_type: String(input.component_type ?? "tyre"),
+        serial_number: String(input.serial_number ?? "").trim(),
+        brand_model: String(input.brand_model ?? "").trim(),
+        position: String(input.position ?? "FL"),
+        installed_at: String(input.installed_at ?? "2026-11-22"),
+        installed_odometer: Number(input.installed_odometer ?? 0),
+        warranty_expires_at: input.warranty_expires_at ?? null,
+        status: "active",
+        replaced_at: null,
+        notes: input.notes ?? null,
+      };
+      vehicleComponents.set(id, rec);
+      completedWrites++;
+      json(201, { data: decorateComp(rec) });
+      return;
+    }
+    if (req.method === "PATCH" && cid) {
+      const rec = vehicleComponents.get(cid);
+      if (!rec) {
+        fail(404);
+        return;
+      }
+      if (input.status) rec.status = String(input.status);
+      if (input.replaced_at !== undefined) rec.replaced_at = input.replaced_at;
+      completedWrites++;
+      json(200, { data: decorateComp(rec) });
+      return;
+    }
+  }
+
+  if (url.pathname === "/api/v1/fuel-transactions") {
+    if (req.method === "GET") {
+      const companyId = Number(url.searchParams.get("company_id"));
+      const abn = url.searchParams.get("abnormal_only") === "1";
+      const items = [...fuelTransactions.values()]
+        .filter((f) => f.company_id === companyId && (!abn || f.is_abnormal))
+        .map((f) => ({
+          ...f,
+          vehicle_registration: vehicles.get(f.vehicle_id)?.registration ?? null,
+        }))
+        .sort((a, b) => b.id - a.id);
+      json(200, {
+        data: items,
+        meta: { current_page: 1, last_page: 1, per_page: 25, total: items.length },
+      });
+      return;
+    }
+    if (req.method === "POST") {
+      const vehicleId = Number(input.vehicle_id);
+      const litres = Number(input.litres);
+      const amountMinor = Number(input.amount_minor);
+      const odometer = Number(input.odometer);
+      const prevFills = [...fuelTransactions.values()]
+        .filter((f) => f.vehicle_id === vehicleId)
+        .sort((a, b) => b.odometer - a.odometer);
+      const prev = prevFills[0] ?? null;
+      if (prev && odometer < prev.odometer) {
+        fail(422, { odometer: ["Odometer cannot be lower than previous fuel fill."] });
+        return;
+      }
+      const kmSinceLast = prev ? odometer - prev.odometer : null;
+      const lPer100 =
+        kmSinceLast && kmSinceLast > 0
+          ? Number(((litres / kmSinceLast) * 100).toFixed(2))
+          : null;
+      const costPerKm =
+        kmSinceLast && kmSinceLast > 0
+          ? Math.round(amountMinor / kmSinceLast)
+          : null;
+      const isAbnormal = lPer100 !== null && lPer100 > 33.3;
+
+      const v = vehicles.get(vehicleId);
+      const expId = nextId++;
+      const nowIso = new Date().toISOString();
+      expenses.set(expId, {
+        id: expId,
+        company_id: Number(input.company_id),
+        branch_id: Number(input.branch_id ?? v?.branch_id ?? 2),
+        vehicle_id: vehicleId,
+        vehicle_registration: v?.registration ?? null,
+        recorded_by: user.id,
+        category: "fuel",
+        description: `Fuel fill (${litres} L${input.station ? ` at ${input.station}` : ""})`,
+        amount_minor: amountMinor,
+        incurred_at: String(input.fuel_date ?? nowIso.slice(0, 10)),
+        created_at: nowIso,
+      });
+      postJournalEntry({
+        companyId: Number(input.company_id),
+        branchId: Number(input.branch_id ?? v?.branch_id ?? 2),
+        createdBy: user.id,
+        sourceType: "expense",
+        sourceId: expId,
+        reference: `FUEL-${expId}`,
+        memo: `Fuel fill for ${v?.registration ?? `Vehicle #${vehicleId}`}`,
+        lines: [
+          { account_code: "5000", debit_minor: amountMinor, credit_minor: 0 },
+          { account_code: "1000", debit_minor: 0, credit_minor: amountMinor },
+        ],
+      });
+
+      const id = nextId++;
+      const rec = {
+        id,
+        company_id: Number(input.company_id),
+        branch_id: Number(input.branch_id ?? v?.branch_id ?? 2),
+        vehicle_id: vehicleId,
+        vehicle_registration: v?.registration ?? null,
+        driver_user_id: user.id,
+        driver_name: user.name,
+        rental_id: input.rental_id ? Number(input.rental_id) : null,
+        expense_id: expId,
+        fuel_date: String(input.fuel_date ?? nowIso.slice(0, 10)),
+        station: input.station ? String(input.station) : null,
+        litres,
+        amount_minor: amountMinor,
+        odometer,
+        payment_method: String(input.payment_method ?? "cash"),
+        km_since_last: kmSinceLast,
+        litres_per_100km: lPer100,
+        cost_per_km_minor: costPerKm,
+        is_abnormal: isAbnormal,
+        created_at: nowIso,
+      };
+      fuelTransactions.set(id, rec);
+      completedWrites++;
+      json(201, { data: rec });
+      return;
+    }
   }
 
   // --- M11 Detailed Stats, Customer 360 & Saved Filters ---

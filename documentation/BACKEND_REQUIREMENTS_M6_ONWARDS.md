@@ -8,7 +8,7 @@
 
 ---
 
-## Master Quick-Reference Index (M6–M12)
+## Master Quick-Reference Index (M6–M13)
 
 ### A. Endpoint Index
 
@@ -66,6 +66,11 @@
 | M12 | `GET/POST` | `/api/v1/invitations/preview` & `/api/v1/invitations/accept` | Public (rate-limited) | `preview?token=...` returns invite metadata & `account_exists` (`410` expired/revoked/used); `accept` creates new user or verifies existing password for multi-company join, auto-signs in & returns `User` |
 | M12 | `POST` | `/api/v1/auth/forgot-password` & `/api/v1/auth/reset-password` | Public (rate-limited) | `forgot-password` always returns identical generic `200` (zero enumeration); `reset-password` enforces `>=10` chars + letters + numbers, clears `must_change_password`, and revokes all active sessions |
 | M12 | `PATCH/POST` | `/api/v1/auth/profile` & `/api/v1/auth/change-password` | Authenticated user | `profile` updates `name` only (email read-only); `change-password` requires `current_password`, optional `revoke_other_sessions`, clears `must_change_password`; non-auth routes return `403` while `must_change_password=true` |
+| M13 | `GET/POST/PATCH` | `/api/v1/rate-cards` & `/api/v1/rate-cards/{id}` | `rentals.view`/`manage` or `quotations.view`/`manage` | Configurable daily/weekly/monthly/chauffeur rates, daily km limit, excess km rate, security deposit, fuel policy |
+| M13 | `GET` | `/api/v1/inspections` & embedded `inspection` on handover/return | `rentals.view` or assigned `driver` | Structured handover/return condition checklist, fuel %, customer acknowledgement, automatic return-vs-handover diff |
+| M13 | `GET/POST/PATCH` | `/api/v1/maintenance-schedules` & `/{id}` | `work_orders.view` / `work_orders.manage` | Preventive km/date service schedules (`ok\|due_soon\|overdue`); work order completion updates schedule & enforces `release_passed` quality release |
+| M13 | `GET/POST/PATCH` | `/api/v1/vehicle-components` & `/{id}` | `parts.view`/`manage` or `work_orders.view`/`manage` | Tyre & battery serial, position (`FL\|FR\|RL\|RR\|SPARE\|BATTERY`), warranty, replacement history; plus `parts.location` & stock valuation |
+| M13 | `GET/POST` | `/api/v1/fuel-transactions` | `vehicles.view`/`manage`, `work_orders.view`, or assigned `driver` (active vehicle) | Canonical metric (`km`, `litres`), server-computed `litres_per_100km`, `cost_per_km_minor`, `is_abnormal`; atomically posts `fuel` Expense + balanced GL (`DR 5000 / CR 1000`) |
 
 ### B. Spatie Role & Permission Matrix (M6–M10 Additions)
 
@@ -973,5 +978,141 @@ Schema::create('invitations', function (Blueprint $table): void {
 5. `forgot-password` returns identical `200` for existing & nonexistent emails; `reset-password` updates password and invalidates prior sessions.
 6. `PATCH /api/v1/auth/profile` updates `name` without permitting email changes.
 
-## Milestone 13 — Car Tracker / GPS Telematics API Integration (PR #16 — TBD)
+## Milestone 13 — Digital Inspections, Rate Cards, Preventive Maintenance, Tyres/Batteries & Fuel Management (PR #16)
+
+### 13.1 Canonical Units & Accounting Invariants
+- **Canonical Storage:** Backend ALWAYS stores distance/odometer in **kilometres (`km`)**, fuel volume in **litres (`L`)**, weight in **kilograms (`kg`)**, and fuel efficiency in **L/100km** (`litres_per_100km`). Display conversions (`km/L`, `MPG US`, `MPG UK`, `miles`, `US gal`, `lb`) happen client-side using `company_settings` unit preferences.
+- **Automatic Fuel Accounting:** `POST /api/v1/fuel-transactions` MUST atomically create a linked `Expense` (`category = 'fuel'`, `vehicle_id`) and balanced `JournalEntry` (`DR 5000 Fleet & Operating Expenses` / `CR 1000 Cash & Bank`) inside a single DB transaction.
+- **Workshop Quality Release Lock:** `POST /api/v1/work-orders/{id}/complete` accepts optional `release_passed` (default `true`) and `release_notes`. If `release_passed === false`, the work order remains `in_progress`, `vehicle.status` stays `maintenance` (blocking rental allocation), and failed inspection notes are persisted.
+
+### 13.2 Database Migrations
+```php
+Schema::table('company_settings', function (Blueprint $table): void {
+    $table->boolean('require_inspection_photos')->default(false);
+    $table->string('distance_unit', 8)->default('km'); // km | mi
+    $table->string('volume_unit', 8)->default('l'); // l | gal_us
+    $table->string('fuel_efficiency_unit', 16)->default('l_per_100km'); // l_per_100km | km_per_l | mpg_us | mpg_uk
+    $table->string('weight_unit', 8)->default('kg'); // kg | lb
+});
+
+Schema::create('rate_cards', function (Blueprint $table): void {
+    $table->id();
+    $table->foreignId('company_id')->constrained()->cascadeOnDelete();
+    $table->foreignId('branch_id')->nullable()->constrained()->nullOnDelete();
+    $table->foreignId('customer_id')->nullable()->constrained()->nullOnDelete();
+    $table->string('name', 120);
+    $table->string('vehicle_category', 64)->nullable();
+    $table->unsignedBigInteger('daily_rate_minor');
+    $table->unsignedBigInteger('weekly_rate_minor')->nullable();
+    $table->unsignedBigInteger('monthly_rate_minor')->nullable();
+    $table->unsignedBigInteger('chauffeur_daily_minor')->nullable();
+    $table->unsignedInteger('daily_km_limit')->nullable();
+    $table->unsignedBigInteger('excess_km_rate_minor')->default(0);
+    $table->unsignedBigInteger('security_deposit_minor')->default(0);
+    $table->unsignedBigInteger('late_return_hourly_minor')->default(0);
+    $table->string('fuel_policy', 24)->default('full_to_full'); // full_to_full | same_to_same | prepaid
+    $table->boolean('is_active')->default(true);
+    $table->timestamps();
+});
+
+Schema::create('vehicle_inspections', function (Blueprint $table): void {
+    $table->id();
+    $table->foreignId('company_id')->constrained()->cascadeOnDelete();
+    $table->foreignId('branch_id')->constrained()->cascadeOnDelete();
+    $table->foreignId('rental_id')->constrained()->cascadeOnDelete();
+    $table->foreignId('vehicle_id')->constrained()->cascadeOnDelete();
+    $table->foreignId('recorded_by')->nullable()->constrained('users')->nullOnDelete();
+    $table->string('type', 16); // handover | return
+    $table->unsignedInteger('odometer');
+    $table->unsignedTinyInteger('fuel_level_pct'); // 0..100
+    $table->boolean('exterior_ok')->default(true);
+    $table->boolean('interior_ok')->default(true);
+    $table->boolean('tyres_ok')->default(true);
+    $table->boolean('spare_tyre_ok')->default(true);
+    $table->boolean('tools_ok')->default(true);
+    $table->boolean('accessories_ok')->default(true);
+    $table->boolean('documents_ok')->default(true);
+    $table->text('damage_notes')->nullable();
+    $table->string('customer_acknowledged_by', 120)->nullable();
+    $table->timestampTz('customer_acknowledged_at')->nullable();
+    $table->timestamps();
+});
+
+Schema::create('maintenance_schedules', function (Blueprint $table): void {
+    $table->id();
+    $table->foreignId('company_id')->constrained()->cascadeOnDelete();
+    $table->foreignId('branch_id')->constrained()->cascadeOnDelete();
+    $table->foreignId('vehicle_id')->constrained()->cascadeOnDelete();
+    $table->string('service_name', 120);
+    $table->unsignedInteger('interval_km')->nullable();
+    $table->unsignedInteger('interval_days')->nullable();
+    $table->unsignedInteger('last_service_odometer')->default(0);
+    $table->date('last_service_at')->nullable();
+    $table->boolean('is_active')->default(true);
+    $table->timestamps();
+});
+
+Schema::create('vehicle_components', function (Blueprint $table): void {
+    $table->id();
+    $table->foreignId('company_id')->constrained()->cascadeOnDelete();
+    $table->foreignId('branch_id')->constrained()->cascadeOnDelete();
+    $table->foreignId('vehicle_id')->constrained()->cascadeOnDelete();
+    $table->string('component_type', 16); // tyre | battery
+    $table->string('serial_number', 80);
+    $table->string('brand_model', 120);
+    $table->string('position', 16); // FL | FR | RL | RR | SPARE | BATTERY
+    $table->date('installed_at');
+    $table->unsignedInteger('installed_odometer')->default(0);
+    $table->date('warranty_expires_at')->nullable();
+    $table->string('status', 16)->default('active'); // active | replaced | scrapped
+    $table->date('replaced_at')->nullable();
+    $table->text('notes')->nullable();
+    $table->timestamps();
+});
+
+Schema::create('fuel_transactions', function (Blueprint $table): void {
+    $table->id();
+    $table->foreignId('company_id')->constrained()->cascadeOnDelete();
+    $table->foreignId('branch_id')->constrained()->cascadeOnDelete();
+    $table->foreignId('vehicle_id')->constrained()->cascadeOnDelete();
+    $table->foreignId('driver_user_id')->nullable()->constrained('users')->nullOnDelete();
+    $table->foreignId('rental_id')->nullable()->constrained()->nullOnDelete();
+    $table->foreignId('expense_id')->nullable()->constrained()->nullOnDelete();
+    $table->date('fuel_date');
+    $table->string('station', 120)->nullable();
+    $table->decimal('litres', 8, 2);
+    $table->unsignedBigInteger('amount_minor');
+    $table->unsignedInteger('odometer');
+    $table->string('payment_method', 32)->default('cash');
+    $table->unsignedInteger('km_since_last')->nullable();
+    $table->decimal('litres_per_100km', 8, 2)->nullable();
+    $table->unsignedBigInteger('cost_per_km_minor')->nullable();
+    $table->boolean('is_abnormal')->default(false);
+    $table->timestamps();
+});
+```
+Also add optional columns on `work_orders` (`work_order_type`, `complaint`, `diagnosis`, `technician_name`, `estimate_minor`, `schedule_id`, `release_passed`, `release_notes`), `parts` (`location`), and `quotations`/`rentals` (`rate_card_id`).
+
+### 13.3 Required Feature Tests (`tests/Feature/MilestoneThirteenTest.php`)
+1. Handover & return with embedded `inspection` persists `vehicle_inspections` rows and returns accurate diff metadata (fuel shortage, newly failed checks, excess km).
+2. `POST/PATCH /api/v1/rate-cards` enforces company scoping and validates positive rates.
+3. `GET/POST /api/v1/maintenance-schedules` computes `due_soon`/`overdue` accurately; completing a linked work order with `release_passed=false` keeps vehicle in `maintenance`, while `release_passed=true` updates `last_service_odometer` and sets vehicle `available`.
+4. `POST /api/v1/fuel-transactions` computes `litres_per_100km` & `is_abnormal` (null on first fill), rejects decreasing odometer (`422`), and atomically creates a linked `fuel` Expense + balanced GL JournalEntry (`DR 5000 / CR 1000`).
+5. `POST/PATCH /api/v1/vehicle-components` tracks tyre/battery serials & positions and marks replacements cleanly.
+
+---
+
+## Milestone 14 — Credit Control, Unified Approval Engine & Compliance Expiry Hub (PR #17)
+*(Will be appended when Milestone 14 is implemented.)*
+
+## Milestone 15 — Full Accounting: AP, Bank Reconciliation, Fixed Assets & Financial Statements (PR #18)
+*(Will be appended when Milestone 15 is implemented.)*
+
+## Milestone 16 — SRS Role Expansion, Lead-to-Quote CRM & Privileged 2FA (PR #19)
+*(Will be appended when Milestone 16 is implemented.)*
+
+## Milestone 17 — Printing & Barcode Scanning (PR #20 — TBD)
+*(Will be appended when Milestone 17 is implemented.)*
+
+## Milestone 18 — Car Tracker / GPS Telematics API Integration (PR #21 — Final / TBD)
 *(Will be appended once GPS tracker vendor API details are available.)*

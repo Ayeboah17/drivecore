@@ -36,7 +36,9 @@ test("M8 full finance loop: rental return auto-drafts invoice, edit/issue, overp
   await page
     .getByLabel("Charge description", { exact: true })
     .fill("Fuel refill");
-  const outsideTimingCheckbox = page.getByRole("checkbox");
+  const outsideTimingCheckbox = page.getByRole("checkbox", {
+    name: /I confirm completing this/i,
+  });
   if (await outsideTimingCheckbox.isVisible()) {
     await outsideTimingCheckbox.check();
   }

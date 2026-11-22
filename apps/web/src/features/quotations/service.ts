@@ -48,6 +48,11 @@ export async function updateCompanySettings(
   body: {
     vat_rate_pct: number;
     discount_approval_threshold_pct: number;
+    require_inspection_photos?: boolean;
+    distance_unit?: "km" | "mi";
+    volume_unit?: "l" | "gal_us";
+    fuel_efficiency_unit?: "l_per_100km" | "km_per_l" | "mpg_us" | "mpg_uk";
+    weight_unit?: "kg" | "lb";
   },
   signal: AbortSignal,
 ): Promise<CompanySettings> {

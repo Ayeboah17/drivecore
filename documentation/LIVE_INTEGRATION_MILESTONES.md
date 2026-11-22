@@ -166,5 +166,39 @@ These items bridge the newly implemented Demo features (`M4+`) into Laravel cont
 
 ---
 
-### Milestone 13 — Car Tracker / GPS Telematics API Integration *(TBD)*
-- **Status:** Deferred until GPS tracker vendor and API documentation are finalized. Will integrate real-time vehicle location, telematics snapshots, and alerts via a provider-agnostic backend adapter.
+### Milestone 13 — Digital Inspections, Rate Cards, Preventive Maintenance, Tyres/Batteries & Fuel Management (PR #16)
+- **Backend Prerequisites:**
+  1. `vehicle_inspections` (handover/return checklist, fuel %, damage notes, digital customer acknowledgement, automatic return-vs-handover diff pre-filling extra invoice charges) + optional `company_settings.require_inspection_photos`.
+  2. `rate_cards` (daily/weekly/monthly/chauffeur rates, daily km limit, excess km rate, security deposit, late-return charge, fuel policy) + optional attachment to quotations/rentals.
+  3. `maintenance_schedules` (preventive km/date intervals, `ok|due_soon|overdue` status) + SRS §8 work-order fields (`work_order_type`, `complaint`, `diagnosis`, `technician_name`, `estimate_minor`, `schedule_id`, inline Quality Release Inspection `release_passed`).
+  4. `vehicle_components` (tyre & battery serial/position/warranty logs) + `parts.location` & stock valuation.
+  5. `fuel_transactions` (litres, amount, odometer, driver, station, server-computed `L/100km`, `cost/km`, abnormal-consumption alerts, auto-posted linked `fuel` Expense + balanced GL `DR 5000 / CR 1000`) + client-side unit preferences (`L/100km` default, `km/L`, `MPG US/UK`, `km`/`mi`, `L`/`gal`, `kg`/`lb`).
+- **Frontend Deliverables:**
+  1. Embedded handover/return inspection checklist + live return diff in Rental Handover/Return dialogs (typed signatory + acknowledgement checkbox + canvas-coming-soon prompt).
+  2. `Rentals → Rate cards`, `Maintenance → Preventive schedules` & `Fuel log`, `Inventory → Tyres & batteries` + Stock Valuation, and `Administration → Financial settings` Measurement Units card.
+- **Acceptance Criteria:** Return diff flags fuel shortage, damage, and excess km; failed work-order release inspection keeps vehicle in `maintenance`; fuel log auto-posts linked Expense & GL; unit conversion works client-side across `L/100km`, `km/L`, `MPG`, `km/mi`, `L/gal`, and `kg/lb`.
+
+---
+
+### Milestone 14 — Credit Control, Unified Approval Engine & Compliance Expiry Hub (PR #17)
+- **Scope (SRS §5, §11, §18, §20):** Customer KYC/corporate credit profiles (`credit_limit_minor`, `payment_terms_days`, TIN, automatic credit holds blocking new rentals), collection follow-ups / promises to pay / disputes, Customer Account Statements, Unified Approval Queue & configurable thresholds across all 7 SRS approval types, and Compliance & Document Expiry hub (insurance, roadworthy, licences).
+
+---
+
+### Milestone 15 — Full Accounting: AP/Supplier Invoices, Bank Reconciliation, Fixed Assets & Financial Statements (PR #18)
+- **Scope (SRS §4, §12, §15, §16, §24):** Procurement 3-way match (`PO → GRN → Supplier Invoice → Supplier Payment`) + AP Ageing, formal Credit Notes, Cash & Bank Accounts + Bank Reconciliation, Fixed Assets (vehicle acquisition, monthly depreciation, vehicle disposal gain/loss & extended vehicle statuses), and formal P&L, Balance Sheet & Cash Flow statements.
+
+---
+
+### Milestone 16 — SRS Role Expansion, Lead-to-Quote CRM Pipeline & Privileged TOTP 2FA (PR #19)
+- **Scope (SRS §3, §6, §25):** Specialized SRS roles (`commercial`, `maintenance-manager`, `mechanic`, `credit-control`), Lead-to-Quote CRM pipeline, and optional TOTP 2FA for privileged users.
+
+---
+
+### Milestone 17 — Printing & Barcode Scanning *(TBD)*
+- **Status:** Requirements to be defined via `/grill-me` after Milestone 16.
+
+---
+
+### Milestone 18 — Car Tracker / GPS Telematics API Integration *(Final — TBD)*
+- **Status:** Moved to the final milestone until GPS tracker vendor and API documentation are finalized. Will integrate real-time vehicle location, telematics snapshots, geofencing, and alerts via a provider-agnostic backend adapter.

@@ -6,8 +6,10 @@ import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Ban,
+  CalendarClock,
   CheckCircle2,
   Clock,
+  Fuel,
   PackageMinus,
   Play,
   Plus,
@@ -17,6 +19,8 @@ import {
 import { useSession } from "@/features/auth/session-provider";
 import { useLiveContext } from "@/features/live/context";
 import { EntityDocumentsPanel } from "@/features/documents/documents-panel";
+import { PreventiveSchedulesPanel } from "@/features/operations-srs/preventive-schedules-panel";
+import { FuelLogPanel } from "@/features/operations-srs/fuel-log-panel";
 import { listRecords } from "@/features/records/service";
 import { listParts } from "@/features/inventory/service";
 import {
@@ -157,6 +161,14 @@ export function LiveMaintenancePage() {
   const canManage = !!user && can(user, "work_orders.manage");
   const currency = scope.company?.currency || "ZMW";
 
+  const rawTab = searchParams.get("tab");
+  const activeTab: "work_orders" | "schedules" | "fuel" =
+    rawTab === "schedules"
+      ? "schedules"
+      : rawTab === "fuel"
+        ? "fuel"
+        : "work_orders";
+
   const rawQ = searchParams.get("q") ?? "";
   const status = searchParams.get("status") ?? "";
   const rawPage = Number(searchParams.get("page") ?? "1");
@@ -254,7 +266,7 @@ export function LiveMaintenancePage() {
             availability.
           </p>
         </div>
-        {canManage ? (
+        {canManage && activeTab === "work_orders" ? (
           <Button
             type="button"
             onClick={() => setCreateOpen(true)}
@@ -264,6 +276,44 @@ export function LiveMaintenancePage() {
             New work order
           </Button>
         ) : null}
+      </div>
+
+      <div
+        role="tablist"
+        aria-label="Maintenance sections"
+        className="flex flex-wrap gap-1.5 rounded-2xl border bg-surface p-1.5"
+      >
+        {(
+          [
+            ["work_orders", "Work orders"],
+            ["schedules", "Preventive schedules"],
+            ["fuel", "Fuel log"],
+          ] as const
+        ).map(([key, label]) => (
+          <button
+            key={key}
+            type="button"
+            role="tab"
+            aria-selected={activeTab === key}
+            onClick={() =>
+              updateQuery({ tab: key === "work_orders" ? "" : key, page: 1 })
+            }
+            className={`inline-flex items-center gap-1.5 rounded-xl px-3.5 py-2 text-xs font-semibold transition-colors ${
+              activeTab === key
+                ? "bg-primary text-primary-foreground shadow-xs"
+                : "text-muted-foreground hover:bg-muted/80 hover:text-foreground"
+            }`}
+          >
+            {key === "work_orders" ? (
+              <Wrench className="size-3.5" aria-hidden="true" />
+            ) : key === "schedules" ? (
+              <CalendarClock className="size-3.5" aria-hidden="true" />
+            ) : (
+              <Fuel className="size-3.5" aria-hidden="true" />
+            )}
+            {label}
+          </button>
+        ))}
       </div>
 
       {notice ? (
@@ -282,6 +332,16 @@ export function LiveMaintenancePage() {
         </div>
       ) : null}
 
+      {activeTab === "schedules" ? (
+        <PreventiveSchedulesPanel
+          canManage={canManage}
+          onWorkOrderOpened={(msg) => {
+            setNotice(msg);
+          }}
+        />
+      ) : activeTab === "fuel" ? (
+        <FuelLogPanel canManage={canManage || !!user && can(user, "vehicles.manage")} />
+      ) : (
       <DataTableFrame
         ariaLabel="Maintenance work orders table"
         chips={chips}
@@ -480,6 +540,7 @@ export function LiveMaintenancePage() {
           </DataTable>
         )}
       </DataTableFrame>
+      )}
 
       <CreateWorkOrderDialog
         open={createOpen}
