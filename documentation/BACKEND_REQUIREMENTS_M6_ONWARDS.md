@@ -8,7 +8,7 @@
 
 ---
 
-## Master Quick-Reference Index (M6–M8)
+## Master Quick-Reference Index (M6–M11)
 
 ### A. Endpoint Index
 
@@ -57,6 +57,11 @@
 | M10 | `GET` | `/api/v1/reports/financial` | `invoices.view` | Period financial summary + line breakdown (`company_id`, optional `branch_id`, `from`, `to`) |
 | M10 | `GET` | `/api/v1/reports/fleet` | `vehicles.view` | Fleet utilization, rentals, maintenance cost & downtime (`revenue_minor`/`net_roi_minor` populated only with `invoices.view`) |
 | M10 | `GET` | `/api/v1/audit-events` | `audit.view` (`company-admin` & platform admin only) | Paginated immutable audit log (`company_id`, optional `action`, `entity_type`, `q`, `page`) |
+| M11 | `GET` | `/api/v1/customers` & `/api/v1/stats/customers` | `customers.view` (monetary filters/sorts/fields require `invoices.view`) | Multi-facet filtering (`from`, `to`, `type`, `min_spend_minor`, `max_spend_minor`, `has_open_ar`, `include_stats=1`) + multi-page sort (`rental_count`, `total_spent_minor`, `open_ar_minor`, `last_rental_at`); returns `403` if non-`invoices.view` caller sends monetary filter/sort params |
+| M11 | `GET` | `/api/v1/customers/{id}/summary` | `customers.view` (monetary fields & invoices require `invoices.view`) | Customer 360 rollup (lifetime spend `payments - refunds`, invoiced, live `open_ar_minor`, rental count, avg rental value, last rental, recent rentals & invoices) |
+| M11 | `GET` | `/api/v1/vehicles` & `/api/v1/stats/vehicles` | `vehicles.view` (monetary sorts/fields require `invoices.view`) | Multi-facet filtering (`from`, `to`, `status`, `functions`, `min_rate_minor`, `max_rate_minor`, `idle_days_min`, `unpriced_only`, `include_stats=1`) + multi-page sort (`rental_count`, `utilization_pct`, `idle_days`, `revenue_minor`, `net_roi_minor`) |
+| M11 | `GET` | `/api/v1/stats/branches` | `reports.view` (monetary columns require `invoices.view`) | Per-branch comparison rollup (`company_id`, optional `branch_id`, `from`, `to`); branch-restricted users see only their assigned branch |
+| M11 | `GET/POST/DELETE` | `/api/v1/saved-filters` & `/api/v1/saved-filters/{id}` | Authenticated company member (`is_shared=true` requires `company-admin` / platform admin) | Personal & company-shared filter views per `module`; omits shared views with `requires_finance=true` when caller lacks `invoices.view`; max 50 per `(company_id, module)` |
 
 ### B. Spatie Role & Permission Matrix (M6–M10 Additions)
 
@@ -838,7 +843,66 @@ Schema::create('user_notifications', function (Blueprint $table): void {
 4. `GET /api/v1/reports/financial` returns `403` for `operations`; `GET /api/v1/reports/fleet` nulls financial columns for `operations`; `GET /api/v1/audit-events` returns `403` for `finance`, `operations`, `viewer`, `driver` and `200` for `company-admin`.
 
 ## Milestone 11 — Detailed Stats, Customer/Vehicle Rollups & Advanced Filtering (PR #14)
-*(Will be appended when Milestone 11 is implemented.)*
+
+### 11.1 Scope & Security Invariants
+- **Period vs. Live AR Semantics:** Flow metrics (`total_spent_minor = max(0, payments - refunds)`, `total_invoiced_minor`, `rental_count`, `avg_rental_value_minor`, `revenue_minor`, `expense_minor`, `net_roi_minor`, `utilization_pct`, `total_km_driven`) filter by optional `from`/`to` (`YYYY-MM-DD`). **`open_ar_minor` is always live point-in-time** (current unpaid balance across issued invoices, unaffected by `from`/`to`).
+- **Monetary Side-Channel Protection:** Callers **without** `invoices.view`:
+  1. Always receive `null` for monetary rollup fields (`total_spent_minor`, `total_invoiced_minor`, `open_ar_minor`, `avg_rental_value_minor`, `revenue_minor`, `expense_minor`, `net_roi_minor`, `expenses_minor`, `net_position_minor`).
+  2. Receive **`403 Forbidden`** if they pass monetary filter params (`min_spend_minor`, `max_spend_minor`, `has_open_ar`) or monetary sort keys (`total_spent_minor`, `open_ar_minor`, `revenue_minor`, `net_roi_minor`).
+  3. Never see company-shared `saved_filters` where `requires_finance = true`.
+- **Multi-Page Server Sorting:** Computed metrics (`total_spent_minor`, `open_ar_minor`, `rental_count`, `last_rental_at`, `utilization_pct`, `idle_days`, `revenue_minor`, `net_roi_minor`) MUST be sorted in SQL across the full matching dataset **before** `paginate(25)`.
+
+### 11.2 Database Migration (`saved_filters`)
+```php
+Schema::create('saved_filters', function (Blueprint $table): void {
+    $table->id();
+    $table->foreignId('company_id')->constrained()->cascadeOnDelete();
+    $table->foreignId('user_id')->constrained()->cascadeOnDelete();
+    $table->string('module', 32); // customers | vehicles | stats_customers | stats_vehicles | stats_branches
+    $table->string('name', 80);
+    $table->jsonb('filters');
+    $table->boolean('is_shared')->default(false);
+    $table->boolean('requires_finance')->default(false);
+    $table->timestamps();
+    $table->index(['company_id', 'module', 'is_shared']);
+    $table->index(['company_id', 'user_id', 'module']);
+});
+```
+
+### 11.3 Endpoints & Contracts
+
+#### A. Extended `GET /api/v1/customers` & Dedicated `GET /api/v1/stats/customers` (`customers.view`)
+- Query: `company_id` (required), optional `branch_id`, `type` (`individual|corporate`), `include_stats` (`0|1`), `from`, `to` (`YYYY-MM-DD`), `min_spend_minor`, `max_spend_minor` (non-negative int, requires `invoices.view`), `has_open_ar` (`0|1`, requires `invoices.view`), `q`, `page`, `sort` (`name|type|email|rental_count|total_spent_minor|open_ar_minor|last_rental_at`), `dir` (`asc|desc`).
+- Response items include `stats` (always on `/stats/customers`, and when `include_stats=1` on `/customers`):
+  `{ rental_count, last_rental_at, total_spent_minor, total_invoiced_minor, open_ar_minor, avg_rental_value_minor }` (monetary fields `null` without `invoices.view`).
+- Response `meta.summary`: `{ total_customers, active_rentals_count, total_spent_minor, total_open_ar_minor }` (monetary fields `null` without `invoices.view`).
+
+#### B. Customer 360 Summary (`GET /api/v1/customers/{id}/summary`, `customers.view`)
+- Scoped to customer's company/branch; returns `404` if outside caller scope.
+- Returns `{ data: { customer_id, rental_count, last_rental_at, total_spent_minor, total_invoiced_minor, open_ar_minor, avg_rental_value_minor, recent_rentals: [...], recent_invoices: [...] } }`.
+- When caller lacks `invoices.view`, monetary scalars are `null` and `recent_invoices` is `[]`.
+
+#### C. Extended `GET /api/v1/vehicles` & Dedicated `GET /api/v1/stats/vehicles` (`vehicles.view`)
+- Query: `company_id` (required), optional `branch_id`, `status`, `include_stats` (`0|1`), `from`, `to`, `min_rate_minor`, `max_rate_minor`, `functions` (comma-separated slugs, AND/overlap match), `idle_days_min` (non-negative int), `unpriced_only` (`0|1`), `q`, `page`, `sort` (`registration|make|daily_rate_minor|odometer|status|rental_count|utilization_pct|idle_days|revenue_minor|net_roi_minor`), `dir`.
+- Response items include `stats`: `{ rental_count, utilization_pct, total_km_driven, idle_days, revenue_minor, expense_minor, net_roi_minor }` (monetary fields `null` without `invoices.view`).
+- Response `meta.summary`: `{ total_vehicles, avg_utilization_pct, idle_over_14d_count, unpriced_count, total_net_roi_minor }` (`total_net_roi_minor` is `null` without `invoices.view`).
+
+#### D. Branch Comparison Stats (`GET /api/v1/stats/branches`, `reports.view`)
+- Query: `company_id` (required), optional `branch_id`, `from`, `to`.
+- Whole-company members receive all company branches (or filtered by `branch_id`); branch-restricted members receive **only** their assigned branch.
+- Returns `{ data: [{ branch_id, branch_name, fleet_total, utilization_pct, rental_count, work_order_count, downtime_hours, revenue_minor, expenses_minor, net_position_minor, open_ar_minor }] }` (monetary fields `null` without `invoices.view`).
+
+#### E. Saved Filter Views (`GET/POST /api/v1/saved-filters`, `DELETE /api/v1/saved-filters/{id}`)
+- `GET /api/v1/saved-filters?company_id={id}&module={module}`: returns caller's personal views + company-shared views (omitting `requires_finance = true` if caller lacks `invoices.view`).
+- `POST /api/v1/saved-filters`: `{ company_id, module, name (1..80), filters: Record<string, string>, is_shared?: boolean }` → `201`. Server computes `requires_finance` from whether `filters` contains monetary keys (`min_spend_minor`, `max_spend_minor`, `has_open_ar`, or monetary `sort`). Rejects `is_shared: true` with `403` unless caller is `company-admin` or platform admin; rejects with `422` if `(company_id, module)` already has >= 50 views.
+- `DELETE /api/v1/saved-filters/{id}` → `204`. Allowed only if `user_id === caller.id`, or (`is_shared === true` and caller is `company-admin` / platform admin); otherwise `403`.
+
+### 11.4 Required Feature Tests (`tests/Feature/MilestoneElevenTest.php`)
+1. Multi-page sorting (>25 customers) by `total_spent_minor` desc/asc orders across pages 1 and 2 accurately (`payments - refunds`).
+2. `from`/`to` date range filters `total_spent_minor` and `rental_count` while `open_ar_minor` remains live point-in-time.
+3. `operations` (without `invoices.view`) receives `null` for all monetary rollup fields, `403` when passing `min_spend_minor` / `has_open_ar` / `sort=total_spent_minor`, and does not see `requires_finance=true` shared saved filters.
+4. `GET /api/v1/customers/{id}/summary` returns accurate Customer 360 totals + recent rentals/invoices (`[]`/nulls for `operations`).
+5. `saved-filters` enforces `is_shared` admin-only creation, delete ownership (`403` on another user's personal view), and the 50-view cap (`422`).
 
 ## Milestone 12 — Authentication, Admin Email Invitations & Account Lifecycle (PR #15)
 *(Will be appended when Milestone 12 is implemented.)*

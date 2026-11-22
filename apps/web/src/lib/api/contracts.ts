@@ -141,12 +141,34 @@ export const managedRoleLabels: Record<ManagedRoleName, string> = {
   driver: "Driver",
 };
 
+export const customerStatsRollupSchema = z.object({
+  rental_count: nonNegInt,
+  last_rental_at: z.string().nullable().optional().default(null),
+  total_spent_minor: nonNegInt.nullable().optional().default(null),
+  total_invoiced_minor: nonNegInt.nullable().optional().default(null),
+  open_ar_minor: nonNegInt.nullable().optional().default(null),
+  avg_rental_value_minor: nonNegInt.nullable().optional().default(null),
+});
+export type CustomerStatsRollup = z.infer<typeof customerStatsRollupSchema>;
+
+export const vehicleStatsRollupSchema = z.object({
+  rental_count: nonNegInt,
+  utilization_pct: z.number().min(0).max(100),
+  total_km_driven: nonNegInt,
+  idle_days: nonNegInt.nullable().optional().default(null),
+  revenue_minor: z.number().int().nullable().optional().default(null),
+  expense_minor: z.number().int().nullable().optional().default(null),
+  net_roi_minor: z.number().int().nullable().optional().default(null),
+});
+export type VehicleStatsRollup = z.infer<typeof vehicleStatsRollupSchema>;
+
 export const customerSchema = z.object({
   ...ownership,
   name: z.string(),
   type: z.enum(["individual", "corporate"]),
   email: z.string().nullable(),
   phone: z.string().nullable(),
+  stats: customerStatsRollupSchema.optional(),
 });
 export const vehicleSchema = z.object({
   ...ownership,
@@ -163,6 +185,7 @@ export const vehicleSchema = z.object({
     .optional()
     .default([]),
   status: z.enum(["available", "maintenance", "damaged", "rented"]),
+  stats: vehicleStatsRollupSchema.optional(),
 });
 export const documentEntityTypes = [
   "vehicle",
@@ -886,6 +909,100 @@ export function normalizePage<T>(page: {
     total: page.meta.total,
   };
 }
+export const customerSummarySchema = z.object({
+  customer_id: numericId,
+  rental_count: nonNegInt,
+  last_rental_at: z.string().nullable().optional().default(null),
+  total_spent_minor: nonNegInt.nullable().optional().default(null),
+  total_invoiced_minor: nonNegInt.nullable().optional().default(null),
+  open_ar_minor: nonNegInt.nullable().optional().default(null),
+  avg_rental_value_minor: nonNegInt.nullable().optional().default(null),
+  recent_rentals: z
+    .array(
+      z.object({
+        id: numericId,
+        vehicle_registration: z.string().nullable().optional().default(null),
+        status: z.string(),
+        started_at: z.string().nullable().optional().default(null),
+        returned_at: z.string().nullable().optional().default(null),
+      }),
+    )
+    .optional()
+    .default([]),
+  recent_invoices: z
+    .array(
+      z.object({
+        id: numericId,
+        invoice_number: z.string().nullable().optional().default(null),
+        status: z.string(),
+        total_minor: nonNegInt,
+        outstanding_minor: nonNegInt,
+        due_at: z.string().nullable().optional().default(null),
+      }),
+    )
+    .optional()
+    .default([]),
+});
+export type CustomerSummary = z.infer<typeof customerSummarySchema>;
+
+export const customerStatsSummaryMetaSchema = z.object({
+  total_customers: nonNegInt,
+  active_rentals_count: nonNegInt,
+  total_spent_minor: nonNegInt.nullable().optional().default(null),
+  total_open_ar_minor: nonNegInt.nullable().optional().default(null),
+});
+export type CustomerStatsSummaryMeta = z.infer<
+  typeof customerStatsSummaryMetaSchema
+>;
+
+export const vehicleStatsSummaryMetaSchema = z.object({
+  total_vehicles: nonNegInt,
+  avg_utilization_pct: z.number().min(0).max(100),
+  idle_over_14d_count: nonNegInt,
+  unpriced_count: nonNegInt,
+  total_net_roi_minor: z.number().int().nullable().optional().default(null),
+});
+export type VehicleStatsSummaryMeta = z.infer<
+  typeof vehicleStatsSummaryMetaSchema
+>;
+
+export const branchStatsRowSchema = z.object({
+  branch_id: numericId,
+  branch_name: z.string(),
+  fleet_total: nonNegInt,
+  utilization_pct: z.number().min(0).max(100),
+  rental_count: nonNegInt,
+  work_order_count: nonNegInt,
+  downtime_hours: z.number().nonnegative(),
+  revenue_minor: z.number().int().nullable().optional().default(null),
+  expenses_minor: z.number().int().nullable().optional().default(null),
+  net_position_minor: z.number().int().nullable().optional().default(null),
+  open_ar_minor: nonNegInt.nullable().optional().default(null),
+});
+export type BranchStatsRow = z.infer<typeof branchStatsRowSchema>;
+
+export const savedFilterModules = [
+  "customers",
+  "vehicles",
+  "stats_customers",
+  "stats_vehicles",
+  "stats_branches",
+] as const;
+export type SavedFilterModule = (typeof savedFilterModules)[number];
+
+export const savedFilterSchema = z.object({
+  id: numericId,
+  company_id: numericId,
+  user_id: numericId,
+  module: z.enum(savedFilterModules),
+  name: z.string().min(1).max(80),
+  filters: z.record(z.string(), z.string()),
+  is_shared: z.boolean().default(false),
+  requires_finance: z.boolean().default(false),
+  created_at: z.string().nullable().optional().default(null),
+});
+export type SavedFilter = z.infer<typeof savedFilterSchema>;
+
 export function safeLoginReturn(raw: string | null) {
   if (!raw || raw.length > 2000 || /[\\\x00-\x20]/.test(raw))
     return "/companies";

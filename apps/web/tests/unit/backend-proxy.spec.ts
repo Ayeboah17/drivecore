@@ -32,7 +32,7 @@ test("proxy allowlist excludes tokens, deletes, arbitrary URLs and unsupported d
     "api/v1/auth/tokens",
     "https://elsewhere.test",
     "api/v1/../users",
-    "api/v1/saved-filters",
+    "api/v1/gps-trackers",
     "api/v1/invitations",
   ])
     expect(allowedPath("GET", path)).toBe(false);
@@ -56,8 +56,8 @@ test("proxy allowlist excludes tokens, deletes, arbitrary URLs and unsupported d
   expect(allowedPath("PATCH", "api/v1/users/1")).toBe(true);
   expect(allowedPath("PATCH", "api/v1/vehicles/1")).toBe(true);
   const rejected = await proxy(
-    make("api/v1/saved-filters"),
-    "api/v1/saved-filters",
+    make("api/v1/gps-trackers"),
+    "api/v1/gps-trackers",
     config,
     async () => {
       throw new Error("Must not call upstream");
@@ -651,4 +651,54 @@ test("M10 dashboard summary, messages, notifications, reports and audit routes e
     );
     expect(res.status).toBe(200);
   }
+});
+
+test("M11 detailed stats, customer 360, and saved-filters routes enforce allowlists and strict DELETE scoping", async () => {
+  for (const invalid of [
+    "api/v1/stats/customers",
+    "api/v1/stats/customers?company_id=1&min_spend_minor=-5",
+    "api/v1/stats/customers?company_id=1&sort=bogus&dir=desc",
+    "api/v1/stats/vehicles?company_id=1&idle_days_min=abc",
+    "api/v1/stats/branches",
+    "api/v1/saved-filters?company_id=1&module=unknown",
+  ]) {
+    const [path] = invalid.split("?");
+    const res = await proxy(make(invalid), path, config, async () => {
+      throw new Error("Must not reach upstream");
+    });
+    expect(res.status).toBe(400);
+  }
+
+  for (const valid of [
+    "api/v1/stats/customers?company_id=1&from=2026-10-01&to=2026-11-22&min_spend_minor=50000&has_open_ar=1&sort=total_spent_minor&dir=desc",
+    "api/v1/stats/vehicles?company_id=1&idle_days_min=14&unpriced_only=1&sort=net_roi_minor&dir=desc",
+    "api/v1/stats/branches?company_id=1&from=2026-10-01&to=2026-11-22",
+    "api/v1/customers/10/summary",
+    "api/v1/saved-filters?company_id=1&module=stats_customers",
+  ]) {
+    const [path] = valid.split("?");
+    const res = await proxy(make(valid), path, config, async () =>
+      Response.json({ data: {} }),
+    );
+    expect(res.status).toBe(200);
+  }
+
+  // DELETE allowed ONLY on saved-filters/{id}, rejected on customers/{id}
+  const delAllowed = await proxy(
+    make("api/v1/saved-filters/5", "DELETE"),
+    "api/v1/saved-filters/5",
+    config,
+    async () => new Response(null, { status: 204 }),
+  );
+  expect(delAllowed.status).toBe(204);
+
+  const delBlocked = await proxy(
+    make("api/v1/customers/10", "DELETE"),
+    "api/v1/customers/10",
+    config,
+    async () => {
+      throw new Error("Must not reach upstream");
+    },
+  );
+  expect(delBlocked.status).toBe(404);
 });

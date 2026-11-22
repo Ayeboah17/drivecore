@@ -39,13 +39,15 @@ function failure(status: number, message: string) {
 }
 export function allowedPath(method: string, path: string) {
   if (method === "GET")
-    return /^(sanctum\/csrf-cookie|api\/v1\/(health|auth\/me|companies|companies\/[1-9]\d*\/settings|branches|customers|customers\/[1-9]\d*|vehicles|vehicles\/[1-9]\d*|vehicles\/[1-9]\d*\/summary|quotations|quotations\/[1-9]\d*|reservations|reservations\/[1-9]\d*|rentals|rentals\/[1-9]\d*|invoices|invoices\/ageing|invoices\/[1-9]\d*|payments|refunds|expenses|gl\/accounts|gl\/journal-entries|work-orders|work-orders\/[1-9]\d*|parts|stock-movements|suppliers|purchase-orders|purchase-orders\/[1-9]\d*|dashboard\/summary|messages|notifications|reports\/(financial|fleet)|audit-events|(quotations|reservations|rentals|invoices)\/[1-9]\d*\/pdf|documents|documents\/[1-9]\d*|users|roles))$/.test(
+    return /^(sanctum\/csrf-cookie|api\/v1\/(health|auth\/me|companies|companies\/[1-9]\d*\/settings|branches|customers|customers\/[1-9]\d*|customers\/[1-9]\d*\/summary|vehicles|vehicles\/[1-9]\d*|vehicles\/[1-9]\d*\/summary|quotations|quotations\/[1-9]\d*|reservations|reservations\/[1-9]\d*|rentals|rentals\/[1-9]\d*|invoices|invoices\/ageing|invoices\/[1-9]\d*|payments|refunds|expenses|gl\/accounts|gl\/journal-entries|work-orders|work-orders\/[1-9]\d*|parts|stock-movements|suppliers|purchase-orders|purchase-orders\/[1-9]\d*|dashboard\/summary|messages|notifications|reports\/(financial|fleet)|stats\/(customers|vehicles|branches)|saved-filters|audit-events|(quotations|reservations|rentals|invoices)\/[1-9]\d*\/pdf|documents|documents\/[1-9]\d*|users|roles))$/.test(
       path,
     );
   if (method === "POST")
-    return /^api\/v1\/(auth\/(login|logout)|companies|branches|customers|vehicles|quotations|quotations\/[1-9]\d*\/(approve-discount|reject-discount|cancel|convert)|reservations|reservations\/[1-9]\d*\/cancel|rentals|rentals\/[1-9]\d*\/(handover|return|extend|assign-driver)|invoices|invoices\/[1-9]\d*\/(issue|void|payments|refunds)|expenses|work-orders|work-orders\/[1-9]\d*\/(start|consume-parts|complete|cancel)|parts|parts\/[1-9]\d*\/adjust|suppliers|purchase-orders|purchase-orders\/[1-9]\d*\/(submit|approve|receive|cancel)|messages|messages\/[1-9]\d*\/read|notifications\/([1-9]\d*\/read|read-all)|documents|users)$/.test(
+    return /^api\/v1\/(auth\/(login|logout)|companies|branches|customers|vehicles|quotations|quotations\/[1-9]\d*\/(approve-discount|reject-discount|cancel|convert)|reservations|reservations\/[1-9]\d*\/cancel|rentals|rentals\/[1-9]\d*\/(handover|return|extend|assign-driver)|invoices|invoices\/[1-9]\d*\/(issue|void|payments|refunds)|expenses|work-orders|work-orders\/[1-9]\d*\/(start|consume-parts|complete|cancel)|parts|parts\/[1-9]\d*\/adjust|suppliers|purchase-orders|purchase-orders\/[1-9]\d*\/(submit|approve|receive|cancel)|messages|messages\/[1-9]\d*\/read|notifications\/([1-9]\d*\/read|read-all)|saved-filters|documents|users)$/.test(
       path,
     );
+  if (method === "DELETE")
+    return /^api\/v1\/saved-filters\/[1-9]\d*$/.test(path);
   return (
     method === "PATCH" &&
     /^api\/v1\/((customers|vehicles|users|invoices|parts|suppliers|purchase-orders)\/[1-9]\d*|companies\/[1-9]\d*\/settings)$/.test(
@@ -56,6 +58,8 @@ export function allowedPath(method: string, path: string) {
 
 const posInt = (value: string) =>
   /^[1-9]\d{0,14}$/.test(value) && Number.isSafeInteger(Number(value));
+const nonNegIntStr = (value: string) =>
+  /^(?:0|[1-9]\d{0,14})$/.test(value) && Number.isSafeInteger(Number(value));
 const validPage = (value: string) =>
   /^[1-9]\d{0,6}$/.test(value) && Number(value) >= 1 && Number(value) <= 1000000;
 
@@ -68,7 +72,7 @@ export function allowedQuery(
   if (keys.length === 0) {
     return (
       method !== "GET" ||
-      !/^api\/v1\/(customers|vehicles|quotations|reservations|rentals|invoices|invoices\/ageing|payments|refunds|expenses|gl\/accounts|gl\/journal-entries|work-orders|parts|stock-movements|suppliers|purchase-orders|dashboard\/summary|messages|notifications|reports\/(financial|fleet)|audit-events|documents|users|roles)$/.test(
+      !/^api\/v1\/(customers|vehicles|quotations|reservations|rentals|invoices|invoices\/ageing|payments|refunds|expenses|gl\/accounts|gl\/journal-entries|work-orders|parts|stock-movements|suppliers|purchase-orders|dashboard\/summary|messages|notifications|reports\/(financial|fleet)|stats\/(customers|vehicles|branches)|saved-filters|audit-events|documents|users|roles)$/.test(
         path,
       )
     );
@@ -108,34 +112,116 @@ export function allowedQuery(
   if (path === "api/v1/branches") {
     return checkCommon(["company_id", "branch_id", "q", "page"], false);
   }
-  if (path === "api/v1/customers") {
+  const validDate = (v: string) => /^\d{4}-\d{2}-\d{2}$/.test(v);
+  if (path === "api/v1/customers" || path === "api/v1/stats/customers") {
     if (
       !checkCommon(
-        ["company_id", "branch_id", "type", "q", "page", "sort", "dir"],
+        [
+          "company_id",
+          "branch_id",
+          "type",
+          "include_stats",
+          "from",
+          "to",
+          "min_spend_minor",
+          "max_spend_minor",
+          "has_open_ar",
+          "q",
+          "page",
+          "sort",
+          "dir",
+        ],
         true,
       )
     )
       return false;
     const type = params.get("type");
-    return (
-      (type === null || ["individual", "corporate"].includes(type)) &&
-      checkSort(["name", "type", "email"])
-    );
+    const inc = params.get("include_stats");
+    const from = params.get("from");
+    const to = params.get("to");
+    const minSpend = params.get("min_spend_minor");
+    const maxSpend = params.get("max_spend_minor");
+    const hasOpenAr = params.get("has_open_ar");
+    if (type !== null && !["individual", "corporate"].includes(type))
+      return false;
+    if (inc !== null && !["0", "1", "true", "false"].includes(inc))
+      return false;
+    if (from !== null && !validDate(from)) return false;
+    if (to !== null && !validDate(to)) return false;
+    if (minSpend !== null && !nonNegIntStr(minSpend)) return false;
+    if (maxSpend !== null && !nonNegIntStr(maxSpend)) return false;
+    if (hasOpenAr !== null && !["0", "1", "true", "false"].includes(hasOpenAr))
+      return false;
+    return checkSort([
+      "name",
+      "type",
+      "email",
+      "rental_count",
+      "total_spent_minor",
+      "open_ar_minor",
+      "last_rental_at",
+    ]);
   }
-  if (path === "api/v1/vehicles") {
+  if (path === "api/v1/vehicles" || path === "api/v1/stats/vehicles") {
     if (
       !checkCommon(
-        ["company_id", "branch_id", "status", "q", "page", "sort", "dir"],
+        [
+          "company_id",
+          "branch_id",
+          "status",
+          "include_stats",
+          "from",
+          "to",
+          "min_rate_minor",
+          "max_rate_minor",
+          "functions",
+          "idle_days_min",
+          "unpriced_only",
+          "q",
+          "page",
+          "sort",
+          "dir",
+        ],
         true,
       )
     )
       return false;
     const status = params.get("status");
-    return (
-      (status === null ||
-        ["available", "rented", "maintenance", "damaged"].includes(status)) &&
-      checkSort(["registration", "make", "daily_rate_minor", "odometer", "status"])
-    );
+    const inc = params.get("include_stats");
+    const from = params.get("from");
+    const to = params.get("to");
+    const minRate = params.get("min_rate_minor");
+    const maxRate = params.get("max_rate_minor");
+    const fns = params.get("functions");
+    const idleMin = params.get("idle_days_min");
+    const unpriced = params.get("unpriced_only");
+    if (
+      status !== null &&
+      !["available", "rented", "maintenance", "damaged"].includes(status)
+    )
+      return false;
+    if (inc !== null && !["0", "1", "true", "false"].includes(inc))
+      return false;
+    if (from !== null && !validDate(from)) return false;
+    if (to !== null && !validDate(to)) return false;
+    if (minRate !== null && !nonNegIntStr(minRate)) return false;
+    if (maxRate !== null && !nonNegIntStr(maxRate)) return false;
+    if (fns !== null && (fns.length > 200 || /[<>\\]/.test(fns))) return false;
+    if (idleMin !== null && !nonNegIntStr(idleMin)) return false;
+    if (unpriced !== null && !["0", "1", "true", "false"].includes(unpriced))
+      return false;
+    return checkSort([
+      "registration",
+      "make",
+      "daily_rate_minor",
+      "odometer",
+      "status",
+      "rental_count",
+      "utilization_pct",
+      "idle_days",
+      "revenue_minor",
+      "net_roi_minor",
+    ]);
   }
   if (path === "api/v1/quotations") {
     if (
@@ -472,11 +558,11 @@ export function allowedQuery(
       "created_at",
     ]);
   }
-  const validDate = (v: string) => /^\d{4}-\d{2}-\d{2}$/.test(v);
   if (
     path === "api/v1/dashboard/summary" ||
     path === "api/v1/reports/financial" ||
-    path === "api/v1/reports/fleet"
+    path === "api/v1/reports/fleet" ||
+    path === "api/v1/stats/branches"
   ) {
     if (!checkCommon(["company_id", "branch_id", "from", "to"], true))
       return false;
@@ -484,6 +570,22 @@ export function allowedQuery(
     const to = params.get("to");
     if (from !== null && !validDate(from)) return false;
     if (to !== null && !validDate(to)) return false;
+    return true;
+  }
+  if (path === "api/v1/saved-filters") {
+    if (!checkCommon(["company_id", "module"], true)) return false;
+    const mod = params.get("module");
+    if (
+      mod !== null &&
+      ![
+        "customers",
+        "vehicles",
+        "stats_customers",
+        "stats_vehicles",
+        "stats_branches",
+      ].includes(mod)
+    )
+      return false;
     return true;
   }
   if (path === "api/v1/messages") {
@@ -779,8 +881,12 @@ export async function proxy(
           body = rawBytes;
         } else {
           const decoded = new TextDecoder().decode(rawBytes);
-          JSON.parse(decoded);
-          body = decoded;
+          if (request.method === "DELETE" && decoded.trim() === "") {
+            body = undefined;
+          } else {
+            JSON.parse(decoded);
+            body = decoded;
+          }
         }
       } catch (error) {
         return failure(

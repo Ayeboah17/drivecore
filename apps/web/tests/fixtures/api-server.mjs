@@ -24,6 +24,7 @@ let workOrders = new Map();
 let messages = new Map();
 let notifications = new Map();
 let auditEvents = new Map();
+let savedFilters = new Map();
 let documents = new Map();
 let documentBlobs = new Map();
 let control = {};
@@ -242,6 +243,7 @@ function reset() {
       },
     ],
   ]);
+  savedFilters = new Map();
   branches = new Map([
     [2, { id: 2, company_id: 1, name: "Synthetic branch" }],
     [4, { id: 4, company_id: 3, name: "Other branch" }],
@@ -1712,6 +1714,396 @@ createServer(async (req, res) => {
     }
     fail(404);
     return;
+  }
+
+  // --- M11 Detailed Stats, Customer 360 & Saved Filters ---
+  function inDateRange(iso, from, to) {
+    if (!from && !to) return true;
+    if (!iso) return false;
+    const day = iso.slice(0, 10);
+    if (from && day < from) return false;
+    if (to && day > to) return false;
+    return true;
+  }
+
+  function computeCustomerStats(c, { from, to, canSeeFinance }) {
+    const custRentals = [...rentals.values()].filter(
+      (r) => r.customer_id === c.id && inDateRange(r.started_at || r.created_at, from, to),
+    );
+    const allCustRentals = [...rentals.values()].filter(
+      (r) => r.customer_id === c.id,
+    );
+    const sortedRentals = [...allCustRentals].sort((a, b) =>
+      String(b.started_at || b.created_at).localeCompare(
+        String(a.started_at || a.created_at),
+      ),
+    );
+    const last_rental_at = sortedRentals[0]
+      ? sortedRentals[0].started_at || sortedRentals[0].created_at
+      : null;
+
+    if (!canSeeFinance) {
+      return {
+        rental_count: custRentals.length,
+        last_rental_at,
+        total_spent_minor: null,
+        total_invoiced_minor: null,
+        open_ar_minor: null,
+        avg_rental_value_minor: null,
+      };
+    }
+
+    const allIssued = [...invoices.values()]
+      .map(decorateInvoice)
+      .filter((i) => i.customer_id === c.id && i.status === "issued");
+    // Open AR is ALWAYS live point-in-time regardless of from/to
+    const open_ar_minor = allIssued.reduce(
+      (sum, i) => sum + i.outstanding_minor,
+      0,
+    );
+    const periodIssued = allIssued.filter((i) =>
+      inDateRange(i.issued_at || i.created_at, from, to),
+    );
+    const total_invoiced_minor = periodIssued.reduce(
+      (sum, i) => sum + i.total_minor,
+      0,
+    );
+    const custInvoiceIds = new Set(allIssued.map((i) => i.id));
+    const periodPaid = [...payments.values()]
+      .filter(
+        (p) =>
+          custInvoiceIds.has(p.invoice_id) &&
+          inDateRange(p.paid_at || p.created_at, from, to),
+      )
+      .reduce((sum, p) => sum + p.amount_minor, 0);
+    const periodRefunded = [...refunds.values()]
+      .filter(
+        (rf) =>
+          custInvoiceIds.has(rf.invoice_id) &&
+          inDateRange(rf.refunded_at || rf.created_at, from, to),
+      )
+      .reduce((sum, rf) => sum + rf.amount_minor, 0);
+    const total_spent_minor = Math.max(0, periodPaid - periodRefunded);
+    const avg_rental_value_minor =
+      custRentals.length > 0
+        ? Math.round(total_invoiced_minor / custRentals.length)
+        : 0;
+
+    return {
+      rental_count: custRentals.length,
+      last_rental_at,
+      total_spent_minor,
+      total_invoiced_minor,
+      open_ar_minor,
+      avg_rental_value_minor,
+    };
+  }
+
+  function computeVehicleStats(v, { from, to, canSeeFinance }) {
+    const vehRentals = [...rentals.values()].filter(
+      (r) =>
+        r.vehicle_id === v.id &&
+        inDateRange(r.started_at || r.created_at, from, to),
+    );
+    const utilization_pct =
+      v.status === "rented"
+        ? 100
+        : Math.min(95, vehRentals.length * 25);
+    const total_km_driven = vehRentals.reduce(
+      (sum, r) =>
+        sum +
+        Math.max(
+          0,
+          (r.end_odometer ?? r.start_odometer ?? 0) - (r.start_odometer ?? 0),
+        ),
+      0,
+    );
+    const idle_days =
+      v.status === "rented" ? 0 : vehRentals.length > 0 ? 5 : 21;
+
+    if (!canSeeFinance) {
+      return {
+        rental_count: vehRentals.length,
+        utilization_pct,
+        total_km_driven,
+        idle_days,
+        revenue_minor: null,
+        expense_minor: null,
+        net_roi_minor: null,
+      };
+    }
+
+    const rentalIds = new Set(vehRentals.map((r) => r.id));
+    const revenue_minor = [...invoices.values()]
+      .map(decorateInvoice)
+      .filter(
+        (i) =>
+          i.status === "issued" &&
+          i.rental_id &&
+          rentalIds.has(i.rental_id) &&
+          inDateRange(i.issued_at || i.created_at, from, to),
+      )
+      .reduce((sum, i) => sum + Math.max(0, i.total_minor - i.refunded_minor), 0);
+    const expense_minor = [...expenses.values()]
+      .filter(
+        (e) =>
+          e.vehicle_id === v.id &&
+          inDateRange(e.incurred_at || e.created_at, from, to),
+      )
+      .reduce((sum, e) => sum + e.amount_minor, 0);
+
+    return {
+      rental_count: vehRentals.length,
+      utilization_pct,
+      total_km_driven,
+      idle_days,
+      revenue_minor,
+      expense_minor,
+      net_roi_minor: revenue_minor - expense_minor,
+    };
+  }
+
+  const custSummaryMatch = url.pathname.match(
+    /^\/api\/v1\/customers\/(\d+)\/summary$/,
+  );
+  if (custSummaryMatch && req.method === "GET") {
+    if (!user.is_platform_admin && !user.permissions.includes("customers.view")) {
+      fail(403);
+      return;
+    }
+    const custId = Number(custSummaryMatch[1]);
+    const c = customers.get(custId);
+    if (!c) {
+      fail(404);
+      return;
+    }
+    const canSeeFinance =
+      user.is_platform_admin || user.permissions.includes("invoices.view");
+    const stats = computeCustomerStats(c, {
+      from: "",
+      to: "",
+      canSeeFinance,
+    });
+    const recent_rentals = [...rentals.values()]
+      .filter((r) => r.customer_id === custId)
+      .sort((a, b) => b.id - a.id)
+      .slice(0, 5)
+      .map((r) => ({
+        id: r.id,
+        vehicle_registration: vehicles.get(r.vehicle_id)?.registration ?? null,
+        status: r.status,
+        started_at: r.started_at ?? r.created_at ?? null,
+        returned_at: r.returned_at ?? null,
+      }));
+    const recent_invoices = canSeeFinance
+      ? [...invoices.values()]
+          .map(decorateInvoice)
+          .filter((i) => i.customer_id === custId)
+          .sort((a, b) => b.id - a.id)
+          .slice(0, 5)
+          .map((i) => ({
+            id: i.id,
+            invoice_number: i.invoice_number ?? `INV-${i.id}`,
+            status: i.status,
+            total_minor: i.total_minor,
+            outstanding_minor: i.outstanding_minor,
+            due_at: i.due_at ?? null,
+          }))
+      : [];
+    json(200, {
+      data: {
+        customer_id: custId,
+        ...stats,
+        recent_rentals,
+        recent_invoices,
+      },
+    });
+    return;
+  }
+
+  if (url.pathname === "/api/v1/stats/branches" && req.method === "GET") {
+    if (!user.is_platform_admin && !user.permissions.includes("reports.view")) {
+      fail(403);
+      return;
+    }
+    const companyId = Number(url.searchParams.get("company_id"));
+    const reqBranch = url.searchParams.get("branch_id")
+      ? Number(url.searchParams.get("branch_id"))
+      : null;
+    const from = url.searchParams.get("from") ?? "";
+    const to = url.searchParams.get("to") ?? "";
+    const membership = user.companies.find((c) => c.id === companyId);
+    const effectiveBranch =
+      !user.is_platform_admin && membership?.branch_id !== null
+        ? membership.branch_id
+        : reqBranch;
+    const canSeeFinance =
+      user.is_platform_admin || user.permissions.includes("invoices.view");
+
+    const scopedBranches = [...branches.values()].filter(
+      (b) =>
+        b.company_id === companyId &&
+        (effectiveBranch === null || b.id === effectiveBranch),
+    );
+    const rows = scopedBranches.map((b) => {
+      const bVehs = [...vehicles.values()].filter(
+        (v) => v.company_id === companyId && v.branch_id === b.id,
+      );
+      const rented = bVehs.filter((v) => v.status === "rented").length;
+      const bRentals = [...rentals.values()].filter(
+        (r) =>
+          r.company_id === companyId &&
+          r.branch_id === b.id &&
+          inDateRange(r.started_at || r.created_at, from, to),
+      );
+      const bWos = [...workOrders.values()].filter(
+        (w) => w.company_id === companyId && w.branch_id === b.id,
+      );
+      const bInvoices = [...invoices.values()]
+        .map(decorateInvoice)
+        .filter(
+          (i) =>
+            i.company_id === companyId &&
+            i.branch_id === b.id &&
+            i.status === "issued",
+        );
+      const periodInvoices = bInvoices.filter((i) =>
+        inDateRange(i.issued_at || i.created_at, from, to),
+      );
+      const bExpenses = [...expenses.values()].filter(
+        (e) =>
+          e.company_id === companyId &&
+          e.branch_id === b.id &&
+          inDateRange(e.incurred_at || e.created_at, from, to),
+      );
+      const rev = periodInvoices.reduce(
+        (s, i) => s + Math.max(0, i.total_minor - i.refunded_minor),
+        0,
+      );
+      const exp = bExpenses.reduce((s, e) => s + e.amount_minor, 0);
+      const openAr = bInvoices.reduce((s, i) => s + i.outstanding_minor, 0);
+      return {
+        branch_id: b.id,
+        branch_name: b.name,
+        fleet_total: bVehs.length,
+        utilization_pct:
+          bVehs.length > 0 ? Math.round((rented / bVehs.length) * 100) : 0,
+        rental_count: bRentals.length,
+        work_order_count: bWos.length,
+        downtime_hours: bWos.length * 4,
+        revenue_minor: canSeeFinance ? rev : null,
+        expenses_minor: canSeeFinance ? exp : null,
+        net_position_minor: canSeeFinance ? rev - exp : null,
+        open_ar_minor: canSeeFinance ? openAr : null,
+      };
+    });
+    json(200, { data: rows });
+    return;
+  }
+
+  const sfMatch = url.pathname.match(/^\/api\/v1\/saved-filters(?:\/(\d+))?$/);
+  if (sfMatch) {
+    const sfId = sfMatch[1] ? Number(sfMatch[1]) : null;
+    const canSeeFinance =
+      user.is_platform_admin || user.permissions.includes("invoices.view");
+    const isAdmin =
+      user.is_platform_admin ||
+      user.roles.includes("company-admin") ||
+      user.permissions.includes("users.manage");
+
+    if (req.method === "GET" && !sfId) {
+      const companyId = Number(url.searchParams.get("company_id"));
+      const mod = url.searchParams.get("module");
+      const items = [...savedFilters.values()].filter((f) => {
+        if (f.company_id !== companyId) return false;
+        if (mod && f.module !== mod) return false;
+        if (f.is_shared) {
+          if (f.requires_finance && !canSeeFinance) return false;
+          return true;
+        }
+        return f.user_id === user.id;
+      });
+      json(200, { data: items });
+      return;
+    }
+
+    if (req.method === "POST" && !sfId) {
+      const companyId = Number(input.company_id);
+      const mod = String(input.module ?? "");
+      const name = String(input.name ?? "").trim();
+      const filtersObj =
+        input.filters && typeof input.filters === "object" ? input.filters : {};
+      const wantShared = Boolean(input.is_shared);
+      if (!name || name.length > 80) {
+        fail(422, { name: ["Provide a view name up to 80 characters."] });
+        return;
+      }
+      if (wantShared && !isAdmin) {
+        fail(403);
+        return;
+      }
+      const existingCount = [...savedFilters.values()].filter(
+        (f) => f.company_id === companyId && f.module === mod,
+      ).length;
+      if (existingCount >= 50) {
+        fail(422, { name: ["Maximum of 50 saved views reached for this module."] });
+        return;
+      }
+      const monetaryKeys = new Set([
+        "min_spend_minor",
+        "max_spend_minor",
+        "has_open_ar",
+      ]);
+      const monetarySorts = new Set([
+        "total_spent_minor",
+        "open_ar_minor",
+        "revenue_minor",
+        "net_roi_minor",
+      ]);
+      const requiresFinance =
+        Object.keys(filtersObj).some((k) => monetaryKeys.has(k)) ||
+        monetarySorts.has(String(filtersObj.sort ?? ""));
+      if (requiresFinance && !canSeeFinance) {
+        fail(403);
+        return;
+      }
+      const id = nextId++;
+      const rec = {
+        id,
+        company_id: companyId,
+        user_id: user.id,
+        module: mod,
+        name,
+        filters: filtersObj,
+        is_shared: wantShared,
+        requires_finance: requiresFinance,
+        created_at: new Date().toISOString(),
+      };
+      savedFilters.set(id, rec);
+      completedWrites++;
+      json(201, { data: rec });
+      return;
+    }
+
+    if (req.method === "DELETE" && sfId) {
+      const rec = savedFilters.get(sfId);
+      if (!rec) {
+        fail(404);
+        return;
+      }
+      const allowed =
+        (!rec.is_shared && rec.user_id === user.id) ||
+        (rec.is_shared && isAdmin);
+      if (!allowed) {
+        fail(403);
+        return;
+      }
+      savedFilters.delete(sfId);
+      completedWrites++;
+      res.writeHead(204);
+      res.end();
+      return;
+    }
   }
 
   // --- M10 Dashboard Summary, Messages, Notifications, Reports & Audit ---
@@ -4297,14 +4689,15 @@ createServer(async (req, res) => {
 
   // --- Customers & Vehicles ---
   const match = url.pathname.match(
-    /^\/api\/v1\/(customers|vehicles)(?:\/(\d+))?$/,
+    /^\/api\/v1\/(?:(stats)\/)?(customers|vehicles)(?:\/(\d+))?$/,
   );
   if (!match) {
     fail(404);
     return;
   }
-  const domain = match[1];
-  const id = match[2] ? Number(match[2]) : null;
+  const isStatsEndpoint = match[1] === "stats";
+  const domain = match[2];
+  const id = match[3] ? Number(match[3]) : null;
   const records = domain === "customers" ? customers : vehicles;
   if (!id && req.method === "GET") {
     if (
@@ -4336,11 +4729,57 @@ createServer(async (req, res) => {
       fail(404);
       return;
     }
+    const canSeeFinance =
+      user.is_platform_admin || user.permissions.includes("invoices.view");
+    const sortParam = url.searchParams.get("sort") ?? "";
+    const monetarySortKeys = [
+      "total_spent_minor",
+      "open_ar_minor",
+      "revenue_minor",
+      "net_roi_minor",
+    ];
+    if (
+      !canSeeFinance &&
+      (url.searchParams.has("min_spend_minor") ||
+        url.searchParams.has("max_spend_minor") ||
+        url.searchParams.get("has_open_ar") === "1" ||
+        monetarySortKeys.includes(sortParam))
+    ) {
+      fail(403);
+      return;
+    }
+
     const q = (url.searchParams.get("q") ?? "").trim().toLowerCase();
     const typeFilter = url.searchParams.get("type");
     const statusFilter = url.searchParams.get("status");
+    const includeStats =
+      isStatsEndpoint || url.searchParams.get("include_stats") === "1";
+    const from = url.searchParams.get("from") ?? "";
+    const to = url.searchParams.get("to") ?? "";
+    const minSpend = url.searchParams.has("min_spend_minor")
+      ? Number(url.searchParams.get("min_spend_minor"))
+      : null;
+    const maxSpend = url.searchParams.has("max_spend_minor")
+      ? Number(url.searchParams.get("max_spend_minor"))
+      : null;
+    const hasOpenAr = url.searchParams.get("has_open_ar") === "1";
+    const minRate = url.searchParams.has("min_rate_minor")
+      ? Number(url.searchParams.get("min_rate_minor"))
+      : null;
+    const maxRate = url.searchParams.has("max_rate_minor")
+      ? Number(url.searchParams.get("max_rate_minor"))
+      : null;
+    const idleDaysMin = url.searchParams.has("idle_days_min")
+      ? Number(url.searchParams.get("idle_days_min"))
+      : null;
+    const unpricedOnly = url.searchParams.get("unpriced_only") === "1";
+    const functionsFilter = (url.searchParams.get("functions") ?? "")
+      .split(",")
+      .map((s) => s.trim().toLowerCase())
+      .filter(Boolean);
+
     collectionReads++;
-    const items = [...records.values()].filter((r) => {
+    let items = [...records.values()].filter((r) => {
       if (r.company_id !== companyId) return false;
       if (
         !user.is_platform_admin &&
@@ -4360,6 +4799,13 @@ createServer(async (req, res) => {
           return false;
       } else {
         if (statusFilter && r.status !== statusFilter) return false;
+        if (minRate !== null && r.daily_rate_minor < minRate) return false;
+        if (maxRate !== null && r.daily_rate_minor > maxRate) return false;
+        if (unpricedOnly && r.daily_rate_minor > 0) return false;
+        if (functionsFilter.length) {
+          const lowerFns = (r.functions ?? []).map((f) => f.toLowerCase());
+          if (!functionsFilter.every((f) => lowerFns.includes(f))) return false;
+        }
         if (
           q &&
           ![r.registration, r.make, r.model].some((v) =>
@@ -4370,26 +4816,121 @@ createServer(async (req, res) => {
       }
       return true;
     });
-    paginateSlice(
-      sortItems(
-        items,
-        domain === "customers"
-          ? {
-              name: (r) => r.name,
-              type: (r) => r.type,
-              email: (r) => r.email,
-              id: (r) => r.id,
-            }
-          : {
-              registration: (r) => r.registration,
-              make: (r) => `${r.make} ${r.model}`,
-              daily_rate_minor: (r) => r.daily_rate_minor,
-              odometer: (r) => r.odometer,
-              status: (r) => r.status,
-              id: (r) => r.id,
-            },
-      ),
+
+    if (includeStats) {
+      if (domain === "customers") {
+        items = items
+          .map((c) => ({
+            ...c,
+            stats: computeCustomerStats(c, { from, to, canSeeFinance }),
+          }))
+          .filter((c) => {
+            if (minSpend !== null && (c.stats.total_spent_minor ?? 0) < minSpend)
+              return false;
+            if (maxSpend !== null && (c.stats.total_spent_minor ?? 0) > maxSpend)
+              return false;
+            if (hasOpenAr && (c.stats.open_ar_minor ?? 0) <= 0) return false;
+            return true;
+          });
+      } else {
+        items = items
+          .map((v) => ({
+            ...v,
+            stats: computeVehicleStats(v, { from, to, canSeeFinance }),
+          }))
+          .filter((v) => {
+            if (
+              idleDaysMin !== null &&
+              (v.stats.idle_days === null || v.stats.idle_days < idleDaysMin)
+            )
+              return false;
+            return true;
+          });
+      }
+    }
+
+    const sorted = sortItems(
+      items,
+      domain === "customers"
+        ? {
+            name: (r) => r.name,
+            type: (r) => r.type,
+            email: (r) => r.email,
+            rental_count: (r) => r.stats?.rental_count ?? 0,
+            total_spent_minor: (r) => r.stats?.total_spent_minor ?? 0,
+            open_ar_minor: (r) => r.stats?.open_ar_minor ?? 0,
+            last_rental_at: (r) => r.stats?.last_rental_at ?? "",
+            id: (r) => r.id,
+          }
+        : {
+            registration: (r) => r.registration,
+            make: (r) => `${r.make} ${r.model}`,
+            daily_rate_minor: (r) => r.daily_rate_minor,
+            odometer: (r) => r.odometer,
+            status: (r) => r.status,
+            rental_count: (r) => r.stats?.rental_count ?? 0,
+            utilization_pct: (r) => r.stats?.utilization_pct ?? 0,
+            idle_days: (r) => r.stats?.idle_days ?? 0,
+            revenue_minor: (r) => r.stats?.revenue_minor ?? 0,
+            net_roi_minor: (r) => r.stats?.net_roi_minor ?? 0,
+            id: (r) => r.id,
+          },
     );
+
+    const perPage = 25;
+    const total = sorted.length;
+    const lastPage = Math.max(1, Math.ceil(total / perPage));
+    const pageNum = Math.max(1, Number(url.searchParams.get("page") ?? "1") || 1);
+    const slice = sorted.slice((pageNum - 1) * perPage, pageNum * perPage);
+    let summary = undefined;
+    if (includeStats) {
+      if (domain === "customers") {
+        const activeRentalsCount = [...rentals.values()].filter(
+          (r) =>
+            r.company_id === companyId &&
+            (branchId === null || r.branch_id === branchId) &&
+            r.status === "active",
+        ).length;
+        summary = {
+          total_customers: total,
+          active_rentals_count: activeRentalsCount,
+          total_spent_minor: canSeeFinance
+            ? sorted.reduce((s, c) => s + (c.stats?.total_spent_minor ?? 0), 0)
+            : null,
+          total_open_ar_minor: canSeeFinance
+            ? sorted.reduce((s, c) => s + (c.stats?.open_ar_minor ?? 0), 0)
+            : null,
+        };
+      } else {
+        summary = {
+          total_vehicles: total,
+          avg_utilization_pct:
+            total > 0
+              ? Math.round(
+                  sorted.reduce((s, v) => s + (v.stats?.utilization_pct ?? 0), 0) /
+                    total,
+                )
+              : 0,
+          idle_over_14d_count: sorted.filter(
+            (v) => (v.stats?.idle_days ?? 0) >= 14,
+          ).length,
+          unpriced_count: sorted.filter((v) => v.daily_rate_minor === 0).length,
+          total_net_roi_minor: canSeeFinance
+            ? sorted.reduce((s, v) => s + (v.stats?.net_roi_minor ?? 0), 0)
+            : null,
+        };
+      }
+    }
+    json(200, {
+      data: slice,
+      meta: {
+        current_page: pageNum,
+        last_page: lastPage,
+        per_page: perPage,
+        total,
+        ...(summary ? { summary } : {}),
+      },
+    });
     return;
   }
   if (req.method === "GET") {

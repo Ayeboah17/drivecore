@@ -41,7 +41,7 @@ export function csrfToken(cookie: string) {
 export async function request(
   path: string,
   options: {
-    method?: "GET" | "POST" | "PATCH";
+    method?: "GET" | "POST" | "PATCH" | "DELETE";
     body?: unknown;
     signal?: AbortSignal;
   } = {},

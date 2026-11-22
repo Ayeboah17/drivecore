@@ -3,6 +3,7 @@
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import {
+  BarChart3,
   CarFront,
   Download,
   Landmark,
@@ -10,6 +11,7 @@ import {
 } from "lucide-react";
 import { useSession } from "@/features/auth/session-provider";
 import { useLiveContext } from "@/features/live/context";
+import { DetailedStatsPanel } from "@/features/stats/detailed-stats-panel";
 import {
   getFinancialReport,
   getFleetReport,
@@ -40,7 +42,7 @@ import { ViewFadeIn } from "@/components/motion/primitives";
 import { Button } from "@/components/ui/button";
 import { DriveCoreDateRangePicker } from "@/components/ui/drivecore-calendar";
 
-type ReportsTab = "financial" | "fleet" | "audit";
+type ReportsTab = "financial" | "fleet" | "stats" | "audit";
 
 function fmtDate(iso?: string | null) {
   if (!iso) return "—";
@@ -69,13 +71,16 @@ export function LiveReportsPage() {
 
   const rawTab = searchParams.get("tab");
   const activeTab: ReportsTab =
-    rawTab === "financial" || rawTab === "fleet" || rawTab === "audit"
+    rawTab === "financial" ||
+    rawTab === "fleet" ||
+    rawTab === "stats" ||
+    rawTab === "audit"
       ? rawTab
       : canFinancial
         ? "financial"
         : canFleet
           ? "fleet"
-          : "audit";
+          : "stats";
 
   const from = searchParams.get("from") ?? "";
   const to = searchParams.get("to") ?? "";
@@ -148,6 +153,7 @@ export function LiveReportsPage() {
   const tabs: { key: ReportsTab; label: string; visible: boolean }[] = [
     { key: "financial", label: "Financial report", visible: canFinancial },
     { key: "fleet", label: "Fleet & maintenance", visible: canFleet },
+    { key: "stats", label: "Detailed stats", visible: canAccess },
     { key: "audit", label: "Audit trail", visible: hasAuditAccess },
   ];
 
@@ -225,7 +231,7 @@ export function LiveReportsPage() {
           type="button"
           variant="outline"
           onClick={handleExportCsv}
-          className="gap-1.5"
+          className={`gap-1.5 ${activeTab === "stats" ? "hidden" : ""}`}
         >
           <Download className="size-4" aria-hidden="true" />
           Export CSV
@@ -258,6 +264,8 @@ export function LiveReportsPage() {
                   <Landmark className="size-3.5" aria-hidden="true" />
                 ) : tab.key === "fleet" ? (
                   <CarFront className="size-3.5" aria-hidden="true" />
+                ) : tab.key === "stats" ? (
+                  <BarChart3 className="size-3.5" aria-hidden="true" />
                 ) : (
                   <ShieldCheck className="size-3.5" aria-hidden="true" />
                 )}
@@ -463,6 +471,8 @@ export function LiveReportsPage() {
           </DataTableFrame>
         )
       ) : null}
+
+      {activeTab === "stats" ? <DetailedStatsPanel /> : null}
 
       {activeTab === "audit" ? (
         !hasAuditAccess ? (
