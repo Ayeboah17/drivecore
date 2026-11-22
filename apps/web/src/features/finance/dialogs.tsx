@@ -42,6 +42,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { DriveCoreDateField } from "@/components/ui/drivecore-calendar";
 import { DriveCoreSelect } from "@/components/ui/drivecore-select";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -514,11 +515,12 @@ function CreateInvoiceForm({
             <label htmlFor={`${formId}-due`} className="text-sm font-medium">
               Due date
             </label>
-            <Input
+            <DriveCoreDateField
               id={`${formId}-due`}
-              type="date"
+              label="Due date"
               value={dueDate}
-              onChange={(e) => setDueDate(e.target.value)}
+              onChange={setDueDate}
+              disabled={busy}
             />
           </div>
           <div className="space-y-1.5">
@@ -1316,11 +1318,12 @@ function CreateExpenseForm({
             <label htmlFor={`${formId}-date`} className="text-sm font-medium">
               Date incurred
             </label>
-            <Input
+            <DriveCoreDateField
               id={`${formId}-date`}
-              type="date"
+              label="Date incurred"
               value={incurredDate}
-              onChange={(e) => setIncurredDate(e.target.value)}
+              onChange={setIncurredDate}
+              disabled={busy}
             />
           </div>
         </div>

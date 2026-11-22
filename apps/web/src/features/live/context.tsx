@@ -219,7 +219,7 @@ export function buildBranchSwitchHref(
 
   // List/tabbed top-level routes stay in place and keep tab/flow/sort state
   if (
-    /^(dashboard|operations|vehicles|customers|rentals|quotations|maintenance|inventory|finance|procurement|users|setup|modules\/[^/]+)$/.test(
+    /^(dashboard|operations|vehicles|customers|rentals|quotations|maintenance|inventory|finance|procurement|reports|users|setup|modules\/[^/]+)$/.test(
       subPath,
     )
   ) {

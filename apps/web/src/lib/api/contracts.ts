@@ -578,6 +578,131 @@ export const vehicleSummarySchema = z.object({
   recent_work_orders: z.array(workOrderSchema).optional().default([]),
 });
 
+export const messageChannels = [
+  "dispatch",
+  "drivers",
+  "customers",
+  "support",
+] as const;
+export type MessageChannel = (typeof messageChannels)[number];
+
+export const liveMessageSchema = z.object({
+  id: numericId,
+  company_id: numericId,
+  branch_id: numericId.nullable().optional().default(null),
+  sender_user_id: numericId,
+  sender_name: z.string(),
+  channel: z.enum(messageChannels),
+  body: z.string(),
+  related_entity_type: z.string().nullable().optional().default(null),
+  related_entity_id: numericId.nullable().optional().default(null),
+  is_read: z.boolean().optional().default(false),
+  created_at: z.string(),
+});
+
+export const liveNotificationSchema = z.object({
+  id: numericId,
+  company_id: numericId,
+  branch_id: numericId.nullable().optional().default(null),
+  severity: z.enum(["info", "warning", "danger", "success"]).default("info"),
+  title: z.string(),
+  body: z.string(),
+  href: z.string().nullable().optional().default(null),
+  read_at: z.string().nullable().optional().default(null),
+  created_at: z.string(),
+});
+
+export const dashboardSummarySchema = z.object({
+  fleet: z.object({
+    total: nonNegInt,
+    available: nonNegInt,
+    rented: nonNegInt,
+    maintenance: nonNegInt,
+    damaged: nonNegInt,
+    utilization_pct: nonNegNumber,
+  }),
+  pipeline: z.object({
+    quotations: nonNegInt,
+    reservations: nonNegInt,
+    active_rentals: nonNegInt,
+    issued_invoices: nonNegInt,
+  }),
+  approvals: z.object({
+    pending_discount_quotes: nonNegInt,
+    pending_purchase_orders: nonNegInt,
+    low_stock_parts: nonNegInt,
+    overdue_invoices: nonNegInt,
+  }),
+  finance: z
+    .object({
+      revenue_minor: z.coerce.number().int(),
+      vat_minor: nonNegInt,
+      receipts_minor: z.coerce.number().int(),
+      expenses_minor: nonNegInt,
+      outstanding_ar_minor: nonNegInt,
+      net_position_minor: z.coerce.number().int(),
+    })
+    .nullable()
+    .optional()
+    .default(null),
+  driver_summary: z
+    .object({
+      active_rentals: nonNegInt,
+      upcoming_rentals: nonNegInt,
+    })
+    .nullable()
+    .optional()
+    .default(null),
+});
+
+export const financialReportSchema = z.object({
+  summary: z.object({
+    invoiced_minor: nonNegInt,
+    vat_minor: nonNegInt,
+    receipts_minor: nonNegInt,
+    refunds_minor: nonNegInt,
+    expenses_minor: nonNegInt,
+    outstanding_ar_minor: nonNegInt,
+    net_position_minor: z.coerce.number().int(),
+  }),
+  rows: z.array(
+    z.object({
+      id: z.string(),
+      date: z.string(),
+      type: z.enum(["invoice", "expense"]),
+      reference: z.string(),
+      counterparty: z.string(),
+      amount_minor: z.coerce.number().int(),
+      vat_minor: nonNegInt.optional().default(0),
+      status: z.string(),
+    }),
+  ),
+});
+
+export const fleetReportRowSchema = z.object({
+  vehicle_id: numericId,
+  registration: z.string(),
+  make_model: z.string(),
+  status: z.string(),
+  rental_count: nonNegInt,
+  work_order_count: nonNegInt,
+  downtime_hours: nonNegNumber,
+  revenue_minor: z.coerce.number().int().nullable().optional().default(null),
+  maintenance_cost_minor: z.coerce.number().int().nullable().optional().default(null),
+  net_roi_minor: z.coerce.number().int().nullable().optional().default(null),
+});
+
+export const auditEventSchema = z.object({
+  id: numericId,
+  company_id: numericId,
+  actor_name: z.string().nullable().optional().default(null),
+  action: z.string(),
+  entity_type: z.string().nullable().optional().default(null),
+  entity_id: numericId.nullable().optional().default(null),
+  summary: z.string(),
+  created_at: z.string(),
+});
+
 export const documentSchema = z.object({
   id: numericId,
   company_id: numericId,
@@ -632,6 +757,12 @@ export type SupplierRecord = z.infer<typeof supplierSchema>;
 export type PurchaseOrderLine = z.infer<typeof purchaseOrderLineSchema>;
 export type PurchaseOrder = z.infer<typeof purchaseOrderSchema>;
 export type VehicleSummary = z.infer<typeof vehicleSummarySchema>;
+export type LiveMessage = z.infer<typeof liveMessageSchema>;
+export type LiveNotification = z.infer<typeof liveNotificationSchema>;
+export type DashboardSummary = z.infer<typeof dashboardSummarySchema>;
+export type FinancialReport = z.infer<typeof financialReportSchema>;
+export type FleetReportRow = z.infer<typeof fleetReportRowSchema>;
+export type AuditEventRecord = z.infer<typeof auditEventSchema>;
 export type DocumentRecord = z.infer<typeof documentSchema>;
 export type ManagedUser = z.infer<typeof managedUserSchema>;
 export type RoleDefinition = z.infer<typeof roleDefinitionSchema>;
@@ -661,6 +792,17 @@ export const canAccessMaintenance = (user: User) =>
 export const canAccessInventory = (user: User) => can(user, "parts.view");
 export const canAccessProcurement = (user: User) =>
   can(user, "purchase_orders.view") || can(user, "suppliers.view");
+export const canAccessReports = (user: User) =>
+  !isDriverRole(user) &&
+  (can(user, "reports.view") ||
+    can(user, "invoices.view") ||
+    can(user, "vehicles.view") ||
+    can(user, "audit.view"));
+export const canViewAudit = (user: User) => can(user, "audit.view");
+export const canAccessMessages = (user: User) =>
+  can(user, "messages.view") || isDriverRole(user);
+export const canSendMessages = (user: User) =>
+  can(user, "messages.send") || isDriverRole(user);
 export const canAccessUserAdmin = (user: User, companyId: string) =>
   user.is_platform_admin ||
   (can(user, "users.view") &&

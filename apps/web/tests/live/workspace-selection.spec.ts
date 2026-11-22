@@ -236,14 +236,9 @@ test("full live navigation distinguishes planned modules from restricted working
     page.getByRole("heading", { name: "Dashboard", exact: true }),
   ).toBeVisible();
   await capture(page, "live-navigation");
-  await nav
-    .getByRole("link", { name: "Reports · Planned", exact: true })
-    .click();
+  await nav.getByRole("link", { name: "Reports", exact: true }).click();
   await expect(
     page.getByRole("heading", { name: "Reports", exact: true }),
-  ).toBeVisible();
-  await expect(
-    page.getByRole("heading", { name: "Live data unavailable", exact: true }),
   ).toBeVisible();
   await page.route("**/api/backend/api/v1/auth/me", async (route) => {
     const response = await route.fetch();

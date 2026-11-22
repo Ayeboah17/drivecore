@@ -39,11 +39,11 @@ function failure(status: number, message: string) {
 }
 export function allowedPath(method: string, path: string) {
   if (method === "GET")
-    return /^(sanctum\/csrf-cookie|api\/v1\/(health|auth\/me|companies|companies\/[1-9]\d*\/settings|branches|customers|customers\/[1-9]\d*|vehicles|vehicles\/[1-9]\d*|vehicles\/[1-9]\d*\/summary|quotations|quotations\/[1-9]\d*|reservations|reservations\/[1-9]\d*|rentals|rentals\/[1-9]\d*|invoices|invoices\/ageing|invoices\/[1-9]\d*|payments|refunds|expenses|gl\/accounts|gl\/journal-entries|work-orders|work-orders\/[1-9]\d*|parts|stock-movements|suppliers|purchase-orders|purchase-orders\/[1-9]\d*|(quotations|reservations|rentals|invoices)\/[1-9]\d*\/pdf|documents|documents\/[1-9]\d*|users|roles))$/.test(
+    return /^(sanctum\/csrf-cookie|api\/v1\/(health|auth\/me|companies|companies\/[1-9]\d*\/settings|branches|customers|customers\/[1-9]\d*|vehicles|vehicles\/[1-9]\d*|vehicles\/[1-9]\d*\/summary|quotations|quotations\/[1-9]\d*|reservations|reservations\/[1-9]\d*|rentals|rentals\/[1-9]\d*|invoices|invoices\/ageing|invoices\/[1-9]\d*|payments|refunds|expenses|gl\/accounts|gl\/journal-entries|work-orders|work-orders\/[1-9]\d*|parts|stock-movements|suppliers|purchase-orders|purchase-orders\/[1-9]\d*|dashboard\/summary|messages|notifications|reports\/(financial|fleet)|audit-events|(quotations|reservations|rentals|invoices)\/[1-9]\d*\/pdf|documents|documents\/[1-9]\d*|users|roles))$/.test(
       path,
     );
   if (method === "POST")
-    return /^api\/v1\/(auth\/(login|logout)|companies|branches|customers|vehicles|quotations|quotations\/[1-9]\d*\/(approve-discount|reject-discount|cancel|convert)|reservations|reservations\/[1-9]\d*\/cancel|rentals|rentals\/[1-9]\d*\/(handover|return|extend|assign-driver)|invoices|invoices\/[1-9]\d*\/(issue|void|payments|refunds)|expenses|work-orders|work-orders\/[1-9]\d*\/(start|consume-parts|complete|cancel)|parts|parts\/[1-9]\d*\/adjust|suppliers|purchase-orders|purchase-orders\/[1-9]\d*\/(submit|approve|receive|cancel)|documents|users)$/.test(
+    return /^api\/v1\/(auth\/(login|logout)|companies|branches|customers|vehicles|quotations|quotations\/[1-9]\d*\/(approve-discount|reject-discount|cancel|convert)|reservations|reservations\/[1-9]\d*\/cancel|rentals|rentals\/[1-9]\d*\/(handover|return|extend|assign-driver)|invoices|invoices\/[1-9]\d*\/(issue|void|payments|refunds)|expenses|work-orders|work-orders\/[1-9]\d*\/(start|consume-parts|complete|cancel)|parts|parts\/[1-9]\d*\/adjust|suppliers|purchase-orders|purchase-orders\/[1-9]\d*\/(submit|approve|receive|cancel)|messages|messages\/[1-9]\d*\/read|notifications\/([1-9]\d*\/read|read-all)|documents|users)$/.test(
       path,
     );
   return (
@@ -68,7 +68,7 @@ export function allowedQuery(
   if (keys.length === 0) {
     return (
       method !== "GET" ||
-      !/^api\/v1\/(customers|vehicles|quotations|reservations|rentals|invoices|invoices\/ageing|payments|refunds|expenses|gl\/accounts|gl\/journal-entries|work-orders|parts|stock-movements|suppliers|purchase-orders|documents|users|roles)$/.test(
+      !/^api\/v1\/(customers|vehicles|quotations|reservations|rentals|invoices|invoices\/ageing|payments|refunds|expenses|gl\/accounts|gl\/journal-entries|work-orders|parts|stock-movements|suppliers|purchase-orders|dashboard\/summary|messages|notifications|reports\/(financial|fleet)|audit-events|documents|users|roles)$/.test(
         path,
       )
     );
@@ -471,6 +471,53 @@ export function allowedQuery(
       "status",
       "created_at",
     ]);
+  }
+  const validDate = (v: string) => /^\d{4}-\d{2}-\d{2}$/.test(v);
+  if (
+    path === "api/v1/dashboard/summary" ||
+    path === "api/v1/reports/financial" ||
+    path === "api/v1/reports/fleet"
+  ) {
+    if (!checkCommon(["company_id", "branch_id", "from", "to"], true))
+      return false;
+    const from = params.get("from");
+    const to = params.get("to");
+    if (from !== null && !validDate(from)) return false;
+    if (to !== null && !validDate(to)) return false;
+    return true;
+  }
+  if (path === "api/v1/messages") {
+    if (!checkCommon(["company_id", "branch_id", "channel", "page"], true))
+      return false;
+    const channel = params.get("channel");
+    if (
+      channel !== null &&
+      !["dispatch", "drivers", "customers", "support"].includes(channel)
+    )
+      return false;
+    return true;
+  }
+  if (path === "api/v1/notifications") {
+    if (!checkCommon(["company_id", "branch_id", "unread_only", "page"], true))
+      return false;
+    const unread = params.get("unread_only");
+    if (unread !== null && !["0", "1", "true", "false"].includes(unread))
+      return false;
+    return true;
+  }
+  if (path === "api/v1/audit-events") {
+    if (
+      !checkCommon(
+        ["company_id", "action", "entity_type", "q", "page"],
+        true,
+      )
+    )
+      return false;
+    const act = params.get("action");
+    const et = params.get("entity_type");
+    if (act !== null && !/^[a-z0-9._-]{1,64}$/i.test(act)) return false;
+    if (et !== null && !/^[a-z0-9_-]{1,32}$/i.test(et)) return false;
+    return true;
   }
   if (path === "api/v1/reservations") {
     if (

@@ -296,6 +296,15 @@ export function DriveCoreDateRangePicker({
             >
               Last 30 days
             </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="rounded-xl text-xs"
+              onClick={() => applyPreset(89)}
+            >
+              Last 90 days
+            </Button>
           </div>
 
           <div className="grid grid-cols-2 gap-2 rounded-xl border bg-muted/40 p-2.5 text-xs">
@@ -550,6 +559,147 @@ export function DriveCoreDateTimeField({
                 Apply date & time
               </Button>
             </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}
+
+/** Custom modal single-date selector replacing HTML5 <input type="date">. */
+export function DriveCoreDateField({
+  id,
+  label,
+  value,
+  onChange,
+  optional = false,
+  disabled = false,
+  placeholder,
+  ariaInvalid,
+  ariaDescribedBy,
+}: {
+  id?: string;
+  label: string;
+  value: string;
+  onChange: (next: string) => void;
+  optional?: boolean;
+  disabled?: boolean;
+  placeholder?: string;
+  ariaInvalid?: boolean;
+  ariaDescribedBy?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [cursor, setCursor] = useState(() => parseIsoDay(value) ?? new Date());
+
+  function openPicker() {
+    if (disabled) return;
+    setCursor(parseIsoDay(value) ?? new Date());
+    setOpen(true);
+  }
+
+  function handleSelect(day: string) {
+    onChange(day);
+    setOpen(false);
+  }
+
+  const formatted = useMemo(() => {
+    const parsed = parseIsoDay(value);
+    if (!parsed) return placeholder ?? "Select date";
+    return parsed.toLocaleDateString("en-US", {
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+    });
+  }, [value, placeholder]);
+
+  return (
+    <>
+      <div className="flex items-center gap-1.5">
+        <Button
+          id={id}
+          type="button"
+          variant="outline"
+          disabled={disabled}
+          aria-invalid={ariaInvalid}
+          aria-describedby={ariaDescribedBy}
+          onClick={openPicker}
+          className={cn(
+            "h-control min-w-0 flex-1 justify-start gap-2 rounded-xl bg-surface px-3 font-mono text-xs font-medium",
+            !value && "text-muted-foreground",
+            ariaInvalid && "border-destructive",
+          )}
+        >
+          <CalendarIcon
+            className="size-3.5 shrink-0 text-link"
+            aria-hidden="true"
+          />
+          <span className="truncate">{formatted}</span>
+        </Button>
+        {optional && value && !disabled ? (
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            aria-label={`Clear ${label}`}
+            onClick={() => onChange("")}
+            className="size-9 shrink-0 rounded-xl"
+          >
+            <X className="size-3.5" aria-hidden="true" />
+          </Button>
+        ) : null}
+      </div>
+
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent className="max-w-md rounded-2xl p-card">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <CalendarIcon className="size-4 text-link" aria-hidden="true" />
+              {label}
+            </DialogTitle>
+            <DialogDescription>
+              Select a date from the calendar.
+            </DialogDescription>
+          </DialogHeader>
+
+          <CalendarGrid
+            cursor={cursor}
+            onCursor={setCursor}
+            selectedStart={value}
+            onSelectDay={handleSelect}
+          />
+
+          <div className="flex flex-wrap items-center justify-between gap-2 border-t pt-3">
+            <div className="flex gap-1.5">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => handleSelect(isoDay(new Date()))}
+              >
+                Today
+              </Button>
+              {optional ? (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => {
+                    onChange("");
+                    setOpen(false);
+                  }}
+                >
+                  Clear
+                </Button>
+              ) : null}
+            </div>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => setOpen(false)}
+            >
+              Close
+            </Button>
           </div>
         </DialogContent>
       </Dialog>

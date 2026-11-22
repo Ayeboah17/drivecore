@@ -25,6 +25,7 @@ import {
   canAccessOperations,
   canAccessProcurement,
   canAccessRentals,
+  canAccessReports,
   canAccessUserAdmin,
 } from "@/lib/api/contracts";
 import { useSession } from "@/features/auth/session-provider";
@@ -86,40 +87,16 @@ export function LiveNavigation({
                       ? !canAccessInventory(user!)
                       : item.key === "procurement"
                         ? !canAccessProcurement(user!)
-                        : permission !== null && !can(user!, permission);
-        const planned =
-          item.key !== "dashboard" &&
-          item.key !== "operations" &&
-          item.key !== "fleet" &&
-          item.key !== "customers" &&
-          item.key !== "rentals" &&
-          item.key !== "maintenance" &&
-          item.key !== "inventory" &&
-          item.key !== "finance" &&
-          item.key !== "procurement" &&
-          item.key !== "administration";
+                        : item.key === "reports"
+                          ? !canAccessReports(user!)
+                          : permission !== null && !can(user!, permission);
+        const planned = false;
         const target =
-          item.key === "dashboard"
-            ? "dashboard"
-            : item.key === "operations"
-              ? "operations"
-              : item.key === "fleet"
-                ? "vehicles"
-                : item.key === "customers"
-                  ? "customers"
-                  : item.key === "rentals"
-                    ? "rentals"
-                    : item.key === "maintenance"
-                      ? "maintenance"
-                      : item.key === "inventory"
-                        ? "inventory"
-                        : item.key === "finance"
-                          ? "finance"
-                          : item.key === "procurement"
-                            ? "procurement"
-                            : item.key === "administration"
-                              ? "users"
-                              : `modules/${item.key}`;
+          item.key === "fleet"
+            ? "vehicles"
+            : item.key === "administration"
+              ? "users"
+              : item.key;
         const basePath = `/companies/${scope.companyId}/${target}`;
         const active =
           !restricted &&

@@ -32,8 +32,8 @@ test("proxy allowlist excludes tokens, deletes, arbitrary URLs and unsupported d
     "api/v1/auth/tokens",
     "https://elsewhere.test",
     "api/v1/../users",
-    "api/v1/audit-events",
-    "api/v1/messages",
+    "api/v1/saved-filters",
+    "api/v1/invitations",
   ])
     expect(allowedPath("GET", path)).toBe(false);
   expect(allowedPath("DELETE", "api/v1/customers/1")).toBe(false);
@@ -56,8 +56,8 @@ test("proxy allowlist excludes tokens, deletes, arbitrary URLs and unsupported d
   expect(allowedPath("PATCH", "api/v1/users/1")).toBe(true);
   expect(allowedPath("PATCH", "api/v1/vehicles/1")).toBe(true);
   const rejected = await proxy(
-    make("api/v1/audit-events"),
-    "api/v1/audit-events",
+    make("api/v1/saved-filters"),
+    "api/v1/saved-filters",
     config,
     async () => {
       throw new Error("Must not call upstream");
@@ -610,6 +610,40 @@ test("M9 maintenance, inventory, procurement, and vehicle 360 routes enforce sco
     "api/v1/suppliers?company_id=1&is_active=1&sort=name&dir=asc",
     "api/v1/purchase-orders?company_id=1&status=approved&sort=total_minor&dir=desc",
     "api/v1/vehicles/10/summary",
+  ]) {
+    const [path] = valid.split("?");
+    const res = await proxy(make(valid), path, config, async () =>
+      Response.json({ data: {} }),
+    );
+    expect(res.status).toBe(200);
+  }
+});
+
+test("M10 dashboard summary, messages, notifications, reports and audit routes enforce scoped queries", async () => {
+  for (const invalid of [
+    "api/v1/dashboard/summary",
+    "api/v1/dashboard/summary?company_id=1&from=bad-date",
+    "api/v1/messages",
+    "api/v1/messages?company_id=1&channel=secret",
+    "api/v1/notifications",
+    "api/v1/reports/financial",
+    "api/v1/reports/fleet?company_id=1&to=not-a-date",
+    "api/v1/audit-events",
+  ]) {
+    const [path] = invalid.split("?");
+    const res = await proxy(make(invalid), path, config, async () => {
+      throw new Error("Must not reach upstream");
+    });
+    expect(res.status).toBe(400);
+  }
+
+  for (const valid of [
+    "api/v1/dashboard/summary?company_id=1&from=2026-10-01&to=2026-11-22",
+    "api/v1/messages?company_id=1&channel=drivers",
+    "api/v1/notifications?company_id=1&unread_only=1",
+    "api/v1/reports/financial?company_id=1&branch_id=2",
+    "api/v1/reports/fleet?company_id=1",
+    "api/v1/audit-events?company_id=1&action=rental.handed_over",
   ]) {
     const [path] = valid.split("?");
     const res = await proxy(make(valid), path, config, async () =>

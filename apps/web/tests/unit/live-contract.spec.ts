@@ -28,6 +28,7 @@ import {
   parseSortParams,
   sortRows,
 } from "../../src/lib/table-sort";
+import { buildCsv, escapeCsvCell } from "../../src/lib/csv";
 const user: User = {
   id: 1,
   name: "Synthetic",
@@ -369,4 +370,15 @@ test("buildBranchSwitchHref preserves tab/flow/sort on list pages, resets page/f
   expect(
     buildBranchSwitchHref("1", "/companies/1/departures/1", "branch=2", "5"),
   ).toBe("/companies/1/dashboard?branch=5");
+});
+
+test("CSV encoder follows RFC-4180 and neutralizes spreadsheet formula injection", () => {
+  expect(escapeCsvCell("=CMD|' /C calc'!A0")).toBe("'=CMD|' /C calc'!A0");
+  expect(escapeCsvCell("+SUM(A1:A2)")).toBe("'+SUM(A1:A2)");
+  expect(escapeCsvCell("-100")).toBe("'-100");
+  expect(escapeCsvCell("@user")).toBe("'@user");
+  expect(escapeCsvCell('Apex, "Corp"')).toBe('"Apex, ""Corp"""');
+  expect(buildCsv(["Name", "Note"], [["=Evil", "Normal"]])).toBe(
+    "Name,Note\r\n'=Evil,Normal",
+  );
 });

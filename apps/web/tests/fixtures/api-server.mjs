@@ -21,6 +21,9 @@ let stockMovements = new Map();
 let suppliers = new Map();
 let purchaseOrders = new Map();
 let workOrders = new Map();
+let messages = new Map();
+let notifications = new Map();
+let auditEvents = new Map();
 let documents = new Map();
 let documentBlobs = new Map();
 let control = {};
@@ -84,6 +87,10 @@ const ROLE_DEFS = [
       "purchase_orders.view",
       "purchase_orders.manage",
       "purchase_orders.approve",
+      "messages.view",
+      "messages.send",
+      "reports.view",
+      "audit.view",
     ],
   },
   { name: "driver", permissions: ["companies.view", "branches.view"] },
@@ -110,6 +117,9 @@ const ROLE_DEFS = [
       "suppliers.view",
       "purchase_orders.view",
       "purchase_orders.approve",
+      "messages.view",
+      "messages.send",
+      "reports.view",
     ],
   },
   {
@@ -135,6 +145,9 @@ const ROLE_DEFS = [
       "suppliers.manage",
       "purchase_orders.view",
       "purchase_orders.manage",
+      "messages.view",
+      "messages.send",
+      "reports.view",
     ],
   },
   {
@@ -154,6 +167,8 @@ const ROLE_DEFS = [
       "parts.view",
       "suppliers.view",
       "purchase_orders.view",
+      "messages.view",
+      "reports.view",
     ],
   },
 ];
@@ -194,6 +209,39 @@ function reset() {
   suppliers = new Map();
   purchaseOrders = new Map();
   workOrders = new Map();
+  messages = new Map();
+  notifications = new Map([
+    [
+      900,
+      {
+        id: 900,
+        company_id: 1,
+        branch_id: 2,
+        required_permission: "rentals.view",
+        severity: "info",
+        title: "Rental #600 active handover logged",
+        body: "Vehicle SYN-11 is currently on active rental.",
+        href: "/companies/1/rentals/600?branch=2",
+        read_by: [],
+        created_at: stamp,
+      },
+    ],
+  ]);
+  auditEvents = new Map([
+    [
+      950,
+      {
+        id: 950,
+        company_id: 1,
+        actor_name: "Synthetic operator",
+        action: "rental.handed_over",
+        entity_type: "rental",
+        entity_id: 600,
+        summary: "Handed over Rental #600 (SYN-11) at 50 km.",
+        created_at: stamp,
+      },
+    ],
+  ]);
   branches = new Map([
     [2, { id: 2, company_id: 1, name: "Synthetic branch" }],
     [4, { id: 4, company_id: 3, name: "Other branch" }],
@@ -820,6 +868,9 @@ createServer(async (req, res) => {
               "suppliers.view",
               "purchase_orders.view",
               "purchase_orders.approve",
+              "messages.view",
+              "messages.send",
+              "reports.view",
             ]
         : role === "viewer"
           ? [
@@ -836,6 +887,8 @@ createServer(async (req, res) => {
               "parts.view",
               "suppliers.view",
               "purchase_orders.view",
+              "messages.view",
+              "reports.view",
             ]
           : [
               "customers.view",
@@ -858,6 +911,9 @@ createServer(async (req, res) => {
               "suppliers.manage",
               "purchase_orders.view",
               "purchase_orders.manage",
+              "messages.view",
+              "messages.send",
+              "reports.view",
               ...(["admin", "companyadmin", "restrictedadmin"].includes(role)
                 ? [
                     "branches.view",
@@ -874,6 +930,7 @@ createServer(async (req, res) => {
                     "expenses.manage",
                     "gl.view",
                     "purchase_orders.approve",
+                    "audit.view",
                   ]
                 : []),
             ];
@@ -1657,23 +1714,476 @@ createServer(async (req, res) => {
     return;
   }
 
+  // --- M10 Dashboard Summary, Messages, Notifications, Reports & Audit ---
+  const isDriverOnly =
+    !user.is_platform_admin &&
+    user.roles.includes("driver") &&
+    !user.permissions.includes("rentals.view");
+
+  if (url.pathname === "/api/v1/dashboard/summary" && req.method === "GET") {
+    const companyId = Number(url.searchParams.get("company_id"));
+    const branchId = url.searchParams.get("branch_id")
+      ? Number(url.searchParams.get("branch_id"))
+      : null;
+    const vehs = [...vehicles.values()].filter(
+      (v) =>
+        v.company_id === companyId &&
+        (branchId === null || v.branch_id === branchId),
+    );
+    const total = vehs.length;
+    const available = vehs.filter((v) => v.status === "available").length;
+    const rented = vehs.filter((v) => v.status === "rented").length;
+    const maintenance = vehs.filter((v) => v.status === "maintenance").length;
+    const damaged = vehs.filter((v) => v.status === "damaged").length;
+    const utilization_pct = total > 0 ? Math.round((rented / total) * 100) : 0;
+
+    const scopedQuotes = [...quotations.values()].filter(
+      (q) =>
+        q.company_id === companyId &&
+        (branchId === null || q.branch_id === branchId),
+    );
+    const scopedRes = [...reservations.values()].filter(
+      (r) =>
+        r.company_id === companyId &&
+        (branchId === null || r.branch_id === branchId),
+    );
+    const scopedRentals = [...rentals.values()].filter(
+      (r) =>
+        r.company_id === companyId &&
+        (branchId === null || r.branch_id === branchId),
+    );
+    const scopedInvoices = [...invoices.values()]
+      .map(decorateInvoice)
+      .filter(
+        (i) =>
+          i.company_id === companyId &&
+          (branchId === null || i.branch_id === branchId),
+      );
+    const scopedExpenses = [...expenses.values()].filter(
+      (e) =>
+        e.company_id === companyId &&
+        (branchId === null || e.branch_id === branchId),
+    );
+    const scopedPos = [...purchaseOrders.values()].filter(
+      (po) =>
+        po.company_id === companyId &&
+        (branchId === null || po.branch_id === branchId),
+    );
+    const scopedParts = [...parts.values()]
+      .map(decoratePart)
+      .filter(
+        (p) =>
+          p.company_id === companyId &&
+          (branchId === null || p.branch_id === branchId),
+      );
+
+    const canSeeFinance =
+      user.is_platform_admin || user.permissions.includes("invoices.view");
+    const issued = scopedInvoices.filter((i) => i.status === "issued");
+    const finance = canSeeFinance
+      ? (() => {
+          const revenue_minor = issued.reduce(
+            (s, i) => s + Math.max(0, i.total_minor - i.refunded_minor),
+            0,
+          );
+          const vat_minor = issued.reduce((s, i) => s + i.vat_minor, 0);
+          const receipts_minor = issued.reduce((s, i) => s + i.net_paid_minor, 0);
+          const expenses_minor = scopedExpenses.reduce(
+            (s, e) => s + e.amount_minor,
+            0,
+          );
+          const outstanding_ar_minor = issued.reduce(
+            (s, i) => s + i.outstanding_minor,
+            0,
+          );
+          return {
+            revenue_minor,
+            vat_minor,
+            receipts_minor,
+            expenses_minor,
+            outstanding_ar_minor,
+            net_position_minor: revenue_minor - expenses_minor,
+          };
+        })()
+      : null;
+
+    const driver_summary = isDriverOnly
+      ? {
+          active_rentals: scopedRentals.filter(
+            (r) => r.driver_user_id === user.id && r.status === "active",
+          ).length,
+          upcoming_rentals: scopedRentals.filter(
+            (r) => r.driver_user_id === user.id && r.status === "draft",
+          ).length,
+        }
+      : null;
+
+    json(200, {
+      data: {
+        fleet: { total, available, rented, maintenance, damaged, utilization_pct },
+        pipeline: {
+          quotations: scopedQuotes.length,
+          reservations: scopedRes.length,
+          active_rentals: scopedRentals.filter((r) => r.status === "active").length,
+          issued_invoices: issued.length,
+        },
+        approvals: {
+          pending_discount_quotes: scopedQuotes.filter(
+            (q) => q.status === "pending_approval",
+          ).length,
+          pending_purchase_orders: scopedPos.filter(
+            (po) => po.status === "submitted",
+          ).length,
+          low_stock_parts: scopedParts.filter((p) => p.is_low_stock).length,
+          overdue_invoices: issued.filter((i) => i.is_overdue).length,
+        },
+        finance,
+        driver_summary,
+      },
+    });
+    return;
+  }
+
+  const msgMatch = url.pathname.match(/^\/api\/v1\/messages(?:\/(\d+)\/read)?$/);
+  if (msgMatch) {
+    const readId = msgMatch[1] ? Number(msgMatch[1]) : null;
+    if (req.method === "GET" && !readId) {
+      if (
+        !user.is_platform_admin &&
+        !user.permissions.includes("messages.view") &&
+        !isDriverOnly
+      ) {
+        fail(403);
+        return;
+      }
+      const companyId = Number(url.searchParams.get("company_id"));
+      const branchId = url.searchParams.get("branch_id")
+        ? Number(url.searchParams.get("branch_id"))
+        : null;
+      const channel = url.searchParams.get("channel");
+      if (
+        isDriverOnly &&
+        channel &&
+        !["drivers", "dispatch"].includes(channel)
+      ) {
+        fail(403);
+        return;
+      }
+      const scoped = [...messages.values()]
+        .filter((m) => {
+          if (m.company_id !== companyId) return false;
+          if (branchId !== null && m.branch_id !== null && m.branch_id !== branchId)
+            return false;
+          if (isDriverOnly && !["drivers", "dispatch"].includes(m.channel))
+            return false;
+          if (channel && m.channel !== channel) return false;
+          return true;
+        })
+        .sort((a, b) => b.id - a.id)
+        .map((m) => ({
+          id: m.id,
+          company_id: m.company_id,
+          branch_id: m.branch_id,
+          sender_user_id: m.sender_user_id,
+          sender_name: m.sender_name,
+          channel: m.channel,
+          body: m.body,
+          related_entity_type: m.related_entity_type,
+          related_entity_id: m.related_entity_id,
+          is_read: m.read_by.includes(user.id),
+          created_at: m.created_at,
+        }));
+      const unread_count = scoped.filter((m) => !m.is_read).length;
+      json(200, {
+        data: scoped.slice(0, 25),
+        meta: {
+          current_page: 1,
+          last_page: 1,
+          per_page: 25,
+          total: scoped.length,
+          unread_count,
+        },
+      });
+      return;
+    }
+    if (req.method === "POST" && !readId) {
+      if (
+        !user.is_platform_admin &&
+        !user.permissions.includes("messages.send") &&
+        !isDriverOnly
+      ) {
+        fail(403);
+        return;
+      }
+      const channel = String(input.channel ?? "dispatch");
+      if (isDriverOnly && !["drivers", "dispatch"].includes(channel)) {
+        fail(403);
+        return;
+      }
+      const bodyStr = String(input.body ?? "").trim();
+      if (!bodyStr || bodyStr.length > 1000) {
+        fail(422, { body: ["Enter a message between 1 and 1000 characters."] });
+        return;
+      }
+      const id = nextId++;
+      const created = {
+        id,
+        company_id: Number(input.company_id),
+        branch_id: input.branch_id ? Number(input.branch_id) : null,
+        sender_user_id: user.id,
+        sender_name: user.name,
+        channel,
+        body: bodyStr,
+        related_entity_type: input.related_entity_type ?? null,
+        related_entity_id: input.related_entity_id
+          ? Number(input.related_entity_id)
+          : null,
+        read_by: [user.id],
+        created_at: new Date().toISOString(),
+      };
+      messages.set(id, created);
+      completedWrites++;
+      json(201, { data: { ...created, is_read: true } });
+      return;
+    }
+    if (req.method === "POST" && readId) {
+      const m = messages.get(readId);
+      if (!m) {
+        fail(404);
+        return;
+      }
+      if (!m.read_by.includes(user.id)) m.read_by.push(user.id);
+      json(200, { data: { ok: true } });
+      return;
+    }
+  }
+
+  const notifMatch = url.pathname.match(
+    /^\/api\/v1\/notifications(?:\/(read-all|(\d+)\/read))?$/,
+  );
+  if (notifMatch) {
+    if (req.method === "GET" && !notifMatch[1]) {
+      const companyId = Number(url.searchParams.get("company_id"));
+      const branchId = url.searchParams.get("branch_id")
+        ? Number(url.searchParams.get("branch_id"))
+        : null;
+      const scoped = [...notifications.values()]
+        .filter((n) => {
+          if (n.company_id !== companyId) return false;
+          if (branchId !== null && n.branch_id !== null && n.branch_id !== branchId)
+            return false;
+          if (
+            n.required_permission &&
+            !user.is_platform_admin &&
+            !user.permissions.includes(n.required_permission)
+          )
+            return false;
+          return true;
+        })
+        .sort((a, b) => b.id - a.id)
+        .map((n) => ({
+          id: n.id,
+          company_id: n.company_id,
+          branch_id: n.branch_id,
+          severity: n.severity,
+          title: n.title,
+          body: n.body,
+          href: n.href,
+          read_at: n.read_by.includes(user.id) ? n.created_at : null,
+          created_at: n.created_at,
+        }));
+      const unread_count = scoped.filter((n) => !n.read_at).length;
+      json(200, {
+        data: scoped.slice(0, 25),
+        meta: {
+          current_page: 1,
+          last_page: 1,
+          per_page: 25,
+          total: scoped.length,
+          unread_count,
+        },
+      });
+      return;
+    }
+    if (req.method === "POST" && notifMatch[1] === "read-all") {
+      const companyId = Number(input.company_id);
+      for (const n of notifications.values()) {
+        if (n.company_id === companyId && !n.read_by.includes(user.id)) {
+          n.read_by.push(user.id);
+        }
+      }
+      json(200, { data: { ok: true } });
+      return;
+    }
+    if (req.method === "POST" && notifMatch[2]) {
+      const n = notifications.get(Number(notifMatch[2]));
+      if (!n) {
+        fail(404);
+        return;
+      }
+      if (!n.read_by.includes(user.id)) n.read_by.push(user.id);
+      json(200, { data: { ok: true } });
+      return;
+    }
+  }
+
+  if (url.pathname === "/api/v1/reports/financial" && req.method === "GET") {
+    if (!user.is_platform_admin && !user.permissions.includes("invoices.view")) {
+      fail(403);
+      return;
+    }
+    const companyId = Number(url.searchParams.get("company_id"));
+    const branchId = url.searchParams.get("branch_id")
+      ? Number(url.searchParams.get("branch_id"))
+      : null;
+    const invs = [...invoices.values()]
+      .map(decorateInvoice)
+      .filter(
+        (i) =>
+          i.company_id === companyId &&
+          (branchId === null || i.branch_id === branchId) &&
+          i.status === "issued",
+      );
+    const exps = [...expenses.values()].filter(
+      (e) =>
+        e.company_id === companyId &&
+        (branchId === null || e.branch_id === branchId),
+    );
+    const invoiced_minor = invs.reduce((s, i) => s + i.total_minor, 0);
+    const vat_minor = invs.reduce((s, i) => s + i.vat_minor, 0);
+    const receipts_minor = invs.reduce((s, i) => s + i.paid_minor, 0);
+    const refunds_minor = invs.reduce((s, i) => s + i.refunded_minor, 0);
+    const expenses_minor = exps.reduce((s, e) => s + e.amount_minor, 0);
+    const outstanding_ar_minor = invs.reduce((s, i) => s + i.outstanding_minor, 0);
+    const rows = [
+      ...invs.map((i) => ({
+        id: `inv-${i.id}`,
+        date: i.issued_at ?? i.created_at,
+        type: "invoice",
+        reference: i.invoice_number,
+        counterparty: i.customer_name ?? i.custom_customer_name ?? "Customer",
+        amount_minor: i.total_minor,
+        vat_minor: i.vat_minor,
+        status: i.outstanding_minor === 0 ? "paid" : "issued",
+      })),
+      ...exps.map((e) => ({
+        id: `exp-${e.id}`,
+        date: e.incurred_at,
+        type: "expense",
+        reference: `EXP-${e.id}`,
+        counterparty: e.description,
+        amount_minor: -e.amount_minor,
+        vat_minor: 0,
+        status: e.category,
+      })),
+    ];
+    json(200, {
+      data: {
+        summary: {
+          invoiced_minor,
+          vat_minor,
+          receipts_minor,
+          refunds_minor,
+          expenses_minor,
+          outstanding_ar_minor,
+          net_position_minor: invoiced_minor - refunds_minor - expenses_minor,
+        },
+        rows,
+      },
+    });
+    return;
+  }
+
+  if (url.pathname === "/api/v1/reports/fleet" && req.method === "GET") {
+    if (!user.is_platform_admin && !user.permissions.includes("vehicles.view")) {
+      fail(403);
+      return;
+    }
+    const companyId = Number(url.searchParams.get("company_id"));
+    const branchId = url.searchParams.get("branch_id")
+      ? Number(url.searchParams.get("branch_id"))
+      : null;
+    const canSeeFinance =
+      user.is_platform_admin || user.permissions.includes("invoices.view");
+    const rows = [...vehicles.values()]
+      .filter(
+        (v) =>
+          v.company_id === companyId &&
+          (branchId === null || v.branch_id === branchId),
+      )
+      .map((v) => {
+        const vehRentals = [...rentals.values()].filter(
+          (r) => r.vehicle_id === v.id,
+        );
+        const vehWos = [...workOrders.values()].filter(
+          (w) => w.vehicle_id === v.id,
+        );
+        const maintCost = vehWos
+          .filter((w) => w.status === "completed")
+          .reduce((s, w) => s + w.labour_cost_minor + w.parts_cost_minor, 0);
+        const rentalIds = new Set(vehRentals.map((r) => r.id));
+        const rev = [...invoices.values()]
+          .filter((i) => i.status === "issued" && i.rental_id && rentalIds.has(i.rental_id))
+          .reduce((s, i) => s + i.total_minor, 0);
+        return {
+          vehicle_id: v.id,
+          registration: v.registration,
+          make_model: `${v.make} ${v.model}`,
+          status: v.status,
+          rental_count: vehRentals.length,
+          work_order_count: vehWos.length,
+          downtime_hours: vehWos.filter((w) => w.started_at).length * 2,
+          revenue_minor: canSeeFinance ? rev : null,
+          maintenance_cost_minor: canSeeFinance ? maintCost : null,
+          net_roi_minor: canSeeFinance ? rev - maintCost : null,
+        };
+      });
+    json(200, { data: rows });
+    return;
+  }
+
+  if (url.pathname === "/api/v1/audit-events" && req.method === "GET") {
+    if (!user.is_platform_admin && !user.permissions.includes("audit.view")) {
+      fail(403);
+      return;
+    }
+    const companyId = Number(url.searchParams.get("company_id"));
+    const q = (url.searchParams.get("q") ?? "").trim().toLowerCase();
+    const items = [...auditEvents.values()]
+      .filter((a) => {
+        if (a.company_id !== companyId) return false;
+        if (
+          q &&
+          ![a.actor_name ?? "", a.action, a.summary].some((s) =>
+            s.toLowerCase().includes(q),
+          )
+        )
+          return false;
+        return true;
+      })
+      .sort((a, b) => b.id - a.id);
+    paginateSlice(items);
+    return;
+  }
+
   // --- M9 Maintenance, Inventory, Procurement & Vehicle 360 ---
-  const partOnHand = (partId) =>
-    [...stockMovements.values()]
+  function partOnHand(partId) {
+    return [...stockMovements.values()]
       .filter((m) => m.part_id === partId)
       .reduce((sum, m) => sum + m.quantity, 0);
+  }
 
-  const decoratePart = (part) => {
+  function decoratePart(part) {
     const on_hand = partOnHand(part.id);
     return { ...part, on_hand, is_low_stock: on_hand <= part.min_stock };
-  };
+  }
 
-  const decorateMovement = (m) => {
+  function decorateMovement(m) {
     const p = parts.get(m.part_id);
     return { ...m, part_sku: p?.sku ?? null, part_name: p?.name ?? null };
-  };
+  }
 
-  const decorateWorkOrder = (wo) => {
+  function decorateWorkOrder(wo) {
     const v = vehicles.get(wo.vehicle_id);
     const movements = [...stockMovements.values()]
       .filter((m) => m.work_order_id === wo.id)
@@ -1685,9 +2195,9 @@ createServer(async (req, res) => {
       total_cost_minor: wo.labour_cost_minor + wo.parts_cost_minor,
       movements,
     };
-  };
+  }
 
-  const decoratePo = (po) => {
+  function decoratePo(po) {
     const sup = suppliers.get(po.supplier_id);
     return {
       ...po,
@@ -1697,7 +2207,7 @@ createServer(async (req, res) => {
         return { ...l, part_sku: p?.sku ?? null, part_name: p?.name ?? null };
       }),
     };
-  };
+  }
 
   const summaryMatch = url.pathname.match(/^\/api\/v1\/vehicles\/(\d+)\/summary$/);
   if (summaryMatch && req.method === "GET") {

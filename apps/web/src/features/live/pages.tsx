@@ -20,6 +20,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { ViewFadeIn } from "@/components/motion/primitives";
 import { useLiveContext } from "./context";
 import { useSession } from "@/features/auth/session-provider";
+import { LiveDashboardAnalytics } from "@/features/reports/dashboard-analytics";
 import {
   can,
   canAccessOperations,
@@ -232,6 +233,9 @@ export function UnavailablePage({ title }: { title?: string }) {
           ) : null}
         </div>
       </div>
+
+      {/* Live KPI Summary & Infographics Band (M10) */}
+      {isDashboard ? <LiveDashboardAnalytics /> : null}
 
       {/* Honest Live Workspace Summary Grid (Dashboard only, strictly derived from session & directory context) */}
       {isDashboard ? (

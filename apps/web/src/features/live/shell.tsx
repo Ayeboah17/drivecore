@@ -21,6 +21,10 @@ import { DriveCoreLogo } from "@/components/brand/drivecore-mark";
 import { DriveCoreMotionProvider } from "@/components/motion/primitives";
 import { ThemeToggle } from "@/components/theme/theme-toggle";
 import {
+  LiveChatDrawer,
+  LiveNotificationsBell,
+} from "@/features/communications/topbar-comms";
+import {
   Sheet,
   SheetContent,
   SheetDescription,
@@ -304,8 +308,10 @@ export function LiveShell({ children }: { children: React.ReactNode }) {
                 <Selectors />
               </div>
 
-              {/* Right Cluster: Theme Toggle + Charcoal Account Dropdown */}
+              {/* Right Cluster: Notifications + Chat + Theme Toggle + Charcoal Account Dropdown */}
               <div className="flex min-w-0 items-center gap-2">
+                <LiveNotificationsBell />
+                <LiveChatDrawer />
                 <ThemeToggle />
                 <LiveAccountMenu
                   pending={pending}

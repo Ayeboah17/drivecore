@@ -58,6 +58,7 @@ import {
 import { StatePanel } from "@/components/layout/state-panel";
 import { ViewFadeIn } from "@/components/motion/primitives";
 import { Button } from "@/components/ui/button";
+import { DriveCoreDateField } from "@/components/ui/drivecore-calendar";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
@@ -849,11 +850,12 @@ function DraftInvoiceEditor({
             <label htmlFor="draft-due" className="text-xs font-medium">
               Due date
             </label>
-            <Input
+            <DriveCoreDateField
               id="draft-due"
-              type="date"
+              label="Due date"
               value={dueDate}
-              onChange={(e) => setDueDate(e.target.value)}
+              onChange={setDueDate}
+              disabled={busy}
             />
           </div>
           <div className="space-y-1">

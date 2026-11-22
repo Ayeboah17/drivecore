@@ -51,8 +51,14 @@
 | M9 | `GET/PATCH` | `/api/v1/purchase-orders/{id}` | `purchase_orders.view` / `purchase_orders.manage` | PO detail with `lines[]`; `PATCH` edits `draft` only (`409` otherwise) |
 | M9 | `POST` | `/api/v1/purchase-orders/{id}/{submit\|approve\|receive\|cancel}` | `purchase_orders.manage` (`approve` requires `purchase_orders.approve`) | `receive` atomically increments stock once (`409` duplicate) & posts GL (`DR 1200 / CR 2000`) |
 | M9 | `GET` | `/api/v1/vehicles/{id}/summary` | `vehicles.view` | Live Vehicle 360 rollup (downtime, work orders; financial revenue/cost/ROI populated only when caller holds `invoices.view`) |
+| M10 | `GET` | `/api/v1/dashboard/summary` | Authenticated company member | `company_id` required; optional `branch_id`, `from`, `to`; returns role-scoped `fleet`, `pipeline`, `approvals`, and (`invoices.view` only) `finance` totals |
+| M10 | `GET/POST` | `/api/v1/messages` & `/api/v1/messages/{id}/read` | `messages.view` / `messages.send` (or `driver` on `drivers` & `dispatch`) | Branch-scoped channels (`dispatch\|drivers\|customers\|support`), unread counts, optional `related_entity_type`/`related_entity_id` |
+| M10 | `GET/POST` | `/api/v1/notifications`, `/{id}/read`, `/read-all` | Authenticated company member | Role- and scope-filtered operational/financial alerts with unread count and mark-read actions |
+| M10 | `GET` | `/api/v1/reports/financial` | `invoices.view` | Period financial summary + line breakdown (`company_id`, optional `branch_id`, `from`, `to`) |
+| M10 | `GET` | `/api/v1/reports/fleet` | `vehicles.view` | Fleet utilization, rentals, maintenance cost & downtime (`revenue_minor`/`net_roi_minor` populated only with `invoices.view`) |
+| M10 | `GET` | `/api/v1/audit-events` | `audit.view` (`company-admin` & platform admin only) | Paginated immutable audit log (`company_id`, optional `action`, `entity_type`, `q`, `page`) |
 
-### B. Spatie Role & Permission Matrix (M6–M9 Additions)
+### B. Spatie Role & Permission Matrix (M6–M10 Additions)
 
 | Permission | `company-admin` | `operations` | `finance` | `driver` | `viewer` |
 | :--- | :---: | :---: | :---: | :---: | :---: |
@@ -74,6 +80,9 @@
 | `suppliers.view` / `suppliers.manage` | Yes / Yes | Yes / Yes | Yes / — | — / — | Yes / — |
 | `purchase_orders.view` / `purchase_orders.manage` | Yes / Yes | Yes / Yes | Yes / — | — / — | Yes / — |
 | `purchase_orders.approve` | Yes | — | Yes | — | — |
+| `messages.view` / `messages.send` | Yes / Yes | Yes / Yes | Yes / Yes | `drivers` & `dispatch` | Yes / — |
+| `reports.view` | Yes | Yes (Fleet) | Yes | — | Yes |
+| `audit.view` | Yes | — | — | — | — |
 
 *(Platform admins with `is_platform_admin = true` bypass all permission gates.)*
 
@@ -743,8 +752,90 @@ Schema::create('stock_movements', function (Blueprint $table): void {
 3. Manual stock adjustment rejects negative resulting stock (`422`) and posts balanced GL.
 4. `GET /api/v1/vehicles/{id}/summary` returns operational downtime & work orders for `operations` with `null` financial fields, and full revenue/cost/Net ROI for `finance` & `company-admin`.
 
-## Milestone 10 — Live Messaging/Chat Center, Dashboard KPIs/Infographics, Reports & Audit (PR #13)
-*(Will be appended when Milestone 10 is implemented.)*
+## Milestone 10 — Live Messaging/Chat Center, Notifications, Dashboard KPIs/Infographics, Reports & Audit (PR #13)
+
+### 10.1 Spatie Roles & Permissions Additions
+Add permissions to `RolePermissionSeeder`:
+- `messages.view`, `messages.send`
+- `reports.view`
+- `audit.view`
+
+Role assignments:
+- `company-admin`: all 4 permissions above.
+- `operations`: `messages.view`, `messages.send`, `reports.view` (Fleet report only; `403` on financial report & audit).
+- `finance`: `messages.view`, `messages.send`, `reports.view` (`403` on `audit.view`).
+- `viewer`: `messages.view`, `reports.view` (`403` on `messages.send` & `audit.view`).
+- `driver`: scoped access to `messages` on `drivers` & `dispatch` channels only (`403` on `customers` & `support`, `403` on reports & audit).
+
+### 10.2 Database Migrations
+```php
+Schema::create('messages', function (Blueprint $table): void {
+    $table->id();
+    $table->foreignId('company_id')->constrained()->cascadeOnDelete();
+    $table->foreignId('branch_id')->nullable()->constrained()->nullOnDelete();
+    $table->foreignId('sender_user_id')->constrained('users')->cascadeOnDelete();
+    $table->string('channel', 24); // dispatch | drivers | customers | support
+    $table->text('body');
+    $table->string('related_entity_type', 32)->nullable();
+    $table->unsignedBigInteger('related_entity_id')->nullable();
+    $table->timestamps();
+    $table->index(['company_id', 'branch_id', 'channel', 'created_at']);
+});
+
+Schema::create('message_reads', function (Blueprint $table): void {
+    $table->id();
+    $table->foreignId('message_id')->constrained()->cascadeOnDelete();
+    $table->foreignId('user_id')->constrained()->cascadeOnDelete();
+    $table->timestampTz('read_at');
+    $table->unique(['message_id', 'user_id']);
+});
+
+Schema::create('user_notifications', function (Blueprint $table): void {
+    $table->id();
+    $table->foreignId('company_id')->constrained()->cascadeOnDelete();
+    $table->foreignId('branch_id')->nullable()->constrained()->nullOnDelete();
+    $table->foreignId('user_id')->nullable()->constrained()->cascadeOnDelete(); // null = role/company broadcast
+    $table->string('required_permission', 64)->nullable();
+    $table->string('severity', 16)->default('info'); // info | warning | danger | success
+    $table->string('title', 160);
+    $table->string('body', 500);
+    $table->string('href', 255)->nullable();
+    $table->timestampTz('read_at')->nullable();
+    $table->timestamps();
+    $table->index(['company_id', 'user_id', 'read_at']);
+});
+```
+
+### 10.3 Endpoints & Contracts
+
+#### A. Live Dashboard Summary (`GET /api/v1/dashboard/summary`)
+- Query: `company_id` (required), optional `branch_id`, `from` (YYYY-MM-DD), `to` (YYYY-MM-DD).
+- Returns:
+  - `fleet`: `{ total, available, rented, maintenance, damaged, utilization_pct }`
+  - `pipeline`: `{ quotations, reservations, active_rentals, issued_invoices }`
+  - `approvals`: `{ pending_discount_quotes, pending_purchase_orders, low_stock_parts, overdue_invoices }`
+  - `finance` *(populated ONLY when caller holds `invoices.view`, else `null`)*: `{ revenue_minor, vat_minor, receipts_minor, expenses_minor, outstanding_ar_minor, net_position_minor }`
+  - `driver_summary` *(populated for `driver` role)*: `{ active_rentals, upcoming_rentals }`
+
+#### B. Messaging & Chat Center (`GET/POST /api/v1/messages`, `POST /api/v1/messages/{id}/read`)
+- `GET /api/v1/messages`: `company_id` required; optional `branch_id`, `channel` (`dispatch|drivers|customers|support`), `page`. Driver role restricted to `drivers` & `dispatch` (`403` if requesting `customers` or `support`). Returns paginated messages with `sender_name`, `is_read` (for current user), plus `meta.unread_count`.
+- `POST /api/v1/messages`: `{ company_id, branch_id?, channel, body (1..1000), related_entity_type?, related_entity_id? }` → `201`.
+- `POST /api/v1/messages/{id}/read`: idempotently marks message read for current user → `200`.
+
+#### C. Notifications (`GET /api/v1/notifications`, `POST /api/v1/notifications/{id}/read`, `POST /api/v1/notifications/read-all`)
+- `GET /api/v1/notifications`: `company_id` required; optional `branch_id`, `unread_only` (`1|0`), `page`. Filters out notifications whose `required_permission` the user does not hold. Returns paginated items + `meta.unread_count`.
+- `POST /api/v1/notifications/{id}/read` & `POST /api/v1/notifications/read-all` (`{ company_id, branch_id? }`): marks notification(s) read for current user.
+
+#### D. Reports & Immutable Audit Trail
+- `GET /api/v1/reports/financial` (`invoices.view`): `company_id` required; optional `branch_id`, `from`, `to`. Returns `summary` (`invoiced_minor`, `vat_minor`, `receipts_minor`, `refunds_minor`, `expenses_minor`, `outstanding_ar_minor`, `net_position_minor`) and `rows[]` (scoped financial breakdown by invoice/expense).
+- `GET /api/v1/reports/fleet` (`vehicles.view`): `company_id` required; optional `branch_id`, `from`, `to`. Returns per-vehicle `rows[]` (`vehicle_id`, `registration`, `make_model`, `status`, `rental_count`, `work_order_count`, `downtime_hours`, and when caller holds `invoices.view`, `revenue_minor`, `maintenance_cost_minor`, `net_roi_minor`; else `null`).
+- `GET /api/v1/audit-events` (`audit.view` ONLY — `403` for `finance`, `operations`, `viewer`, `driver`): `company_id` required; optional `action`, `entity_type`, `q`, `page`. Returns paginated immutable `audit_events` (`id`, `actor_name`, `action`, `entity_type`, `entity_id`, `summary`, `created_at`).
+
+### 10.4 Required Feature Tests (`tests/Feature/MilestoneTenTest.php`)
+1. `GET /api/v1/dashboard/summary` returns accurate fleet/pipeline/approvals counts; omits `finance` (`null`) for `operations` and populates it for `finance`/`company-admin`.
+2. `POST /api/v1/messages` & `GET /api/v1/messages`: `driver` can read/send on `drivers` & `dispatch`, receives `403` on `customers`/`support`; `viewer` receives `403` on `POST /api/v1/messages`.
+3. `GET /api/v1/notifications` respects `required_permission` & company/branch scope; `read` & `read-all` decrement `meta.unread_count`.
+4. `GET /api/v1/reports/financial` returns `403` for `operations`; `GET /api/v1/reports/fleet` nulls financial columns for `operations`; `GET /api/v1/audit-events` returns `403` for `finance`, `operations`, `viewer`, `driver` and `200` for `company-admin`.
 
 ## Milestone 11 — Detailed Stats, Customer/Vehicle Rollups & Advanced Filtering (PR #14)
 *(Will be appended when Milestone 11 is implemented.)*
