@@ -237,10 +237,10 @@ test("full live navigation distinguishes planned modules from restricted working
   ).toBeVisible();
   await capture(page, "live-navigation");
   await nav
-    .getByRole("link", { name: "Maintenance · Planned", exact: true })
+    .getByRole("link", { name: "Reports · Planned", exact: true })
     .click();
   await expect(
-    page.getByRole("heading", { name: "Maintenance", exact: true }),
+    page.getByRole("heading", { name: "Reports", exact: true }),
   ).toBeVisible();
   await expect(
     page.getByRole("heading", { name: "Live data unavailable", exact: true }),

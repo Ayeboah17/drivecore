@@ -171,6 +171,8 @@ export const documentEntityTypes = [
   "rental",
   "quotation",
   "invoice",
+  "work_order",
+  "purchase_order",
 ] as const;
 export type DocumentEntityType = (typeof documentEntityTypes)[number];
 export const documentEntityLabels: Record<DocumentEntityType, string> = {
@@ -180,6 +182,8 @@ export const documentEntityLabels: Record<DocumentEntityType, string> = {
   rental: "Rental",
   quotation: "Quotation",
   invoice: "Invoice",
+  work_order: "Work order",
+  purchase_order: "Purchase order",
 };
 
 const nonNegNumber = z.union([
@@ -450,12 +454,128 @@ export const journalEntrySchema = z.object({
   company_id: numericId,
   branch_id: numericId,
   created_by: numericId,
-  source_type: z.enum(["invoice", "payment", "refund", "expense"]),
+  source_type: z.enum([
+    "invoice",
+    "payment",
+    "refund",
+    "expense",
+    "work_order",
+    "purchase_order",
+    "stock_adjustment",
+  ]),
   source_id: numericId,
   reference: z.string(),
   memo: z.string(),
   posted_at: z.string(),
   lines: z.array(journalLineSchema),
+});
+
+export const partSchema = z.object({
+  id: numericId,
+  company_id: numericId,
+  branch_id: numericId,
+  sku: z.string(),
+  name: z.string(),
+  unit_cost_minor: nonNegInt,
+  min_stock: nonNegInt,
+  on_hand: z.coerce.number().int().optional().default(0),
+  is_low_stock: z.boolean().optional().default(false),
+  created_at: z.string(),
+  updated_at: z.string(),
+});
+
+export const stockMovementSchema = z.object({
+  id: numericId,
+  company_id: numericId,
+  branch_id: numericId,
+  part_id: numericId,
+  part_sku: z.string().nullable().optional().default(null),
+  part_name: z.string().nullable().optional().default(null),
+  recorded_by: numericId,
+  quantity: z.coerce.number().int(),
+  unit_cost_minor: nonNegInt,
+  reason: z.string(),
+  work_order_id: numericId.nullable().optional().default(null),
+  purchase_order_id: numericId.nullable().optional().default(null),
+  created_at: z.string(),
+});
+
+export const workOrderSchema = z.object({
+  id: numericId,
+  company_id: numericId,
+  branch_id: numericId,
+  vehicle_id: numericId,
+  vehicle_registration: z.string().nullable().optional().default(null),
+  vehicle_label: z.string().nullable().optional().default(null),
+  created_by: numericId,
+  title: z.string(),
+  status: z.enum(["open", "in_progress", "completed", "cancelled"]),
+  due_at: z.string(),
+  started_at: z.string().nullable().optional().default(null),
+  completed_at: z.string().nullable().optional().default(null),
+  labour_cost_minor: nonNegInt,
+  parts_cost_minor: nonNegInt,
+  total_cost_minor: nonNegInt.optional().default(0),
+  notes: z.string().nullable().optional().default(null),
+  completion_notes: z.string().nullable().optional().default(null),
+  expense_id: numericId.nullable().optional().default(null),
+  created_at: z.string(),
+  updated_at: z.string(),
+  movements: z.array(stockMovementSchema).optional().default([]),
+});
+
+export const supplierSchema = z.object({
+  id: numericId,
+  company_id: numericId,
+  name: z.string(),
+  email: z.string().nullable().optional().default(null),
+  phone: z.string().nullable().optional().default(null),
+  is_active: z.boolean().default(true),
+  created_at: z.string(),
+  updated_at: z.string(),
+});
+
+export const purchaseOrderLineSchema = z.object({
+  id: numericId.optional(),
+  part_id: numericId,
+  part_sku: z.string().nullable().optional().default(null),
+  part_name: z.string().nullable().optional().default(null),
+  quantity: numericId,
+  unit_cost_minor: nonNegInt,
+  line_total_minor: nonNegInt,
+});
+
+export const purchaseOrderSchema = z.object({
+  id: numericId,
+  company_id: numericId,
+  branch_id: numericId,
+  supplier_id: numericId,
+  supplier_name: z.string().nullable().optional().default(null),
+  created_by: numericId,
+  approved_by: numericId.nullable().optional().default(null),
+  approved_by_name: z.string().nullable().optional().default(null),
+  po_number: z.string(),
+  status: z.enum(["draft", "submitted", "approved", "received", "cancelled"]),
+  total_minor: nonNegInt,
+  notes: z.string().nullable().optional().default(null),
+  submitted_at: z.string().nullable().optional().default(null),
+  approved_at: z.string().nullable().optional().default(null),
+  received_at: z.string().nullable().optional().default(null),
+  created_at: z.string(),
+  updated_at: z.string(),
+  lines: z.array(purchaseOrderLineSchema).optional().default([]),
+});
+
+export const vehicleSummarySchema = z.object({
+  vehicle_id: numericId,
+  work_order_count: nonNegInt,
+  open_work_order_count: nonNegInt,
+  total_downtime_hours: nonNegNumber,
+  cumulative_revenue_minor: z.coerce.number().int().nullable().optional().default(null),
+  maintenance_cost_minor: z.coerce.number().int().nullable().optional().default(null),
+  other_expenses_minor: z.coerce.number().int().nullable().optional().default(null),
+  net_roi_minor: z.coerce.number().int().nullable().optional().default(null),
+  recent_work_orders: z.array(workOrderSchema).optional().default([]),
 });
 
 export const documentSchema = z.object({
@@ -505,6 +625,13 @@ export type GlAccount = z.infer<typeof glAccountSchema>;
 export type GlTrialBalance = z.infer<typeof glTrialBalanceSchema>;
 export type JournalLine = z.infer<typeof journalLineSchema>;
 export type JournalEntry = z.infer<typeof journalEntrySchema>;
+export type PartRecord = z.infer<typeof partSchema>;
+export type StockMovementRecord = z.infer<typeof stockMovementSchema>;
+export type WorkOrder = z.infer<typeof workOrderSchema>;
+export type SupplierRecord = z.infer<typeof supplierSchema>;
+export type PurchaseOrderLine = z.infer<typeof purchaseOrderLineSchema>;
+export type PurchaseOrder = z.infer<typeof purchaseOrderSchema>;
+export type VehicleSummary = z.infer<typeof vehicleSummarySchema>;
 export type DocumentRecord = z.infer<typeof documentSchema>;
 export type ManagedUser = z.infer<typeof managedUserSchema>;
 export type RoleDefinition = z.infer<typeof roleDefinitionSchema>;
@@ -529,6 +656,11 @@ export const canAccessFinance = (user: User) =>
   can(user, "expenses.view") ||
   can(user, "gl.view");
 export const canViewGl = (user: User) => can(user, "gl.view");
+export const canAccessMaintenance = (user: User) =>
+  can(user, "work_orders.view");
+export const canAccessInventory = (user: User) => can(user, "parts.view");
+export const canAccessProcurement = (user: User) =>
+  can(user, "purchase_orders.view") || can(user, "suppliers.view");
 export const canAccessUserAdmin = (user: User, companyId: string) =>
   user.is_platform_admin ||
   (can(user, "users.view") &&

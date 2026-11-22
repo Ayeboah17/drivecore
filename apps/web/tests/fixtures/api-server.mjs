@@ -16,6 +16,11 @@ let payments = new Map();
 let refunds = new Map();
 let expenses = new Map();
 let journalEntries = new Map();
+let parts = new Map();
+let stockMovements = new Map();
+let suppliers = new Map();
+let purchaseOrders = new Map();
+let workOrders = new Map();
 let documents = new Map();
 let documentBlobs = new Map();
 let control = {};
@@ -23,10 +28,13 @@ let nextId = 20;
 const SYSTEM_GL_ACCOUNTS = [
   { id: 1, code: "1000", name: "Cash & Bank", type: "asset", is_system: true },
   { id: 2, code: "1100", name: "Accounts Receivable", type: "asset", is_system: true },
-  { id: 3, code: "2100", name: "VAT Payable", type: "liability", is_system: true },
-  { id: 4, code: "4000", name: "Rental Revenue", type: "revenue", is_system: true },
-  { id: 5, code: "4100", name: "Sales Refunds & Credits", type: "revenue", is_system: true },
-  { id: 6, code: "5000", name: "Fleet & Operating Expenses", type: "expense", is_system: true },
+  { id: 3, code: "1200", name: "Spare Parts Inventory", type: "asset", is_system: true },
+  { id: 4, code: "1250", name: "Maintenance Work-in-Progress", type: "asset", is_system: true },
+  { id: 5, code: "2000", name: "Supplier Payables", type: "liability", is_system: true },
+  { id: 6, code: "2100", name: "VAT Payable", type: "liability", is_system: true },
+  { id: 7, code: "4000", name: "Rental Revenue", type: "revenue", is_system: true },
+  { id: 8, code: "4100", name: "Sales Refunds & Credits", type: "revenue", is_system: true },
+  { id: 9, code: "5000", name: "Fleet & Operating Expenses", type: "expense", is_system: true },
 ];
 let collectionReads = 0;
 let completedWrites = 0;
@@ -67,6 +75,15 @@ const ROLE_DEFS = [
       "expenses.view",
       "expenses.manage",
       "gl.view",
+      "work_orders.view",
+      "work_orders.manage",
+      "parts.view",
+      "parts.manage",
+      "suppliers.view",
+      "suppliers.manage",
+      "purchase_orders.view",
+      "purchase_orders.manage",
+      "purchase_orders.approve",
     ],
   },
   { name: "driver", permissions: ["companies.view", "branches.view"] },
@@ -88,6 +105,11 @@ const ROLE_DEFS = [
       "expenses.view",
       "expenses.manage",
       "gl.view",
+      "work_orders.view",
+      "parts.view",
+      "suppliers.view",
+      "purchase_orders.view",
+      "purchase_orders.approve",
     ],
   },
   {
@@ -105,6 +127,14 @@ const ROLE_DEFS = [
       "rentals.manage",
       "documents.view",
       "documents.manage",
+      "work_orders.view",
+      "work_orders.manage",
+      "parts.view",
+      "parts.manage",
+      "suppliers.view",
+      "suppliers.manage",
+      "purchase_orders.view",
+      "purchase_orders.manage",
     ],
   },
   {
@@ -120,6 +150,10 @@ const ROLE_DEFS = [
       "documents.view",
       "invoices.view",
       "expenses.view",
+      "work_orders.view",
+      "parts.view",
+      "suppliers.view",
+      "purchase_orders.view",
     ],
   },
 ];
@@ -155,6 +189,11 @@ function reset() {
   refunds = new Map();
   expenses = new Map();
   journalEntries = new Map();
+  parts = new Map();
+  stockMovements = new Map();
+  suppliers = new Map();
+  purchaseOrders = new Map();
+  workOrders = new Map();
   branches = new Map([
     [2, { id: 2, company_id: 1, name: "Synthetic branch" }],
     [4, { id: 4, company_id: 3, name: "Other branch" }],
@@ -776,6 +815,11 @@ createServer(async (req, res) => {
               "expenses.view",
               "expenses.manage",
               "gl.view",
+              "work_orders.view",
+              "parts.view",
+              "suppliers.view",
+              "purchase_orders.view",
+              "purchase_orders.approve",
             ]
         : role === "viewer"
           ? [
@@ -788,6 +832,10 @@ createServer(async (req, res) => {
               "documents.view",
               "invoices.view",
               "expenses.view",
+              "work_orders.view",
+              "parts.view",
+              "suppliers.view",
+              "purchase_orders.view",
             ]
           : [
               "customers.view",
@@ -802,6 +850,14 @@ createServer(async (req, res) => {
               "rentals.manage",
               "documents.view",
               "documents.manage",
+              "work_orders.view",
+              "work_orders.manage",
+              "parts.view",
+              "parts.manage",
+              "suppliers.view",
+              "suppliers.manage",
+              "purchase_orders.view",
+              "purchase_orders.manage",
               ...(["admin", "companyadmin", "restrictedadmin"].includes(role)
                 ? [
                     "branches.view",
@@ -817,6 +873,7 @@ createServer(async (req, res) => {
                     "expenses.view",
                     "expenses.manage",
                     "gl.view",
+                    "purchase_orders.approve",
                   ]
                 : []),
             ];
@@ -1594,6 +1651,806 @@ createServer(async (req, res) => {
       rec.updated_at = new Date().toISOString();
       completedWrites++;
       json(200, { data: rec });
+      return;
+    }
+    fail(404);
+    return;
+  }
+
+  // --- M9 Maintenance, Inventory, Procurement & Vehicle 360 ---
+  const partOnHand = (partId) =>
+    [...stockMovements.values()]
+      .filter((m) => m.part_id === partId)
+      .reduce((sum, m) => sum + m.quantity, 0);
+
+  const decoratePart = (part) => {
+    const on_hand = partOnHand(part.id);
+    return { ...part, on_hand, is_low_stock: on_hand <= part.min_stock };
+  };
+
+  const decorateMovement = (m) => {
+    const p = parts.get(m.part_id);
+    return { ...m, part_sku: p?.sku ?? null, part_name: p?.name ?? null };
+  };
+
+  const decorateWorkOrder = (wo) => {
+    const v = vehicles.get(wo.vehicle_id);
+    const movements = [...stockMovements.values()]
+      .filter((m) => m.work_order_id === wo.id)
+      .map(decorateMovement);
+    return {
+      ...wo,
+      vehicle_registration: v?.registration ?? null,
+      vehicle_label: v ? `${v.make} ${v.model}` : null,
+      total_cost_minor: wo.labour_cost_minor + wo.parts_cost_minor,
+      movements,
+    };
+  };
+
+  const decoratePo = (po) => {
+    const sup = suppliers.get(po.supplier_id);
+    return {
+      ...po,
+      supplier_name: sup?.name ?? null,
+      lines: po.lines.map((l) => {
+        const p = parts.get(l.part_id);
+        return { ...l, part_sku: p?.sku ?? null, part_name: p?.name ?? null };
+      }),
+    };
+  };
+
+  const summaryMatch = url.pathname.match(/^\/api\/v1\/vehicles\/(\d+)\/summary$/);
+  if (summaryMatch && req.method === "GET") {
+    if (!user.is_platform_admin && !user.permissions.includes("vehicles.view")) {
+      fail(403);
+      return;
+    }
+    const vehicleId = Number(summaryMatch[1]);
+    const v = vehicles.get(vehicleId);
+    if (!v) {
+      fail(404);
+      return;
+    }
+    const vehWos = [...workOrders.values()]
+      .filter((w) => w.vehicle_id === vehicleId)
+      .sort((a, b) => b.id - a.id);
+    const nowMs = Date.now();
+    const totalDowntimeHours = vehWos.reduce((hrs, w) => {
+      if (!w.started_at) return hrs;
+      const endMs = w.completed_at ? Date.parse(w.completed_at) : nowMs;
+      return hrs + Math.max(0, (endMs - Date.parse(w.started_at)) / 3_600_000);
+    }, 0);
+    const canSeeFinance =
+      user.is_platform_admin || user.permissions.includes("invoices.view");
+    let cumulativeRevenue = null;
+    let maintCost = null;
+    let otherExpenses = null;
+    let netRoi = null;
+    if (canSeeFinance) {
+      const vehRentalIds = new Set(
+        [...rentals.values()]
+          .filter((r) => r.vehicle_id === vehicleId)
+          .map((r) => r.id),
+      );
+      cumulativeRevenue = [...invoices.values()]
+        .filter((i) => i.status === "issued" && i.rental_id && vehRentalIds.has(i.rental_id))
+        .reduce((sum, i) => {
+          const dec = decorateInvoice(i);
+          return sum + Math.max(0, dec.total_minor - dec.refunded_minor);
+        }, 0);
+      maintCost = vehWos
+        .filter((w) => w.status === "completed")
+        .reduce((sum, w) => sum + w.labour_cost_minor + w.parts_cost_minor, 0);
+      const woExpenseIds = new Set(
+        vehWos.map((w) => w.expense_id).filter(Boolean),
+      );
+      otherExpenses = [...expenses.values()]
+        .filter((e) => e.vehicle_id === vehicleId && !woExpenseIds.has(e.id))
+        .reduce((sum, e) => sum + e.amount_minor, 0);
+      netRoi = cumulativeRevenue - maintCost - otherExpenses;
+    }
+    json(200, {
+      data: {
+        vehicle_id: vehicleId,
+        work_order_count: vehWos.length,
+        open_work_order_count: vehWos.filter(
+          (w) => w.status === "open" || w.status === "in_progress",
+        ).length,
+        total_downtime_hours: Number(totalDowntimeHours.toFixed(1)),
+        cumulative_revenue_minor: cumulativeRevenue,
+        maintenance_cost_minor: maintCost,
+        other_expenses_minor: otherExpenses,
+        net_roi_minor: netRoi,
+        recent_work_orders: vehWos.slice(0, 5).map(decorateWorkOrder),
+      },
+    });
+    return;
+  }
+
+  const woMatch = url.pathname.match(
+    /^\/api\/v1\/work-orders(?:\/(\d+)(?:\/(start|consume-parts|complete|cancel))?)?$/,
+  );
+  if (woMatch) {
+    const woId = woMatch[1] ? Number(woMatch[1]) : null;
+    const action = woMatch[2] ?? null;
+    if (req.method === "GET" && !woId) {
+      if (!user.is_platform_admin && !user.permissions.includes("work_orders.view")) {
+        fail(403);
+        return;
+      }
+      const companyId = Number(url.searchParams.get("company_id"));
+      const branchId = url.searchParams.get("branch_id")
+        ? Number(url.searchParams.get("branch_id"))
+        : null;
+      const statusFilter = url.searchParams.get("status");
+      const vehicleFilter = url.searchParams.get("vehicle_id")
+        ? Number(url.searchParams.get("vehicle_id"))
+        : null;
+      const q = (url.searchParams.get("q") ?? "").trim().toLowerCase();
+      const items = [...workOrders.values()]
+        .map(decorateWorkOrder)
+        .filter((w) => {
+          if (w.company_id !== companyId) return false;
+          if (branchId !== null && w.branch_id !== branchId) return false;
+          if (statusFilter && w.status !== statusFilter) return false;
+          if (vehicleFilter !== null && w.vehicle_id !== vehicleFilter) return false;
+          if (
+            q &&
+            ![w.title, w.vehicle_registration ?? "", w.notes ?? ""].some((s) =>
+              s.toLowerCase().includes(q),
+            )
+          )
+            return false;
+          return true;
+        });
+      paginateSlice(
+        sortItems(items, {
+          id: (w) => w.id,
+          vehicle_registration: (w) => w.vehicle_registration,
+          title: (w) => w.title,
+          due_at: (w) => w.due_at,
+          total_cost_minor: (w) => w.total_cost_minor,
+          status: (w) => w.status,
+        }),
+      );
+      return;
+    }
+    if (req.method === "GET" && woId && !action) {
+      if (!user.is_platform_admin && !user.permissions.includes("work_orders.view")) {
+        fail(403);
+        return;
+      }
+      const wo = workOrders.get(woId);
+      if (!wo) fail(404);
+      else json(200, { data: decorateWorkOrder(wo) });
+      return;
+    }
+    if (req.method === "POST" && !woId) {
+      if (!user.is_platform_admin && !user.permissions.includes("work_orders.manage")) {
+        fail(403);
+        return;
+      }
+      const id = nextId++;
+      const created = {
+        id,
+        company_id: Number(input.company_id),
+        branch_id: Number(input.branch_id),
+        vehicle_id: Number(input.vehicle_id),
+        created_by: user.id,
+        title: String(input.title ?? "").trim(),
+        status: "open",
+        due_at: input.due_at || new Date(Date.now() + 86_400_000).toISOString(),
+        started_at: null,
+        completed_at: null,
+        labour_cost_minor: Number(input.labour_cost_minor ?? 0),
+        parts_cost_minor: 0,
+        notes: input.notes ? String(input.notes) : null,
+        completion_notes: null,
+        expense_id: null,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      };
+      workOrders.set(id, created);
+      completedWrites++;
+      json(201, { data: decorateWorkOrder(created) });
+      return;
+    }
+    if (req.method === "POST" && woId && action) {
+      if (!user.is_platform_admin && !user.permissions.includes("work_orders.manage")) {
+        fail(403);
+        return;
+      }
+      const wo = workOrders.get(woId);
+      if (!wo) {
+        fail(404);
+        return;
+      }
+      const v = vehicles.get(wo.vehicle_id);
+      if (action === "start") {
+        const hasFutureRes = [...reservations.values()].some(
+          (r) =>
+            r.vehicle_id === wo.vehicle_id &&
+            r.status === "confirmed" &&
+            Date.parse(r.ends_at) > Date.now(),
+        );
+        const hasActiveWo = [...workOrders.values()].some(
+          (other) =>
+            other.id !== wo.id &&
+            other.vehicle_id === wo.vehicle_id &&
+            other.status === "in_progress",
+        );
+        if (
+          wo.status !== "open" ||
+          !v ||
+          v.status === "rented" ||
+          hasFutureRes ||
+          hasActiveWo
+        ) {
+          fail(409);
+          return;
+        }
+        wo.status = "in_progress";
+        wo.started_at = new Date().toISOString();
+        wo.updated_at = wo.started_at;
+        v.status = "maintenance";
+        completedWrites++;
+        json(200, { data: decorateWorkOrder(wo) });
+        return;
+      }
+      if (action === "consume-parts") {
+        if (wo.status !== "in_progress") {
+          fail(409);
+          return;
+        }
+        const part = parts.get(Number(input.part_id));
+        const qty = Number(input.quantity);
+        if (!part || !Number.isInteger(qty) || qty < 1) {
+          fail(422, { quantity: ["Select a valid part and positive quantity."] });
+          return;
+        }
+        if (partOnHand(part.id) < qty) {
+          fail(422, { quantity: ["Insufficient stock on hand for this part."] });
+          return;
+        }
+        const mId = nextId++;
+        stockMovements.set(mId, {
+          id: mId,
+          company_id: wo.company_id,
+          branch_id: wo.branch_id,
+          part_id: part.id,
+          recorded_by: user.id,
+          quantity: -qty,
+          unit_cost_minor: part.unit_cost_minor,
+          reason: "Maintenance consumption",
+          work_order_id: wo.id,
+          purchase_order_id: null,
+          created_at: new Date().toISOString(),
+        });
+        const lineCost = qty * part.unit_cost_minor;
+        wo.parts_cost_minor += lineCost;
+        wo.updated_at = new Date().toISOString();
+        if (lineCost > 0) {
+          postJournalEntry({
+            companyId: wo.company_id,
+            branchId: wo.branch_id,
+            createdBy: user.id,
+            sourceType: "work_order",
+            sourceId: wo.id,
+            reference: `WO-${wo.id}`,
+            memo: `Parts consumed on WO #${wo.id}`,
+            lines: [
+              { account_code: "1250", debit_minor: lineCost, credit_minor: 0 },
+              { account_code: "1200", debit_minor: 0, credit_minor: lineCost },
+            ],
+          });
+        }
+        completedWrites++;
+        json(200, { data: decorateWorkOrder(wo) });
+        return;
+      }
+      if (action === "complete") {
+        if (wo.status !== "in_progress") {
+          fail(409);
+          return;
+        }
+        if (input.labour_cost_minor !== undefined) {
+          wo.labour_cost_minor = Math.max(0, Number(input.labour_cost_minor));
+        }
+        if (input.completion_notes) {
+          wo.completion_notes = String(input.completion_notes);
+        }
+        wo.status = "completed";
+        wo.completed_at = new Date().toISOString();
+        wo.updated_at = wo.completed_at;
+        if (v) v.status = "available";
+        const total = wo.labour_cost_minor + wo.parts_cost_minor;
+        if (total > 0) {
+          const expId = nextId++;
+          expenses.set(expId, {
+            id: expId,
+            company_id: wo.company_id,
+            branch_id: wo.branch_id,
+            vehicle_id: wo.vehicle_id,
+            vehicle_registration: v?.registration ?? null,
+            recorded_by: user.id,
+            category: "maintenance",
+            description: `Work order #${wo.id}: ${wo.title}`,
+            amount_minor: total,
+            incurred_at: wo.completed_at,
+            created_at: wo.completed_at,
+          });
+          wo.expense_id = expId;
+          postJournalEntry({
+            companyId: wo.company_id,
+            branchId: wo.branch_id,
+            createdBy: user.id,
+            sourceType: "work_order",
+            sourceId: wo.id,
+            reference: `WO-${wo.id}`,
+            memo: `Completed work order #${wo.id}: ${wo.title}`,
+            lines: [
+              { account_code: "5000", debit_minor: total, credit_minor: 0 },
+              {
+                account_code: "1250",
+                debit_minor: 0,
+                credit_minor: wo.parts_cost_minor,
+              },
+              {
+                account_code: "1000",
+                debit_minor: 0,
+                credit_minor: wo.labour_cost_minor,
+              },
+            ],
+          });
+        }
+        completedWrites++;
+        json(200, { data: decorateWorkOrder(wo) });
+        return;
+      }
+      if (action === "cancel") {
+        if (wo.status !== "open") {
+          fail(409);
+          return;
+        }
+        wo.status = "cancelled";
+        wo.updated_at = new Date().toISOString();
+        completedWrites++;
+        json(200, { data: decorateWorkOrder(wo) });
+        return;
+      }
+    }
+    fail(404);
+    return;
+  }
+
+  const partMatch = url.pathname.match(/^\/api\/v1\/parts(?:\/(\d+)(?:\/(adjust))?)?$/);
+  if (partMatch) {
+    const partId = partMatch[1] ? Number(partMatch[1]) : null;
+    const action = partMatch[2] ?? null;
+    if (req.method === "GET" && !partId) {
+      if (!user.is_platform_admin && !user.permissions.includes("parts.view")) {
+        fail(403);
+        return;
+      }
+      const companyId = Number(url.searchParams.get("company_id"));
+      const branchId = url.searchParams.get("branch_id")
+        ? Number(url.searchParams.get("branch_id"))
+        : null;
+      const lowOnly =
+        url.searchParams.get("low_stock_only") === "1" ||
+        url.searchParams.get("low_stock_only") === "true";
+      const q = (url.searchParams.get("q") ?? "").trim().toLowerCase();
+      const items = [...parts.values()]
+        .map(decoratePart)
+        .filter((p) => {
+          if (p.company_id !== companyId) return false;
+          if (branchId !== null && p.branch_id !== branchId) return false;
+          if (lowOnly && !p.is_low_stock) return false;
+          if (
+            q &&
+            ![p.sku, p.name].some((s) => s.toLowerCase().includes(q))
+          )
+            return false;
+          return true;
+        });
+      paginateSlice(
+        sortItems(items, {
+          id: (p) => p.id,
+          sku: (p) => p.sku,
+          name: (p) => p.name,
+          unit_cost_minor: (p) => p.unit_cost_minor,
+          on_hand: (p) => p.on_hand,
+          min_stock: (p) => p.min_stock,
+        }),
+      );
+      return;
+    }
+    if (req.method === "POST" && !partId) {
+      if (!user.is_platform_admin && !user.permissions.includes("parts.manage")) {
+        fail(403);
+        return;
+      }
+      const id = nextId++;
+      const created = {
+        id,
+        company_id: Number(input.company_id),
+        branch_id: Number(input.branch_id),
+        sku: String(input.sku ?? "").trim().toUpperCase(),
+        name: String(input.name ?? "").trim(),
+        unit_cost_minor: Math.max(0, Number(input.unit_cost_minor ?? 0)),
+        min_stock: Math.max(0, Number(input.min_stock ?? 0)),
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      };
+      parts.set(id, created);
+      completedWrites++;
+      json(201, { data: decoratePart(created) });
+      return;
+    }
+    if (req.method === "PATCH" && partId && !action) {
+      if (!user.is_platform_admin && !user.permissions.includes("parts.manage")) {
+        fail(403);
+        return;
+      }
+      const p = parts.get(partId);
+      if (!p) {
+        fail(404);
+        return;
+      }
+      Object.assign(p, {
+        sku: input.sku ? String(input.sku).trim().toUpperCase() : p.sku,
+        name: input.name ? String(input.name).trim() : p.name,
+        unit_cost_minor:
+          input.unit_cost_minor !== undefined
+            ? Math.max(0, Number(input.unit_cost_minor))
+            : p.unit_cost_minor,
+        min_stock:
+          input.min_stock !== undefined
+            ? Math.max(0, Number(input.min_stock))
+            : p.min_stock,
+        updated_at: new Date().toISOString(),
+      });
+      completedWrites++;
+      json(200, { data: decoratePart(p) });
+      return;
+    }
+    if (req.method === "POST" && partId && action === "adjust") {
+      if (!user.is_platform_admin && !user.permissions.includes("parts.manage")) {
+        fail(403);
+        return;
+      }
+      const p = parts.get(partId);
+      if (!p) {
+        fail(404);
+        return;
+      }
+      const qty = Number(input.quantity);
+      if (!Number.isInteger(qty) || qty === 0) {
+        fail(422, { quantity: ["Enter a nonzero whole stock adjustment."] });
+        return;
+      }
+      if (partOnHand(p.id) + qty < 0) {
+        fail(422, { quantity: ["Stock on hand cannot become negative."] });
+        return;
+      }
+      const mId = nextId++;
+      stockMovements.set(mId, {
+        id: mId,
+        company_id: p.company_id,
+        branch_id: p.branch_id,
+        part_id: p.id,
+        recorded_by: user.id,
+        quantity: qty,
+        unit_cost_minor: p.unit_cost_minor,
+        reason: String(input.reason ?? "Stock adjustment").trim(),
+        work_order_id: null,
+        purchase_order_id: null,
+        created_at: new Date().toISOString(),
+      });
+      const val = Math.abs(qty) * p.unit_cost_minor;
+      if (val > 0) {
+        postJournalEntry({
+          companyId: p.company_id,
+          branchId: p.branch_id,
+          createdBy: user.id,
+          sourceType: "stock_adjustment",
+          sourceId: mId,
+          reference: `ADJ-${mId} (${p.sku})`,
+          memo: String(input.reason ?? "Stock adjustment").trim(),
+          lines:
+            qty > 0
+              ? [
+                  { account_code: "1200", debit_minor: val, credit_minor: 0 },
+                  { account_code: "5000", debit_minor: 0, credit_minor: val },
+                ]
+              : [
+                  { account_code: "5000", debit_minor: val, credit_minor: 0 },
+                  { account_code: "1200", debit_minor: 0, credit_minor: val },
+                ],
+        });
+      }
+      completedWrites++;
+      json(200, { data: decoratePart(p) });
+      return;
+    }
+    fail(404);
+    return;
+  }
+
+  if (url.pathname === "/api/v1/stock-movements" && req.method === "GET") {
+    if (!user.is_platform_admin && !user.permissions.includes("parts.view")) {
+      fail(403);
+      return;
+    }
+    const companyId = Number(url.searchParams.get("company_id"));
+    const branchId = url.searchParams.get("branch_id")
+      ? Number(url.searchParams.get("branch_id"))
+      : null;
+    const q = (url.searchParams.get("q") ?? "").trim().toLowerCase();
+    const items = [...stockMovements.values()]
+      .map(decorateMovement)
+      .filter((m) => {
+        if (m.company_id !== companyId) return false;
+        if (branchId !== null && m.branch_id !== branchId) return false;
+        if (
+          q &&
+          ![m.part_name ?? "", m.part_sku ?? "", m.reason].some((s) =>
+            s.toLowerCase().includes(q),
+          )
+        )
+          return false;
+        return true;
+      })
+      .sort((a, b) => b.id - a.id);
+    paginateSlice(
+      sortItems(items, {
+        id: (m) => m.id,
+        created_at: (m) => m.created_at,
+        part_name: (m) => m.part_name,
+        quantity: (m) => m.quantity,
+        unit_cost_minor: (m) => m.unit_cost_minor,
+      }),
+    );
+    return;
+  }
+
+  const supMatch = url.pathname.match(/^\/api\/v1\/suppliers(?:\/(\d+))?$/);
+  if (supMatch) {
+    const supId = supMatch[1] ? Number(supMatch[1]) : null;
+    if (req.method === "GET" && !supId) {
+      if (!user.is_platform_admin && !user.permissions.includes("suppliers.view")) {
+        fail(403);
+        return;
+      }
+      const companyId = Number(url.searchParams.get("company_id"));
+      const q = (url.searchParams.get("q") ?? "").trim().toLowerCase();
+      const items = [...suppliers.values()].filter((s) => {
+        if (s.company_id !== companyId) return false;
+        if (q && ![s.name, s.email ?? ""].some((v) => v.toLowerCase().includes(q)))
+          return false;
+        return true;
+      });
+      paginateSlice(
+        sortItems(items, {
+          id: (s) => s.id,
+          name: (s) => s.name,
+          email: (s) => s.email,
+          is_active: (s) => s.is_active,
+        }),
+      );
+      return;
+    }
+    if (req.method === "POST" && !supId) {
+      if (!user.is_platform_admin && !user.permissions.includes("suppliers.manage")) {
+        fail(403);
+        return;
+      }
+      const id = nextId++;
+      const created = {
+        id,
+        company_id: Number(input.company_id),
+        name: String(input.name ?? "").trim(),
+        email: input.email ? String(input.email).trim() : null,
+        phone: input.phone ? String(input.phone).trim() : null,
+        is_active: input.is_active !== false,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      };
+      suppliers.set(id, created);
+      completedWrites++;
+      json(201, { data: created });
+      return;
+    }
+    fail(404);
+    return;
+  }
+
+  const poMatch = url.pathname.match(
+    /^\/api\/v1\/purchase-orders(?:\/(\d+)(?:\/(submit|approve|receive|cancel))?)?$/,
+  );
+  if (poMatch) {
+    const poId = poMatch[1] ? Number(poMatch[1]) : null;
+    const action = poMatch[2] ?? null;
+    if (req.method === "GET" && !poId) {
+      if (
+        !user.is_platform_admin &&
+        !user.permissions.includes("purchase_orders.view")
+      ) {
+        fail(403);
+        return;
+      }
+      const companyId = Number(url.searchParams.get("company_id"));
+      const branchId = url.searchParams.get("branch_id")
+        ? Number(url.searchParams.get("branch_id"))
+        : null;
+      const statusFilter = url.searchParams.get("status");
+      const q = (url.searchParams.get("q") ?? "").trim().toLowerCase();
+      const items = [...purchaseOrders.values()]
+        .map(decoratePo)
+        .filter((po) => {
+          if (po.company_id !== companyId) return false;
+          if (branchId !== null && po.branch_id !== branchId) return false;
+          if (statusFilter && po.status !== statusFilter) return false;
+          if (
+            q &&
+            ![po.po_number, po.supplier_name ?? ""].some((s) =>
+              s.toLowerCase().includes(q),
+            )
+          )
+            return false;
+          return true;
+        });
+      paginateSlice(
+        sortItems(items, {
+          id: (po) => po.id,
+          supplier_name: (po) => po.supplier_name,
+          total_minor: (po) => po.total_minor,
+          status: (po) => po.status,
+          created_at: (po) => po.created_at,
+        }),
+      );
+      return;
+    }
+    if (req.method === "GET" && poId && !action) {
+      if (
+        !user.is_platform_admin &&
+        !user.permissions.includes("purchase_orders.view")
+      ) {
+        fail(403);
+        return;
+      }
+      const po = purchaseOrders.get(poId);
+      if (!po) fail(404);
+      else json(200, { data: decoratePo(po) });
+      return;
+    }
+    if (req.method === "POST" && !poId) {
+      if (
+        !user.is_platform_admin &&
+        !user.permissions.includes("purchase_orders.manage")
+      ) {
+        fail(403);
+        return;
+      }
+      const rawLines = Array.isArray(input.lines) ? input.lines : [];
+      if (rawLines.length === 0) {
+        fail(422, { lines: ["Add at least one order line."] });
+        return;
+      }
+      const normLines = rawLines.map((l, idx) => {
+        const qty = Math.max(1, Number(l.quantity));
+        const cost = Math.max(0, Number(l.unit_cost_minor));
+        return {
+          id: idx + 1,
+          part_id: Number(l.part_id),
+          quantity: qty,
+          unit_cost_minor: cost,
+          line_total_minor: qty * cost,
+        };
+      });
+      const id = nextId++;
+      const created = {
+        id,
+        company_id: Number(input.company_id),
+        branch_id: Number(input.branch_id),
+        supplier_id: Number(input.supplier_id),
+        created_by: user.id,
+        approved_by: null,
+        approved_by_name: null,
+        po_number: `PO-${String(id).padStart(5, "0")}`,
+        status: "draft",
+        total_minor: normLines.reduce((s, l) => s + l.line_total_minor, 0),
+        notes: input.notes ? String(input.notes) : null,
+        submitted_at: null,
+        approved_at: null,
+        received_at: null,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        lines: normLines,
+      };
+      purchaseOrders.set(id, created);
+      completedWrites++;
+      json(201, { data: decoratePo(created) });
+      return;
+    }
+    if (req.method === "POST" && poId && action) {
+      const reqPerm =
+        action === "approve"
+          ? "purchase_orders.approve"
+          : "purchase_orders.manage";
+      if (!user.is_platform_admin && !user.permissions.includes(reqPerm)) {
+        fail(403);
+        return;
+      }
+      const po = purchaseOrders.get(poId);
+      if (!po) {
+        fail(404);
+        return;
+      }
+      if (action === "submit") {
+        if (po.status !== "draft") {
+          fail(409);
+          return;
+        }
+        po.status = "submitted";
+        po.submitted_at = new Date().toISOString();
+      } else if (action === "approve") {
+        if (po.status !== "submitted") {
+          fail(409);
+          return;
+        }
+        po.status = "approved";
+        po.approved_by = user.id;
+        po.approved_by_name = user.name;
+        po.approved_at = new Date().toISOString();
+      } else if (action === "receive") {
+        if (po.status !== "approved") {
+          fail(409);
+          return;
+        }
+        po.status = "received";
+        po.received_at = new Date().toISOString();
+        for (const line of po.lines) {
+          const mId = nextId++;
+          stockMovements.set(mId, {
+            id: mId,
+            company_id: po.company_id,
+            branch_id: po.branch_id,
+            part_id: line.part_id,
+            recorded_by: user.id,
+            quantity: line.quantity,
+            unit_cost_minor: line.unit_cost_minor,
+            reason: `Purchase receipt (${po.po_number})`,
+            work_order_id: null,
+            purchase_order_id: po.id,
+            created_at: po.received_at,
+          });
+        }
+        if (po.total_minor > 0) {
+          postJournalEntry({
+            companyId: po.company_id,
+            branchId: po.branch_id,
+            createdBy: user.id,
+            sourceType: "purchase_order",
+            sourceId: po.id,
+            reference: po.po_number,
+            memo: `Received goods on ${po.po_number}`,
+            lines: [
+              { account_code: "1200", debit_minor: po.total_minor, credit_minor: 0 },
+              { account_code: "2000", debit_minor: 0, credit_minor: po.total_minor },
+            ],
+          });
+        }
+      } else if (action === "cancel") {
+        if (!["draft", "submitted", "approved"].includes(po.status)) {
+          fail(409);
+          return;
+        }
+        po.status = "cancelled";
+      }
+      po.updated_at = new Date().toISOString();
+      completedWrites++;
+      json(200, { data: decoratePo(po) });
       return;
     }
     fail(404);

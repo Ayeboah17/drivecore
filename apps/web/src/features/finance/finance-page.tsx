@@ -1277,6 +1277,9 @@ export function LiveFinancePage() {
                         { value: "payment", label: "Payment" },
                         { value: "refund", label: "Refund" },
                         { value: "expense", label: "Expense" },
+                        { value: "work_order", label: "Work order" },
+                        { value: "purchase_order", label: "Purchase order" },
+                        { value: "stock_adjustment", label: "Stock adjustment" },
                       ]}
                     />
                   </div>

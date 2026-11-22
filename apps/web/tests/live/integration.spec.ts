@@ -286,7 +286,7 @@ test("proxy rejects missing CSRF and hostile origins through the actual Next han
   expect(origin.status()).toBe(403);
   const collection = await request.get("/api/backend/api/v1/customers");
   expect(collection.status()).toBe(400);
-  const blocked = await request.get("/api/backend/api/v1/work-orders");
+  const blocked = await request.get("/api/backend/api/v1/audit-events");
   expect(blocked.status()).toBe(404);
   await request.get("/api/backend/sanctum/csrf-cookie");
   const mismatch = await request.post("/api/backend/api/v1/auth/login", {

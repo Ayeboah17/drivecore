@@ -219,7 +219,7 @@ export function buildBranchSwitchHref(
 
   // List/tabbed top-level routes stay in place and keep tab/flow/sort state
   if (
-    /^(dashboard|operations|vehicles|customers|rentals|quotations|finance|users|setup|modules\/[^/]+)$/.test(
+    /^(dashboard|operations|vehicles|customers|rentals|quotations|maintenance|inventory|finance|procurement|users|setup|modules\/[^/]+)$/.test(
       subPath,
     )
   ) {
@@ -254,6 +254,15 @@ export function buildBranchSwitchHref(
     params.set("tab", "quotations");
     params.set("branch", nextBranch);
     return `${prefix}rentals?${params.toString()}`;
+  }
+  if (subPath.startsWith("maintenance/")) {
+    params.set("branch", nextBranch);
+    return `${prefix}maintenance?${params.toString()}`;
+  }
+  if (subPath.startsWith("procurement/")) {
+    params.set("tab", "purchase-orders");
+    params.set("branch", nextBranch);
+    return `${prefix}procurement?${params.toString()}`;
   }
   if (subPath.startsWith("finance/")) {
     params.set("tab", "invoices");

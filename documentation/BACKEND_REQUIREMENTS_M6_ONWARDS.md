@@ -40,8 +40,19 @@
 | M8 | `GET/POST` | `/api/v1/expenses` | `expenses.view` / `expenses.manage` | Immutable expenses with category (`maintenance\|fuel\|insurance\|tolls_parking\|general`) & optional `vehicle_id`; posts GL (`DR 5000`, `CR 1000`) |
 | M8 | `GET` | `/api/v1/gl/accounts` | `gl.view` | Read-only system-seeded Chart of Accounts + scoped Trial Balance (`debit_minor`, `credit_minor`, `balance_minor`) |
 | M8 | `GET` | `/api/v1/gl/journal-entries` | `gl.view` | Paginated immutable balanced `JournalEntry` rows with `lines[]` (`account_code`, `source_type`, `q`, `page`) |
+| M9 | `GET/POST` | `/api/v1/work-orders` | `work_orders.view` / `work_orders.manage` | Scoped list (`status`, `vehicle_id`, `q`, `sort`, `dir`, `page`); `POST` opens work order (`open`) |
+| M9 | `GET` | `/api/v1/work-orders/{id}` | `work_orders.view` | Work order detail including consumed `movements[]` & linked `expense_id` |
+| M9 | `POST` | `/api/v1/work-orders/{id}/{start\|consume-parts\|complete\|cancel}` | `work_orders.manage` | Locks vehicle/part rows (`lockForUpdate()`); toggles `vehicle.status`, deducts stock atomically, posts Maintenance Expense & GL |
+| M9 | `GET/POST` | `/api/v1/parts` | `parts.view` / `parts.manage` | Spare parts catalogue with server-computed `on_hand` & `is_low_stock` (`low_stock_only`, `q`, `sort`, `dir`, `page`) |
+| M9 | `PATCH/POST` | `/api/v1/parts/{id}` & `/api/v1/parts/{id}/adjust` | `parts.manage` | Edit part metadata; `adjust` writes stock movement + GL and rejects negative resulting stock (`422`) |
+| M9 | `GET` | `/api/v1/stock-movements` | `parts.view` | Immutable inventory movement ledger (`part_id`, `work_order_id`, `purchase_order_id`, `q`, `sort`, `dir`, `page`) |
+| M9 | `GET/POST/PATCH` | `/api/v1/suppliers` & `/api/v1/suppliers/{id}` | `suppliers.view` / `suppliers.manage` | Company-scoped suppliers directory (`is_active`, `q`, `sort`, `dir`, `page`) |
+| M9 | `GET/POST` | `/api/v1/purchase-orders` | `purchase_orders.view` / `purchase_orders.manage` | Multi-line POs (`lines[]` per supplier & branch); `status`, `supplier_id`, `q`, `sort`, `dir`, `page` |
+| M9 | `GET/PATCH` | `/api/v1/purchase-orders/{id}` | `purchase_orders.view` / `purchase_orders.manage` | PO detail with `lines[]`; `PATCH` edits `draft` only (`409` otherwise) |
+| M9 | `POST` | `/api/v1/purchase-orders/{id}/{submit\|approve\|receive\|cancel}` | `purchase_orders.manage` (`approve` requires `purchase_orders.approve`) | `receive` atomically increments stock once (`409` duplicate) & posts GL (`DR 1200 / CR 2000`) |
+| M9 | `GET` | `/api/v1/vehicles/{id}/summary` | `vehicles.view` | Live Vehicle 360 rollup (downtime, work orders; financial revenue/cost/ROI populated only when caller holds `invoices.view`) |
 
-### B. Spatie Role & Permission Matrix (M6–M8 Additions)
+### B. Spatie Role & Permission Matrix (M6–M9 Additions)
 
 | Permission | `company-admin` | `operations` | `finance` | `driver` | `viewer` |
 | :--- | :---: | :---: | :---: | :---: | :---: |
@@ -58,6 +69,11 @@
 | `payments.manage` | Yes | — | Yes | — | — |
 | `expenses.view` / `expenses.manage` | Yes / Yes | — / — | Yes / Yes | — / — | Yes / — |
 | `gl.view` | Yes | — | Yes | — | — |
+| `work_orders.view` / `work_orders.manage` | Yes / Yes | Yes / Yes | Yes / — | — / — | Yes / — |
+| `parts.view` / `parts.manage` | Yes / Yes | Yes / Yes | Yes / — | — / — | Yes / — |
+| `suppliers.view` / `suppliers.manage` | Yes / Yes | Yes / Yes | Yes / — | — / — | Yes / — |
+| `purchase_orders.view` / `purchase_orders.manage` | Yes / Yes | Yes / Yes | Yes / — | — / — | Yes / — |
+| `purchase_orders.approve` | Yes | — | Yes | — | — |
 
 *(Platform admins with `is_platform_admin = true` bypass all permission gates.)*
 
@@ -556,7 +572,176 @@ Seed system accounts automatically on company creation (and backfill existing co
 6. `GET /api/v1/invoices/ageing` accurately buckets open issued invoices into `current`, `d1_30`, `d31_60`, `d61_90`, `d90_plus`, and `GET /api/v1/invoices/{id}/pdf` streams valid `%PDF-` bytes with `nosniff` + `private, no-store`.
 
 ## Milestone 9 — Live Maintenance, Inventory, Procurement & Vehicle 360 (PR #12)
-*(Will be appended when Milestone 9 is implemented.)*
+
+### 9.1 Spatie Roles & Permissions Additions
+Add permissions to `RolePermissionSeeder`:
+- `work_orders.view`, `work_orders.manage`
+- `parts.view`, `parts.manage`
+- `suppliers.view`, `suppliers.manage`
+- `purchase_orders.view`, `purchase_orders.manage`, `purchase_orders.approve`
+
+Role assignments:
+- `company-admin`: all 9 permissions above.
+- `operations`: all `.view` & `.manage` permissions above (**NO** `purchase_orders.approve`).
+- `finance`: all `.view` permissions above + `purchase_orders.approve`.
+- `viewer`: all `.view` permissions above only.
+- `driver`: none.
+
+### 9.2 Additional System GL Accounts & Document Entity Types
+Seed 3 additional system GL accounts per company (extending Section 8.2C):
+- `1200` Spare Parts Inventory (`asset`)
+- `1250` Maintenance Work-in-Progress (`asset`)
+- `2000` Supplier Payables (`liability`)
+
+Extend allowed values:
+- `journal_entries.source_type`: `'invoice' | 'payment' | 'refund' | 'expense' | 'work_order' | 'purchase_order' | 'stock_adjustment'`
+- `documents.entity_type`: add `'work_order'` and `'purchase_order'`
+
+### 9.3 Database Migrations
+```php
+Schema::create('suppliers', function (Blueprint $table): void {
+    $table->id();
+    $table->foreignId('company_id')->constrained()->cascadeOnDelete();
+    $table->string('name', 255);
+    $table->string('email', 255)->nullable();
+    $table->string('phone', 50)->nullable();
+    $table->boolean('is_active')->default(true);
+    $table->timestamps();
+    $table->index(['company_id', 'is_active']);
+});
+
+Schema::create('parts', function (Blueprint $table): void {
+    $table->id();
+    $table->foreignId('company_id')->constrained()->cascadeOnDelete();
+    $table->foreignId('branch_id')->constrained()->cascadeOnDelete();
+    $table->string('sku', 64);
+    $table->string('name', 255);
+    $table->unsignedBigInteger('unit_cost_minor')->default(0);
+    $table->unsignedInteger('min_stock')->default(0);
+    $table->timestamps();
+    $table->unique(['company_id', 'branch_id', 'sku']);
+});
+
+Schema::create('work_orders', function (Blueprint $table): void {
+    $table->id();
+    $table->foreignId('company_id')->constrained()->cascadeOnDelete();
+    $table->foreignId('branch_id')->constrained()->cascadeOnDelete();
+    $table->foreignId('vehicle_id')->constrained()->cascadeOnDelete();
+    $table->foreignId('created_by')->constrained('users');
+    $table->string('title', 255);
+    $table->string('status', 20)->default('open'); // open | in_progress | completed | cancelled
+    $table->timestampTz('due_at');
+    $table->timestampTz('started_at')->nullable();
+    $table->timestampTz('completed_at')->nullable();
+    $table->unsignedBigInteger('labour_cost_minor')->default(0);
+    $table->unsignedBigInteger('parts_cost_minor')->default(0);
+    $table->text('notes')->nullable();
+    $table->text('completion_notes')->nullable();
+    $table->foreignId('expense_id')->nullable()->constrained('expenses')->nullOnDelete();
+    $table->timestamps();
+    $table->index(['company_id', 'branch_id', 'status']);
+    $table->index(['company_id', 'vehicle_id', 'status']);
+});
+
+Schema::create('purchase_orders', function (Blueprint $table): void {
+    $table->id();
+    $table->foreignId('company_id')->constrained()->cascadeOnDelete();
+    $table->foreignId('branch_id')->constrained()->cascadeOnDelete();
+    $table->foreignId('supplier_id')->constrained()->cascadeOnDelete();
+    $table->foreignId('created_by')->constrained('users');
+    $table->foreignId('approved_by')->nullable()->constrained('users')->nullOnDelete();
+    $table->string('po_number', 40);
+    $table->string('status', 20)->default('draft'); // draft | submitted | approved | received | cancelled
+    $table->unsignedBigInteger('total_minor')->default(0);
+    $table->text('notes')->nullable();
+    $table->timestampTz('submitted_at')->nullable();
+    $table->timestampTz('approved_at')->nullable();
+    $table->timestampTz('received_at')->nullable();
+    $table->timestamps();
+    $table->unique(['company_id', 'po_number']);
+    $table->index(['company_id', 'branch_id', 'status']);
+});
+
+Schema::create('purchase_order_lines', function (Blueprint $table): void {
+    $table->id();
+    $table->foreignId('purchase_order_id')->constrained()->cascadeOnDelete();
+    $table->foreignId('part_id')->constrained()->cascadeOnDelete();
+    $table->unsignedInteger('quantity');
+    $table->unsignedBigInteger('unit_cost_minor');
+    $table->unsignedBigInteger('line_total_minor');
+    $table->timestamps();
+});
+
+Schema::create('stock_movements', function (Blueprint $table): void {
+    $table->id();
+    $table->foreignId('company_id')->constrained()->cascadeOnDelete();
+    $table->foreignId('branch_id')->constrained()->cascadeOnDelete();
+    $table->foreignId('part_id')->constrained()->cascadeOnDelete();
+    $table->foreignId('recorded_by')->constrained('users');
+    $table->integer('quantity'); // positive for receipts/positive adjustments, negative for consumption/write-offs
+    $table->unsignedBigInteger('unit_cost_minor');
+    $table->string('reason', 255);
+    $table->foreignId('work_order_id')->nullable()->constrained()->nullOnDelete();
+    $table->foreignId('purchase_order_id')->nullable()->constrained()->nullOnDelete();
+    $table->timestamps();
+    $table->index(['company_id', 'branch_id', 'part_id']);
+});
+```
+
+### 9.4 Endpoints, Transactions & GL Postings
+
+#### A. Maintenance Work Orders (`work_orders.view` / `work_orders.manage`)
+- `GET /api/v1/work-orders`: `company_id` required; optional `branch_id`, `status` (`open|in_progress|completed|cancelled`), `vehicle_id`, `q`, `page`, `sort` (`id|vehicle_registration|title|due_at|total_cost_minor|status`), `dir`.
+- `POST /api/v1/work-orders`: `{ company_id, branch_id, vehicle_id, title, due_at, labour_cost_minor?, notes? }` → creates `open` work order.
+- `GET /api/v1/work-orders/{id}`: returns work order with `vehicle_registration`, `vehicle_label`, `total_cost_minor` (`labour_cost_minor + parts_cost_minor`), and `movements[]`.
+- `POST /api/v1/work-orders/{id}/start`: inside `DB::transaction` locking `vehicle` and `work_order`:
+  1. Require `work_order.status === 'open'` (`409`).
+  2. Reject if `vehicle.status === 'rented'`, if vehicle has any `confirmed` reservation with `ends_at > now()`, or if another `in_progress` work order exists on the same vehicle (`409`).
+  3. Set `work_order.status = 'in_progress'`, `started_at = now()`, `vehicle.status = 'maintenance'`.
+- `POST /api/v1/work-orders/{id}/consume-parts`: `{ part_id, quantity >= 1 }` inside `DB::transaction` locking `work_order` & `part`:
+  1. Require `work_order.status === 'in_progress'` (`409`) and `part` belongs to same `(company_id, branch_id)` (`422`).
+  2. Compute `on_hand = SUM(stock_movements.quantity)`; require `on_hand >= quantity` (else `422` on `quantity`).
+  3. Insert negative `stock_movements` (`-quantity`, `unit_cost_minor = part.unit_cost_minor`, `reason = 'Maintenance consumption'`).
+  4. Increment `work_order.parts_cost_minor += quantity * part.unit_cost_minor`.
+  5. Post balanced GL (`source_type='work_order'`): `DR 1250 Maintenance WIP`, `CR 1200 Spare Parts Inventory`.
+- `POST /api/v1/work-orders/{id}/complete`: `{ labour_cost_minor?, completion_notes? }` inside `DB::transaction` locking `work_order` & `vehicle`:
+  1. Require `work_order.status === 'in_progress'` (`409`).
+  2. Optionally update `labour_cost_minor` (`>= 0`) and `completion_notes`.
+  3. Set `work_order.status = 'completed'`, `completed_at = now()`, `vehicle.status = 'available'`.
+  4. If `total_cost = labour_cost_minor + parts_cost_minor > 0`: create linked `Expense` (`category='maintenance'`, `vehicle_id`, `amount_minor = total_cost`) and post balanced GL (`source_type='work_order'`): `DR 5000 Fleet & Operating Expenses (total_cost)`, `CR 1250 Maintenance WIP (parts_cost_minor)`, `CR 1000 Cash & Bank (labour_cost_minor)`.
+- `POST /api/v1/work-orders/{id}/cancel`: allowed only when `status === 'open'` (`409` otherwise).
+
+#### B. Inventory Parts & Stock Movements (`parts.view` / `parts.manage`)
+- `GET /api/v1/parts`: `company_id` required; optional `branch_id`, `low_stock_only` (`1|0`), `q`, `page`, `sort` (`id|sku|name|unit_cost_minor|on_hand|min_stock`), `dir`. Returns server-computed `on_hand` & `is_low_stock` (`on_hand <= min_stock`).
+- `POST /api/v1/parts` & `PATCH /api/v1/parts/{id}`: create/edit part (`sku` unique per company+branch, `name`, `unit_cost_minor`, `min_stock`).
+- `POST /api/v1/parts/{id}/adjust`: `{ quantity: nonzero int, reason: string (max 255) }` inside `DB::transaction` locking `part`:
+  1. Require `on_hand + quantity >= 0` (else `422` on `quantity`).
+  2. Insert `stock_movements` row and post balanced GL (`source_type='stock_adjustment'`): if `quantity > 0` → `DR 1200 / CR 5000`; if `quantity < 0` → `DR 5000 / CR 1200` for `abs(quantity) * unit_cost_minor`.
+- `GET /api/v1/stock-movements`: `company_id` required; optional `branch_id`, `part_id`, `work_order_id`, `purchase_order_id`, `q`, `page`, `sort` (`id|created_at|part_name|quantity|unit_cost_minor`), `dir`.
+
+#### C. Procurement — Suppliers & Multi-Line Purchase Orders (`suppliers.*` / `purchase_orders.*`)
+- `GET/POST /api/v1/suppliers` & `PATCH /api/v1/suppliers/{id}`: `company_id` required on `GET`; optional `is_active`, `q`, `page`, `sort` (`id|name|email|is_active`), `dir`.
+- `GET/POST /api/v1/purchase-orders`: `company_id` required on `GET`; optional `branch_id`, `status` (`draft|submitted|approved|received|cancelled`), `supplier_id`, `q`, `page`, `sort` (`id|supplier_name|total_minor|status|created_at`), `dir`. `POST` accepts `supplier_id`, `branch_id`, `notes?`, `lines[]` (`min:1`, `{ part_id, quantity >= 1, unit_cost_minor >= 0 }`).
+- `GET/PATCH /api/v1/purchase-orders/{id}`: `PATCH` allowed only while `status === 'draft'` (`409` otherwise).
+- `POST /api/v1/purchase-orders/{id}/submit`: `draft` → `submitted` (`purchase_orders.manage`).
+- `POST /api/v1/purchase-orders/{id}/approve`: `submitted` → `approved` (`purchase_orders.approve` — `403` for `operations`).
+- `POST /api/v1/purchase-orders/{id}/receive`: inside `DB::transaction` with `PurchaseOrder::lockForUpdate()`:
+  1. Require `status === 'approved'` (`409` on duplicate receive or wrong state).
+  2. Insert positive `stock_movements` for every line (`reason = 'Purchase receipt'`, `purchase_order_id`).
+  3. Set `status = 'received'`, `received_at = now()`.
+  4. Post balanced GL (`source_type='purchase_order'`): `DR 1200 Spare Parts Inventory (total_minor)`, `CR 2000 Supplier Payables (total_minor)`.
+- `POST /api/v1/purchase-orders/{id}/cancel`: allowed while `status` in `['draft', 'submitted', 'approved']` (`409` if already `received` or `cancelled`).
+
+#### D. Live Vehicle 360 Summary (`GET /api/v1/vehicles/{id}/summary`, `vehicles.view`)
+- Returns:
+  - Always populated: `vehicle_id`, `work_order_count`, `open_work_order_count`, `total_downtime_hours` (sum of `started_at -> completed_at/now` for `in_progress`/`completed` work orders), `recent_work_orders[]` (last 5).
+  - Populated **only** when caller holds `invoices.view` (else `null`): `cumulative_revenue_minor` (issued rental invoices for vehicle minus refunds), `maintenance_cost_minor` (completed work orders), `other_expenses_minor` (non-work-order expenses linked to `vehicle_id`), `net_roi_minor` (`cumulative_revenue_minor - maintenance_cost_minor - other_expenses_minor`).
+
+### 9.5 Required Feature Tests (`tests/Feature/MilestoneNineTest.php`)
+1. Multi-line PO `draft → submit → approve` (`403` for `operations`, `200` for `finance`) → `receive` increments stock once across all lines, posts `DR 1200 / CR 2000`, and rejects duplicate `receive` (`409`).
+2. Work order `start` switches vehicle to `maintenance` and rejects rented/reserved vehicles (`409`); `consume-parts` deducts stock atomically and rejects insufficient stock (`422`); `complete` restores vehicle to `available`, creates `maintenance` Expense, and maintains balanced GL (`SUM(debit) === SUM(credit)`).
+3. Manual stock adjustment rejects negative resulting stock (`422`) and posts balanced GL.
+4. `GET /api/v1/vehicles/{id}/summary` returns operational downtime & work orders for `operations` with `null` financial fields, and full revenue/cost/Net ROI for `finance` & `company-admin`.
 
 ## Milestone 10 — Live Messaging/Chat Center, Dashboard KPIs/Infographics, Reports & Audit (PR #13)
 *(Will be appended when Milestone 10 is implemented.)*

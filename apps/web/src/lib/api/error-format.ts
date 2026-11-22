@@ -40,6 +40,15 @@ const FIELD_LABELS: Record<string, string> = {
   custom_customer_name: "Custom customer name",
   custom_customer_email: "Custom customer email",
   custom_customer_phone: "Custom customer phone",
+  part_id: "Spare part",
+  supplier_id: "Supplier",
+  work_order_id: "Work order",
+  purchase_order_id: "Purchase order",
+  labour_cost_minor: "Labour cost",
+  unit_cost_minor: "Unit cost",
+  min_stock: "Minimum stock",
+  sku: "Part SKU",
+  completion_notes: "Completion notes",
 };
 
 const MESSAGE_REPLACEMENTS: readonly [RegExp, string][] = [

@@ -32,8 +32,8 @@ test("proxy allowlist excludes tokens, deletes, arbitrary URLs and unsupported d
     "api/v1/auth/tokens",
     "https://elsewhere.test",
     "api/v1/../users",
-    "api/v1/work-orders",
-    "api/v1/purchase-orders",
+    "api/v1/audit-events",
+    "api/v1/messages",
   ])
     expect(allowedPath("GET", path)).toBe(false);
   expect(allowedPath("DELETE", "api/v1/customers/1")).toBe(false);
@@ -56,8 +56,8 @@ test("proxy allowlist excludes tokens, deletes, arbitrary URLs and unsupported d
   expect(allowedPath("PATCH", "api/v1/users/1")).toBe(true);
   expect(allowedPath("PATCH", "api/v1/vehicles/1")).toBe(true);
   const rejected = await proxy(
-    make("api/v1/work-orders"),
-    "api/v1/work-orders",
+    make("api/v1/audit-events"),
+    "api/v1/audit-events",
     config,
     async () => {
       throw new Error("Must not call upstream");
@@ -583,4 +583,38 @@ test("M8 finance, AR ageing, GL, and invoice PDF routes enforce scoped queries a
   expect(pdfRes.headers.get("content-type")).toBe("application/pdf");
   expect(pdfRes.headers.get("x-content-type-options")).toBe("nosniff");
   expect(await pdfRes.text()).toContain("%PDF-1.4");
+});
+
+test("M9 maintenance, inventory, procurement, and vehicle 360 routes enforce scoped queries and allowlists", async () => {
+  for (const invalid of [
+    "api/v1/work-orders",
+    "api/v1/work-orders?company_id=1&status=bogus",
+    "api/v1/parts",
+    "api/v1/parts?company_id=1&low_stock_only=maybe",
+    "api/v1/stock-movements",
+    "api/v1/suppliers",
+    "api/v1/purchase-orders",
+    "api/v1/purchase-orders?company_id=1&status=shipped",
+  ]) {
+    const [path] = invalid.split("?");
+    const res = await proxy(make(invalid), path, config, async () => {
+      throw new Error("Must not reach upstream");
+    });
+    expect(res.status).toBe(400);
+  }
+
+  for (const valid of [
+    "api/v1/work-orders?company_id=1&status=in_progress&sort=due_at&dir=asc",
+    "api/v1/parts?company_id=1&low_stock_only=1&sort=on_hand&dir=asc",
+    "api/v1/stock-movements?company_id=1&sort=created_at&dir=desc",
+    "api/v1/suppliers?company_id=1&is_active=1&sort=name&dir=asc",
+    "api/v1/purchase-orders?company_id=1&status=approved&sort=total_minor&dir=desc",
+    "api/v1/vehicles/10/summary",
+  ]) {
+    const [path] = valid.split("?");
+    const res = await proxy(make(valid), path, config, async () =>
+      Response.json({ data: {} }),
+    );
+    expect(res.status).toBe(200);
+  }
 });

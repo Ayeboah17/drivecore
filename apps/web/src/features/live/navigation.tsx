@@ -20,7 +20,10 @@ import { navigation } from "@/lib/navigation/definitions";
 import {
   can,
   canAccessFinance,
+  canAccessInventory,
+  canAccessMaintenance,
   canAccessOperations,
+  canAccessProcurement,
   canAccessRentals,
   canAccessUserAdmin,
 } from "@/lib/api/contracts";
@@ -77,14 +80,23 @@ export function LiveNavigation({
                 ? !canAccessRentals(user!)
                 : item.key === "finance"
                   ? !canAccessFinance(user!)
-                  : permission !== null && !can(user!, permission);
+                  : item.key === "maintenance"
+                    ? !canAccessMaintenance(user!)
+                    : item.key === "inventory"
+                      ? !canAccessInventory(user!)
+                      : item.key === "procurement"
+                        ? !canAccessProcurement(user!)
+                        : permission !== null && !can(user!, permission);
         const planned =
           item.key !== "dashboard" &&
           item.key !== "operations" &&
           item.key !== "fleet" &&
           item.key !== "customers" &&
           item.key !== "rentals" &&
+          item.key !== "maintenance" &&
+          item.key !== "inventory" &&
           item.key !== "finance" &&
+          item.key !== "procurement" &&
           item.key !== "administration";
         const target =
           item.key === "dashboard"
@@ -97,11 +109,17 @@ export function LiveNavigation({
                   ? "customers"
                   : item.key === "rentals"
                     ? "rentals"
-                    : item.key === "finance"
-                      ? "finance"
-                      : item.key === "administration"
-                        ? "users"
-                        : `modules/${item.key}`;
+                    : item.key === "maintenance"
+                      ? "maintenance"
+                      : item.key === "inventory"
+                        ? "inventory"
+                        : item.key === "finance"
+                          ? "finance"
+                          : item.key === "procurement"
+                            ? "procurement"
+                            : item.key === "administration"
+                              ? "users"
+                              : `modules/${item.key}`;
         const basePath = `/companies/${scope.companyId}/${target}`;
         const active =
           !restricted &&

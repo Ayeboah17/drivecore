@@ -14,6 +14,7 @@ import { getRecord } from "./service";
 import { RecordDirectory } from "./directory";
 import { RecordDetails, VehicleStatus } from "./presentation";
 import { EntityDocumentsPanel } from "@/features/documents/documents-panel";
+import { Vehicle360Panel } from "@/features/maintenance/maintenance-page";
 
 export function RecordPage({ domain }: { domain: Domain }) {
   const { record: route = [] } = useParams<{ record?: string[] }>();
@@ -216,6 +217,9 @@ export function RecordPage({ domain }: { domain: Domain }) {
               )?.name ?? `Branch #${value.branch_id}`
             }
           />
+          {domain === "vehicles" && "registration" in value ? (
+            <Vehicle360Panel vehicle={value} />
+          ) : null}
           {can(user!, "documents.view") ? (
             <EntityDocumentsPanel
               entityType={domain === "customers" ? "customer" : "vehicle"}
