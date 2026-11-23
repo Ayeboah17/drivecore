@@ -17,13 +17,22 @@ import { createQueryClient } from "@/lib/data/query-client";
 import { ApiError, initializeCsrf, read, request } from "@/lib/api/client";
 import { userSchema, type User } from "@/lib/api/contracts";
 
+export type LoginResult =
+  | { status: "authenticated" }
+  | { status: "two_factor_required"; challengeToken: string };
+
 interface Session {
   user: User | null;
   pending: boolean;
   error: Error | null;
   notice: string | null;
   epoch: number;
-  login: (email: string, password: string) => Promise<void>;
+  login: (email: string, password: string) => Promise<LoginResult>;
+  verifyTwoFactor: (input: {
+    challengeToken: string;
+    code?: string;
+    recoveryCode?: string;
+  }) => Promise<void>;
   adoptUser: (user: User, resetSession?: boolean) => Promise<void>;
   logout: () => Promise<void>;
   expire: () => void;
@@ -131,7 +140,7 @@ function SessionState({ children }: { children: React.ReactNode }) {
         refresh: () => {
           void identity.refetch();
         },
-        login: async (email, password) => {
+        login: async (email, password): Promise<LoginResult> => {
           const active = ++generation.current;
           setNotice(null);
           await initializeCsrf();
@@ -139,11 +148,50 @@ function SessionState({ children }: { children: React.ReactNode }) {
             method: "POST",
             body: { email, password },
           });
+          const challenge = z
+            .object({
+              two_factor_required: z.literal(true),
+              challenge_token: z.string().min(1),
+            })
+            .safeParse(payload);
+          if (challenge.success) {
+            return {
+              status: "two_factor_required",
+              challengeToken: challenge.data.challenge_token,
+            };
+          }
           const parsed = z.object({ data: userSchema }).safeParse(payload);
           if (!parsed.success)
             throw new ApiError(
               502,
               "Unexpected sign-in response. Reload to verify your session.",
+            );
+          if (active !== generation.current) return { status: "authenticated" };
+          const nextEpoch = epoch + 1;
+          justSignedInEpoch.current = nextEpoch;
+          await client.cancelQueries();
+          client.clear();
+          client.setQueryData(["identity", nextEpoch], parsed.data.data);
+          setEpoch(nextEpoch);
+          return { status: "authenticated" };
+        },
+        verifyTwoFactor: async ({ challengeToken, code, recoveryCode }) => {
+          const active = ++generation.current;
+          setNotice(null);
+          await initializeCsrf();
+          const payload = await request("api/v1/auth/two-factor/challenge", {
+            method: "POST",
+            body: {
+              challenge_token: challengeToken,
+              ...(code ? { code } : {}),
+              ...(recoveryCode ? { recovery_code: recoveryCode } : {}),
+            },
+          });
+          const parsed = z.object({ data: userSchema }).safeParse(payload);
+          if (!parsed.success)
+            throw new ApiError(
+              502,
+              "Unexpected two-factor verification response. Reload to verify your session.",
             );
           if (active !== generation.current) return;
           const nextEpoch = epoch + 1;

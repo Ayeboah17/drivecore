@@ -8,7 +8,7 @@
 
 ---
 
-## Master Quick-Reference Index (M6–M15)
+## Master Quick-Reference Index (M6–M16)
 
 ### A. Endpoint Index
 
@@ -81,6 +81,10 @@
 | M15 | `GET/POST` | `/api/v1/bank-accounts`, `/{id}/transactions`, `/{id}/reconciliations`, `/bank-transactions/{id}/{match\|unmatch}` | `gl.view` / `expenses.manage` (`banking.view`/`manage`) | Cash & Bank Accounts, CSV/manual statement lines, auto-suggested matching, bank-fee posting, reconciliation close |
 | M15 | `GET/POST` | `/api/v1/fixed-assets`, `/depreciate`, `/{id}/{request-disposal\|dispose}` | `gl.view` / `expenses.manage` (`assets.view`/`manage`) | Fixed Assets (vehicle or equipment), idempotent monthly depreciation (`straight_line` / `reducing_balance`), approval-gated Vehicle Disposal (`sold` / `decommissioned`) |
 | M15 | `GET` | `/api/v1/reports/statements/{pnl\|balance-sheet\|cash-flow}` | `gl.view` (or `invoices.view`) | Server-aggregated Management P&L, Balance Sheet (`is_balanced`), and Cash Flow from posted GL journal lines |
+| M16 | `GET/POST/PATCH` | `/api/v1/roles`, `/users`, `/invitations` (Exact SRS §3 Roles) | `users.view`/`manage` (`HR/Admin Manager` non-privileged only; `System Administrator` all) | Adds all 10 exact SRS §3 roles (`ceo`, `general-manager`, `business-accounts-manager`, `operations-manager`, `maintenance-manager`, `finance-manager`, `credit-control-manager`, `hr-admin-manager`, `mechanic-technician`, `system-administrator`) + `driver`; keeps legacy slugs backward-compatible |
+| M16 | `GET/POST/PATCH` | `/api/v1/leads` & `POST /api/v1/leads/{id}/convert` | `leads.view`/`manage` (or `quotations.view`/`manage`) | CRM Lead-to-Quote pipeline (`new\|contacted\|qualified\|proposal_sent\|won\|lost`); `convert` auto-creates or links Customer & transitions to Quotation |
+| M16 | `POST` | `/api/v1/auth/two-factor/{setup\|confirm\|disable\|recovery-codes\|challenge}` | Authenticated (public rate-limited for `challenge`) | TOTP 2FA enrollment (encrypted secret + `otpauth_uri`), 6-digit confirmation + 8 single-use hashed recovery codes, 2-step login challenge |
+| M16 | `POST` | `/api/v1/users/{id}/reset-two-factor` | `System Administrator` / platform admin only | Lockout recovery clearing target user's TOTP secret & recovery codes (`409` on self-reset; `403` for HR/Admin Manager) |
 
 ### B. Spatie Role & Permission Matrix (M6–M10 Additions)
 
@@ -1330,8 +1334,71 @@ Schema::create('depreciation_entries', function (Blueprint $table): void {
 5. Fixed asset registration, idempotent monthly depreciation run (`YYYY-MM`), approval-gated Vehicle Disposal calculating gain/loss, posting GL, and transitioning vehicle status to `sold` or `decommissioned` (blocking future reservations with `409`).
 6. `GET /api/v1/reports/statements/{pnl|balance-sheet|cash-flow}` returns balanced server-computed GL totals and enforces `403` for non-finance roles.
 
-## Milestone 16 — Exact SRS §3 Role Expansion, Lead-to-Quote CRM & Privileged 2FA (PR #19)
-*(Will be appended when Milestone 16 is implemented.)*
+## Milestone 16 — Exact SRS §3 Role Expansion, Lead-to-Quote CRM Pipeline & Privileged TOTP 2FA (PR #19)
+
+### 16.1 Exact SRS §3 Role Catalog & Least-Privilege Governance
+Seed all **10 exact SRS §3 roles** plus field `driver` alongside legacy backward-compatible aliases (`company-admin`, `operations`, `finance`, `viewer`):
+1. `ceo` (**CEO** — privileged): Full cross-module read + Financial Statements + Audit Trail + Approval Engine decisions (`approvals.decide`, `quotations.approve_discount`, `purchase_orders.approve`). No System Admin settings/security write access.
+2. `general-manager` (**General Manager** — privileged): Full operational, commercial & financial read oversight + Approval Engine decisions. No System Admin security mutations.
+3. `business-accounts-manager` (**Business Accounts Manager**): CRM Leads (`leads.*`), Customers (`customers.*`), Rate Cards, Quotations (`quotations.*`), Reservations & Contracts (`reservations.*`, `rentals.view`), Documents view. No accounting/GL writes.
+4. `operations-manager` (**Operations Manager**): Fleet (`vehicles.*`), Operations/Dispatch, Reservations & Rentals (`reservations.*`, `rentals.*`), Inspections, Fuel Log, Documents/Compliance. No GL/Finance writes.
+5. `maintenance-manager` (**Maintenance Manager**): Work Orders (`work_orders.*`), Preventive Schedules, Parts & Tyres/Batteries (`parts.*`), Fuel Log, Suppliers & Purchase Orders (`suppliers.*`, `purchase_orders.view/manage`).
+6. `finance-manager` (**Finance Manager** — privileged): Full Finance & Accounting (`invoices.*`, `payments.manage`, `expenses.*`, `gl.view`, `ap.*`, `banking.*`, `assets.*`), Financial Statements, Approval decisions.
+7. `credit-control-manager` (**Credit Control Manager** — privileged): Customers view, Invoices/AR Ageing/Statements view, Credit Control (`credit.view/manage`, holds/releases, promises to pay, collection notes), Credit Note requests. Cannot edit GL/AP/Banking/Assets.
+8. `hr-admin-manager` (**HR/Admin Manager**): Drivers & non-privileged staff administration (`users.view`, `users.manage_non_privileged`), Documents & Compliance Expiry Hub (`documents.*`). MUST receive **`403 Forbidden`** when attempting to assign/edit privileged roles (`ceo`, `general-manager`, `finance-manager`, `credit-control-manager`, `system-administrator`), edit company financial/security settings, or reset 2FA.
+9. `mechanic-technician` (**Mechanic / Technician**): Assigned/branch Work Orders (`work_orders.view_assigned`, `work_orders.manage_assigned` — diagnosis, parts consumption, completion), Parts read (`parts.view`). MUST receive **`403`** on Finance, Customers, Leads, Quotations, and monetary ROI fields.
+10. `system-administrator` (**System Administrator** — privileged): Full user/role/invitation administration (`users.*`, `roles.view`), Company & Security Settings (`settings.manage`, `require_2fa_for_privileged`), 2FA Reset (`users/{id}/reset-two-factor`), Audit Trail (`audit.view`), Branches.
+11. `driver` (**Driver**): Field-only assigned handovers, returns, inspections, fuel entry for active vehicle, and driver/dispatch chat.
+
+### 16.2 Database Migrations
+```php
+Schema::create('leads', function (Blueprint $table): void {
+    $table->id();
+    $table->foreignId('company_id')->constrained()->cascadeOnDelete();
+    $table->foreignId('branch_id')->constrained()->cascadeOnDelete();
+    $table->string('contact_name', 120);
+    $table->string('company_name', 140)->nullable();
+    $table->string('customer_type', 16)->default('corporate'); // individual | corporate
+    $table->string('email', 255)->nullable();
+    $table->string('phone', 40)->nullable();
+    $table->string('source', 32)->default('corporate_outreach'); // website | referral | corporate_outreach | walk_in | phone | other
+    $table->string('stage', 24)->default('new'); // new | contacted | qualified | proposal_sent | won | lost
+    $table->text('vehicle_requirements')->nullable();
+    $table->date('expected_start_date')->nullable();
+    $table->unsignedSmallInteger('expected_days')->nullable();
+    $table->unsignedBigInteger('estimated_value_minor')->nullable();
+    $table->foreignId('assigned_to_user_id')->nullable()->constrained('users')->nullOnDelete();
+    $table->date('next_follow_up_at')->nullable();
+    $table->string('lost_reason', 255)->nullable();
+    $table->foreignId('customer_id')->nullable()->constrained()->nullOnDelete();
+    $table->foreignId('quotation_id')->nullable()->constrained()->nullOnDelete();
+    $table->text('notes')->nullable();
+    $table->timestamps();
+    $table->index(['company_id', 'stage']);
+});
+
+Schema::table('users', function (Blueprint $table): void {
+    $table->text('two_factor_secret')->nullable(); // encrypted cast
+    $table->text('two_factor_recovery_codes')->nullable(); // encrypted JSON of hashed single-use codes
+    $table->timestampTz('two_factor_confirmed_at')->nullable();
+});
+
+Schema::table('company_settings', function (Blueprint $table): void {
+    $table->boolean('require_2fa_for_privileged')->default(false);
+});
+```
+
+### 16.3 TOTP 2FA Security Contract
+- **Enrollment**: `POST /api/v1/auth/two-factor/setup` generates a 160-bit Base32 secret stored encrypted (unconfirmed) and returns `{ secret, otpauth_uri }`. `POST /api/v1/auth/two-factor/confirm` validates a 6-digit RFC 6238 TOTP code (±1 30s window), sets `two_factor_confirmed_at`, generates 8 single-use recovery codes (stored hashed), and returns `{ two_factor_enabled: true, recovery_codes }`.
+- **2-Step Login Challenge**: If `user.two_factor_confirmed_at !== null`, `POST /api/v1/auth/login` MUST NOT issue a full session; instead it returns `{ two_factor_required: true, challenge_token }` (single-use random token, 5-minute TTL, rate-limited `5/min`). `POST /api/v1/auth/two-factor/challenge` verifies `{ challenge_token, code }` OR `{ challenge_token, recovery_code }` (consuming the recovery code atomically), establishes the Sanctum session, and returns `{ data: User }`.
+- **Privileged Enforcement**: When any user company has `require_2fa_for_privileged = true` and the user holds a privileged role (`ceo`, `general-manager`, `finance-manager`, `credit-control-manager`, `system-administrator`, `is_platform_admin`, or legacy `company-admin`/`finance`) with `two_factor_confirmed_at === null`, `GET /api/v1/auth/me` includes `two_factor_enrollment_required: true` and non-auth/non-2FA routes return `403` until enrolled. `POST /api/v1/auth/two-factor/disable` returns `409` while enforced.
+- **Admin Reset**: `POST /api/v1/users/{id}/reset-two-factor` (System Administrator / platform admin only; `409` on self) clears target user's TOTP secret, recovery codes, and `two_factor_confirmed_at`, and logs an `audit_event`.
+
+### 16.4 Required Feature Tests (`tests/Feature/MilestoneSixteenTest.php`)
+1. Exact 10 SRS §3 roles + `driver` are assignable; `HR/Admin Manager` receives `403` when assigning privileged roles or resetting 2FA; `Mechanic / Technician` accesses assigned/branch work orders and receives `403` on Finance/Customers/Leads.
+2. `POST/PATCH /api/v1/leads` validates stage transitions (`lost` requires `lost_reason`); `POST /api/v1/leads/{id}/convert` creates or links existing Customer by email and moves lead to `proposal_sent`.
+3. TOTP 2FA setup → confirm returns 8 recovery codes → next login requires challenge → TOTP code or single-use recovery code succeeds (reusing a recovery code fails `422`).
+4. Toggling `require_2fa_for_privileged = true` sets `two_factor_enrollment_required = true` for unenrolled privileged users and blocks disabling 2FA (`409`); `System Administrator` resets another user's 2FA (`200`) and self-reset returns `409`.
 
 ## Milestone 17 — Printing & Barcode Scanning (PR #20 — TBD)
 *(Will be appended when Milestone 17 is implemented.)*

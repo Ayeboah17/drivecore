@@ -14,6 +14,7 @@ import {
 import { useSession } from "@/features/auth/session-provider";
 import { changePassword, updateProfile } from "@/features/auth/service";
 import { PasswordStrengthHint } from "@/features/auth/password-strength";
+import { TwoFactorCard } from "@/features/auth/two-factor-card";
 import { Protected } from "@/features/live/shell";
 import {
   LiveAccountMenu,
@@ -42,6 +43,7 @@ function AccountWorkspace() {
     useLiveLogout();
   const user = session.user!;
   const forced = Boolean(user.must_change_password);
+  const needs2fa = Boolean(user.two_factor_enrollment_required);
 
   const [displayName, setDisplayName] = useState(user.name);
   const [profileBusy, setProfileBusy] = useState(false);
@@ -181,6 +183,24 @@ function AccountWorkspace() {
                   <p className="mt-0.5 text-xs opacity-90">
                     Your account was created with a temporary password. Choose a
                     new personal password below to unlock DriveCore workspaces.
+                  </p>
+                </div>
+              </div>
+            ) : null}
+
+            {needs2fa && !forced ? (
+              <div
+                role="alert"
+                className="flex items-start gap-3 rounded-2xl border border-amber-500/40 bg-amber-500/10 p-4 text-sm text-amber-900 dark:text-amber-200"
+              >
+                <ShieldAlert className="mt-0.5 size-5 shrink-0" aria-hidden="true" />
+                <div>
+                  <p className="font-semibold">
+                    Two-factor authentication required
+                  </p>
+                  <p className="mt-0.5 text-xs opacity-90">
+                    Your company requires TOTP 2FA for privileged roles. Complete
+                    two-factor setup below to unlock workspaces.
                   </p>
                 </div>
               </div>
@@ -384,6 +404,8 @@ function AccountWorkspace() {
                   </Button>
                 </form>
               </section>
+
+              {!forced ? <TwoFactorCard /> : null}
             </div>
           </ViewFadeIn>
         </main>

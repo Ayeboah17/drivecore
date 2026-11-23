@@ -56,6 +56,13 @@ export function Protected({ children }: { children: React.ReactNode }) {
       path !== "/account"
     ) {
       router.replace("/account?force_password_change=1");
+    } else if (
+      !session.pending &&
+      !session.error &&
+      session.user?.two_factor_enrollment_required &&
+      path !== "/account"
+    ) {
+      router.replace("/account?setup_2fa=1");
     }
   }, [session.pending, session.error, session.user, router, path, search]);
   if (session.pending)
@@ -87,6 +94,12 @@ export function Protected({ children }: { children: React.ReactNode }) {
     return (
       <p className="p-page" role="status">
         Password update required before continuing…
+      </p>
+    );
+  if (session.user.two_factor_enrollment_required && path !== "/account")
+    return (
+      <p className="p-page" role="status">
+        Two-factor authentication enrollment required before continuing…
       </p>
     );
   return children;

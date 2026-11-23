@@ -53,6 +53,7 @@ export async function updateCompanySettings(
     volume_unit?: "l" | "gal_us";
     fuel_efficiency_unit?: "l_per_100km" | "km_per_l" | "mpg_us" | "mpg_uk";
     weight_unit?: "kg" | "lb";
+    require_2fa_for_privileged?: boolean;
   },
   signal: AbortSignal,
 ): Promise<CompanySettings> {

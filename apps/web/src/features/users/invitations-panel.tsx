@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Ban, MailPlus, RefreshCw } from "lucide-react";
+import { useSession } from "@/features/auth/session-provider";
 import { useLiveContext } from "@/features/live/context";
 import {
   createInvitation,
@@ -12,8 +13,10 @@ import {
 } from "@/features/auth/service";
 import { errorText } from "@/lib/api/client";
 import {
+  assignableRoleNames,
+  canAssignRole,
   managedRoleLabels,
-  managedRoleNames,
+  type AssignableRoleName,
   type Invitation,
   type ManagedRoleName,
 } from "@/lib/api/contracts";
@@ -63,9 +66,17 @@ export function InviteUserDialog({
   onOpenChange: (open: boolean) => void;
   onInvited: (email: string) => void;
 }) {
+  const { user } = useSession();
   const scope = useLiveContext();
+  const allowedRoles = assignableRoleNames.filter(
+    (r) => !user || canAssignRole(user, r),
+  );
   const [email, setEmail] = useState("");
-  const [role, setRole] = useState<ManagedRoleName>("operations");
+  const [role, setRole] = useState<AssignableRoleName>(
+    allowedRoles.includes("operations-manager")
+      ? "operations-manager"
+      : allowedRoles[0] ?? "driver",
+  );
   const [branchId, setBranchId] = useState<string>("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -136,8 +147,8 @@ export function InviteUserDialog({
             <DriveCoreSelect
               ariaLabel="Invited user role"
               value={role}
-              onValueChange={(v) => setRole(v as ManagedRoleName)}
-              options={managedRoleNames.map((r) => ({
+              onValueChange={(v) => setRole(v as AssignableRoleName)}
+              options={allowedRoles.map((r) => ({
                 value: r,
                 label: managedRoleLabels[r],
               }))}

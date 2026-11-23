@@ -8,6 +8,8 @@ import { useSession } from "@/features/auth/session-provider";
 import { useLiveContext } from "@/features/live/context";
 import { ApiError, errorText, initializeCsrf } from "@/lib/api/client";
 import {
+  assignableRoleNames,
+  canAssignRole,
   managedRoleLabels,
   managedRoleNames,
   type ManagedRoleName,
@@ -34,7 +36,7 @@ import {
 } from "./schemas";
 import { createUser, updateUser } from "./service";
 
-const ROLE_OPTIONS = managedRoleNames.map((name) => ({
+const ROLE_OPTIONS = assignableRoleNames.map((name) => ({
   value: name,
   label: managedRoleLabels[name],
 }));
@@ -83,7 +85,7 @@ function CreateUserForm({
       email: "",
       password: "",
       password_confirmation: "",
-      role: "operations",
+      role: "operations-manager",
       branch_id: defaultBranch,
     },
   });
@@ -210,7 +212,9 @@ function CreateUserForm({
               }
               ariaInvalid={!!errors.role}
               aria-describedby={`${formId}-role-error`}
-              options={ROLE_OPTIONS}
+              options={ROLE_OPTIONS.filter(
+                (o) => !session.user || canAssignRole(session.user, o.value),
+              )}
             />
             <p
               id={`${formId}-role-error`}
@@ -518,7 +522,9 @@ function EditUserForm({
               })
             }
             ariaInvalid={!!errors.role}
-            options={ROLE_OPTIONS}
+            options={ROLE_OPTIONS.filter(
+              (o) => !session.user || canAssignRole(session.user, o.value),
+            )}
           />
         </div>
 

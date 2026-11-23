@@ -22,6 +22,10 @@ export function LoginForm() {
   const router = useRouter();
   const search = useSearchParams();
   const [error, setError] = useState<unknown>(null);
+  const [challengeToken, setChallengeToken] = useState<string | null>(null);
+  const [twoFactorCode, setTwoFactorCode] = useState("");
+  const [useRecovery, setUseRecovery] = useState(false);
+  const [verifying2fa, setVerifying2fa] = useState(false);
   const {
     register,
     handleSubmit,
@@ -36,7 +40,9 @@ export function LoginForm() {
       router.replace(
         session.user.must_change_password
           ? "/account?force_password_change=1"
-          : target,
+          : session.user.two_factor_enrollment_required
+            ? "/account?setup_2fa=1"
+            : target,
       );
     }
   }, [session.pending, session.error, session.user, router, target]);
@@ -73,14 +79,110 @@ export function LoginForm() {
           </div>
         ) : session.user ? (
           <p role="status">Opening workspace…</p>
+        ) : challengeToken ? (
+          <form
+            className="space-y-4"
+            onSubmit={async (e) => {
+              e.preventDefault();
+              setError(null);
+              const trimmed = twoFactorCode.trim();
+              if (!trimmed) {
+                setError(
+                  new Error(
+                    useRecovery
+                      ? "Enter a recovery code."
+                      : "Enter your 6-digit authenticator code.",
+                  ),
+                );
+                return;
+              }
+              setVerifying2fa(true);
+              try {
+                await session.verifyTwoFactor({
+                  challengeToken,
+                  ...(useRecovery
+                    ? { recoveryCode: trimmed }
+                    : { code: trimmed }),
+                });
+              } catch (failure) {
+                setError(failure);
+              } finally {
+                setVerifying2fa(false);
+              }
+            }}
+          >
+            <div className="space-y-1">
+              <h2 className="text-base font-bold tracking-tight">
+                Two-factor verification
+              </h2>
+              <p className="text-xs text-muted-foreground">
+                {useRecovery
+                  ? "Enter one of your single-use recovery codes."
+                  : "Enter the 6-digit code from your authenticator app."}
+              </p>
+            </div>
+            <div className="space-y-2">
+              <label htmlFor="two-factor-code">
+                {useRecovery ? "Recovery code" : "Verification code"}
+              </label>
+              <Input
+                id="two-factor-code"
+                inputMode={useRecovery ? "text" : "numeric"}
+                autoComplete="one-time-code"
+                placeholder={useRecovery ? "XXXX-XXXX" : "123456"}
+                value={twoFactorCode}
+                onChange={(e) => setTwoFactorCode(e.target.value)}
+                disabled={verifying2fa}
+              />
+            </div>
+            {error ? (
+              <div role="alert" className="text-sm text-danger-foreground">
+                <p>{errorText(error)}</p>
+              </div>
+            ) : null}
+            <Button type="submit" className="w-full" disabled={verifying2fa}>
+              {verifying2fa ? "Verifying…" : "Verify & sign in"}
+            </Button>
+            <div className="flex items-center justify-between text-xs">
+              <button
+                type="button"
+                className="font-medium text-link hover:underline"
+                onClick={() => {
+                  setUseRecovery((v) => !v);
+                  setTwoFactorCode("");
+                  setError(null);
+                }}
+              >
+                {useRecovery
+                  ? "Use authenticator code instead"
+                  : "Use a recovery code"}
+              </button>
+              <button
+                type="button"
+                className="text-muted-foreground hover:text-foreground"
+                onClick={() => {
+                  setChallengeToken(null);
+                  setTwoFactorCode("");
+                  setError(null);
+                }}
+              >
+                Back to sign in
+              </button>
+            </div>
+          </form>
         ) : (
           <form
             className="space-y-4"
             onSubmit={handleSubmit(async (values) => {
               setError(null);
               try {
-                await session.login(values.email, values.password);
+                const res = await session.login(values.email, values.password);
                 resetField("password");
+                if (res.status === "two_factor_required") {
+                  setChallengeToken(res.challengeToken);
+                  setTwoFactorCode("");
+                  setUseRecovery(false);
+                }
               } catch (failure) {
                 resetField("password");
                 setError(failure);

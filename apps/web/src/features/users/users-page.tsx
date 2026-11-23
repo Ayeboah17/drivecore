@@ -9,9 +9,11 @@ import { useSession } from "@/features/auth/session-provider";
 import { useLiveContext } from "@/features/live/context";
 import { canCreateBranch } from "@/features/setup/contracts";
 import {
+  assignableRoleNames,
   canAccessUserAdmin,
   canManageCompanySettings,
   canManageUsers,
+  canResetUserTwoFactor,
   managedRoleLabels,
   managedRoleNames,
   type ManagedRoleName,
@@ -46,7 +48,7 @@ import {
   sortRows,
   type SortDirection,
 } from "@/lib/table-sort";
-import { listRoles, listUsers } from "./service";
+import { listRoles, listUsers, resetUserTwoFactor } from "./service";
 
 const USER_SORT_KEYS = ["name", "email", "role", "is_active"] as const;
 import { FinancialSettingsPanel } from "./settings-panel";
@@ -54,7 +56,7 @@ import { InvitationsPanel, InviteUserDialog } from "./invitations-panel";
 
 const ROLE_FILTERS = [
   { value: "", label: "All roles" },
-  ...managedRoleNames.map((name) => ({
+  ...assignableRoleNames.map((name) => ({
     value: name,
     label: managedRoleLabels[name],
   })),
@@ -80,6 +82,8 @@ export function UsersAdminPage() {
 
   const allowed = !!user && canAccessUserAdmin(user, scope.companyId);
   const canManage = !!user && canManageUsers(user, scope.companyId);
+  const canReset2fa = !!user && canResetUserTwoFactor(user);
+  const [resetting2faId, setResetting2faId] = useState<number | null>(null);
   const canManageBranches = !!user && canCreateBranch(user, scope.companyId);
   const canViewSettings =
     !!user && canManageCompanySettings(user, scope.companyId);
@@ -506,6 +510,7 @@ export function UsersAdminPage() {
                   >
                     Status
                   </DataTableHeaderCell>
+                  <DataTableHeaderCell>2FA</DataTableHeaderCell>
                   <DataTableHeaderCell align="right">Action</DataTableHeaderCell>
                 </tr>
               </DataTableHead>
@@ -553,6 +558,13 @@ export function UsersAdminPage() {
                           {row.is_active ? "Active" : "Inactive"}
                         </StatusDotBadge>
                       </DataTableCell>
+                      <DataTableCell>
+                        <StatusDotBadge
+                          tone={row.two_factor_enabled ? "success" : "neutral"}
+                        >
+                          {row.two_factor_enabled ? "Enabled" : "Off"}
+                        </StatusDotBadge>
+                      </DataTableCell>
                       <DataTableCell align="right">
                         {canManage ? (
                           isSelf ? (
@@ -560,15 +572,46 @@ export function UsersAdminPage() {
                               Protected
                             </span>
                           ) : (
-                            <Button
-                              type="button"
-                              size="sm"
-                              variant="outline"
-                              onClick={() => setEditing(row)}
-                              className="transition-transform duration-150 ease-out active:scale-[0.98]"
-                            >
-                              Edit access
-                            </Button>
+                            <div className="inline-flex items-center gap-1.5">
+                              {canReset2fa && row.two_factor_enabled ? (
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  variant="outline"
+                                  disabled={resetting2faId === row.id}
+                                  onClick={async () => {
+                                    setResetting2faId(row.id);
+                                    try {
+                                      await resetUserTwoFactor(
+                                        row.id,
+                                        Number(scope.companyId),
+                                      );
+                                      setNotice(
+                                        `Two-factor authentication reset for ${row.name}.`,
+                                      );
+                                      await refreshUsers();
+                                    } catch (err) {
+                                      setNotice(errorText(err));
+                                    } finally {
+                                      setResetting2faId(null);
+                                    }
+                                  }}
+                                >
+                                  {resetting2faId === row.id
+                                    ? "Resetting…"
+                                    : "Reset 2FA"}
+                                </Button>
+                              ) : null}
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="outline"
+                                onClick={() => setEditing(row)}
+                                className="transition-transform duration-150 ease-out active:scale-[0.98]"
+                              >
+                                Edit access
+                              </Button>
+                            </div>
                           )
                         ) : (
                           <span className="text-xs text-muted-foreground">

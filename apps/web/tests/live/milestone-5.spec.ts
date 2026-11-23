@@ -221,7 +221,7 @@ test("company admin manages users, creates a driver, views role permissions, and
     .click();
   const conflictDialog = page.getByRole("dialog");
   await conflictDialog.getByLabel("Role", { exact: true }).click();
-  await page.getByRole("option", { name: "Viewer", exact: true }).click();
+  await page.getByRole("option", { name: "Operations Manager", exact: true }).click();
   await conflictDialog
     .getByRole("button", { name: "Save access", exact: true })
     .click();

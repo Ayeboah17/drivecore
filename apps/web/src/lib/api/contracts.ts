@@ -23,6 +23,8 @@ export const userSchema = z.object({
   email: z.string(),
   is_platform_admin: z.boolean(),
   must_change_password: z.boolean().optional(),
+  two_factor_enabled: z.boolean().optional(),
+  two_factor_enrollment_required: z.boolean().optional(),
   roles: z.array(z.string()),
   permissions: z.array(z.string()),
   companies: z.array(
@@ -126,21 +128,92 @@ export function mergeVehicleFunctions(
   return { next, error };
 }
 
-export const managedRoleNames = [
+export const assignableRoleNames = [
+  "ceo",
+  "general-manager",
+  "business-accounts-manager",
+  "operations-manager",
+  "maintenance-manager",
+  "finance-manager",
+  "credit-control-manager",
+  "hr-admin-manager",
+  "mechanic-technician",
+  "system-administrator",
+  "driver",
+] as const;
+export type AssignableRoleName = (typeof assignableRoleNames)[number];
+
+export const legacyRoleNames = [
   "company-admin",
   "operations",
   "finance",
   "viewer",
-  "driver",
+] as const;
+
+export const managedRoleNames = [
+  ...assignableRoleNames,
+  ...legacyRoleNames,
 ] as const;
 export type ManagedRoleName = (typeof managedRoleNames)[number];
+
+export const privilegedRoleNames: readonly ManagedRoleName[] = [
+  "ceo",
+  "general-manager",
+  "finance-manager",
+  "credit-control-manager",
+  "system-administrator",
+  "company-admin",
+  "finance",
+];
+
 export const managedRoleLabels: Record<ManagedRoleName, string> = {
-  "company-admin": "Company Admin",
-  operations: "Operations",
-  finance: "Finance",
-  viewer: "Viewer",
+  ceo: "CEO",
+  "general-manager": "General Manager",
+  "business-accounts-manager": "Business Accounts Manager",
+  "operations-manager": "Operations Manager",
+  "maintenance-manager": "Maintenance Manager",
+  "finance-manager": "Finance Manager",
+  "credit-control-manager": "Credit Control Manager",
+  "hr-admin-manager": "HR/Admin Manager",
+  "mechanic-technician": "Mechanic / Technician",
+  "system-administrator": "System Administrator",
   driver: "Driver",
+  "company-admin": "Company Admin (Legacy)",
+  operations: "Operations (Legacy)",
+  finance: "Finance (Legacy)",
+  viewer: "Viewer (Legacy)",
 };
+
+export function isPrivilegedRole(role: string): boolean {
+  return privilegedRoleNames.includes(role as ManagedRoleName);
+}
+
+export function isPrivilegedUser(user: User): boolean {
+  return user.is_platform_admin || user.roles.some((r) => isPrivilegedRole(r));
+}
+
+export function isSystemAdmin(user: User): boolean {
+  return (
+    user.is_platform_admin ||
+    user.roles.includes("system-administrator") ||
+    user.roles.includes("company-admin") ||
+    (user.permissions.includes("users.manage") &&
+      user.permissions.includes("settings.manage"))
+  );
+}
+
+export function canAssignRole(user: User, role: string): boolean {
+  if (isSystemAdmin(user)) return true;
+  // HR/Admin Manager can manage non-privileged roles only
+  if (user.roles.includes("hr-admin-manager")) {
+    return !isPrivilegedRole(role);
+  }
+  return false;
+}
+
+export function canResetUserTwoFactor(user: User): boolean {
+  return isSystemAdmin(user);
+}
 
 export const customerStatsRollupSchema = z.object({
   rental_count: nonNegInt,
@@ -253,6 +326,7 @@ export const companySettingsSchema = z.object({
     .optional()
     .default("l_per_100km"),
   weight_unit: z.enum(weightUnits).optional().default("kg"),
+  require_2fa_for_privileged: z.boolean().optional().default(false),
 });
 
 export const quotationVehicleSchema = z.object({
@@ -776,6 +850,7 @@ export const managedUserSchema = z.object({
   name: z.string(),
   email: z.string(),
   is_active: z.boolean(),
+  two_factor_enabled: z.boolean().optional().default(false),
   roles: z.array(z.string()),
   company_id: id.nullable(),
   branch_id: id.nullable(),
@@ -1654,6 +1729,101 @@ export function canViewStatements(user: User): boolean {
     user.is_platform_admin ||
     user.permissions.includes("gl.view") ||
     user.permissions.includes("invoices.view")
+  );
+}
+
+// ---------- Milestone 16: CRM Leads & Privileged TOTP 2FA ----------
+
+export const leadStages = [
+  "new",
+  "contacted",
+  "qualified",
+  "proposal_sent",
+  "won",
+  "lost",
+] as const;
+export type LeadStage = (typeof leadStages)[number];
+
+export const leadStageLabels: Record<LeadStage, string> = {
+  new: "New",
+  contacted: "Contacted",
+  qualified: "Qualified",
+  proposal_sent: "Proposal sent",
+  won: "Won",
+  lost: "Lost",
+};
+
+export const leadSources = [
+  "website",
+  "referral",
+  "corporate_outreach",
+  "walk_in",
+  "phone",
+  "other",
+] as const;
+export type LeadSource = (typeof leadSources)[number];
+
+export const leadSourceLabels: Record<LeadSource, string> = {
+  website: "Website",
+  referral: "Referral",
+  corporate_outreach: "Corporate outreach",
+  walk_in: "Walk-in",
+  phone: "Phone inquiry",
+  other: "Other",
+};
+
+export const leadSchema = z.object({
+  id: numericId,
+  company_id: numericId,
+  branch_id: numericId,
+  contact_name: z.string(),
+  company_name: z.string().nullable().optional().default(null),
+  customer_type: z.enum(["individual", "corporate"]),
+  email: z.string().nullable().optional().default(null),
+  phone: z.string().nullable().optional().default(null),
+  source: z.enum(leadSources),
+  stage: z.enum(leadStages),
+  vehicle_requirements: z.string().nullable().optional().default(null),
+  expected_start_date: z.string().nullable().optional().default(null),
+  expected_days: nonNegInt.nullable().optional().default(null),
+  estimated_value_minor: nonNegInt.nullable().optional().default(null),
+  assigned_to_user_id: numericId.nullable().optional().default(null),
+  assigned_to_name: z.string().nullable().optional().default(null),
+  next_follow_up_at: z.string().nullable().optional().default(null),
+  lost_reason: z.string().nullable().optional().default(null),
+  customer_id: numericId.nullable().optional().default(null),
+  quotation_id: numericId.nullable().optional().default(null),
+  notes: z.string().nullable().optional().default(null),
+  created_at: z.string().nullable().optional().default(null),
+  updated_at: z.string().nullable().optional().default(null),
+});
+export type Lead = z.infer<typeof leadSchema>;
+
+export const twoFactorSetupSchema = z.object({
+  secret: z.string(),
+  otpauth_uri: z.string(),
+});
+export type TwoFactorSetup = z.infer<typeof twoFactorSetupSchema>;
+
+export const twoFactorConfirmSchema = z.object({
+  two_factor_enabled: z.boolean(),
+  recovery_codes: z.array(z.string()),
+});
+export type TwoFactorConfirm = z.infer<typeof twoFactorConfirmSchema>;
+
+export function canAccessLeads(user: User): boolean {
+  return (
+    user.is_platform_admin ||
+    user.permissions.includes("leads.view") ||
+    user.permissions.includes("quotations.view")
+  );
+}
+
+export function canManageLeads(user: User): boolean {
+  return (
+    user.is_platform_admin ||
+    user.permissions.includes("leads.manage") ||
+    user.permissions.includes("quotations.manage")
   );
 }
 

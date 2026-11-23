@@ -63,6 +63,9 @@ function SettingsForm({
   const [requirePhotos, setRequirePhotos] = useState(
     Boolean(initial.require_inspection_photos),
   );
+  const [require2fa, setRequire2fa] = useState(
+    Boolean(initial.require_2fa_for_privileged),
+  );
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<unknown>(null);
   const lock = useRef(false);
@@ -115,6 +118,7 @@ function SettingsForm({
           volume_unit: volUnit,
           weight_unit: weightUnit,
           require_inspection_photos: requirePhotos,
+          require_2fa_for_privileged: require2fa,
         },
         controller.current.signal,
       );
@@ -262,6 +266,28 @@ function SettingsForm({
           />
           Require inspection photos before completing handover/return
         </label>
+
+        <div className="sm:col-span-2 border-t pt-4 space-y-2">
+          <h3 className="text-sm font-semibold">
+            Security &amp; two-factor policy (SRS §25)
+          </h3>
+          <label className="flex items-start gap-2 text-xs text-muted-foreground">
+            <input
+              type="checkbox"
+              checked={require2fa}
+              onChange={(e) => setRequire2fa(e.target.checked)}
+              className="mt-0.5 size-3.5 rounded border"
+            />
+            <span>
+              <strong className="text-foreground">
+                Require TOTP 2FA for privileged roles
+              </strong>{" "}
+              (CEO, General Manager, Finance Manager, Credit Control Manager,
+              System Administrator). Unenrolled privileged users are prompted to
+              configure 2FA on /account before accessing workspaces.
+            </span>
+          </label>
+        </div>
       </fieldset>
 
       {notice ? (
@@ -340,7 +366,7 @@ export function FinancialSettingsPanel() {
 
   return (
     <SettingsForm
-      key={`${query.data.company_id}:${query.data.vat_rate_pct}:${query.data.discount_approval_threshold_pct}:${query.data.fuel_efficiency_unit}:${query.data.distance_unit}:${query.data.volume_unit}:${query.data.weight_unit}:${query.data.require_inspection_photos}`}
+      key={`${query.data.company_id}:${query.data.vat_rate_pct}:${query.data.discount_approval_threshold_pct}:${query.data.fuel_efficiency_unit}:${query.data.distance_unit}:${query.data.volume_unit}:${query.data.weight_unit}:${query.data.require_inspection_photos}:${query.data.require_2fa_for_privileged}`}
       initial={query.data}
       currency={query.data.currency || scope.company?.currency || "ZMW"}
       canEdit={canEdit}

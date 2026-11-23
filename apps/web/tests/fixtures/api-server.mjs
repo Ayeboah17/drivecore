@@ -22,6 +22,9 @@ let bankTransactions = new Map();
 let bankReconciliations = new Map();
 let fixedAssets = new Map();
 let depreciationEntries = new Map();
+let leads = new Map();
+let twoFactorState = new Map();
+let twoFactorChallenges = new Map();
 let customers = new Map();
 let vehicles = new Map();
 let companies = new Map();
@@ -199,6 +202,229 @@ const ROLE_DEFS = [
       "reports.view",
     ],
   },
+  {
+    name: "ceo",
+    permissions: [
+      "companies.view",
+      "branches.view",
+      "customers.view",
+      "vehicles.view",
+      "leads.view",
+      "quotations.view",
+      "quotations.approve_discount",
+      "reservations.view",
+      "rentals.view",
+      "documents.view",
+      "invoices.view",
+      "expenses.view",
+      "gl.view",
+      "work_orders.view",
+      "parts.view",
+      "suppliers.view",
+      "purchase_orders.view",
+      "purchase_orders.approve",
+      "messages.view",
+      "reports.view",
+      "audit.view",
+    ],
+  },
+  {
+    name: "general-manager",
+    permissions: [
+      "companies.view",
+      "branches.view",
+      "customers.view",
+      "vehicles.view",
+      "leads.view",
+      "quotations.view",
+      "quotations.approve_discount",
+      "reservations.view",
+      "rentals.view",
+      "documents.view",
+      "invoices.view",
+      "expenses.view",
+      "gl.view",
+      "work_orders.view",
+      "parts.view",
+      "suppliers.view",
+      "purchase_orders.view",
+      "purchase_orders.approve",
+      "messages.view",
+      "reports.view",
+    ],
+  },
+  {
+    name: "business-accounts-manager",
+    permissions: [
+      "companies.view",
+      "branches.view",
+      "customers.view",
+      "customers.manage",
+      "vehicles.view",
+      "leads.view",
+      "leads.manage",
+      "quotations.view",
+      "quotations.manage",
+      "reservations.view",
+      "reservations.manage",
+      "rentals.view",
+      "documents.view",
+      "messages.view",
+      "messages.send",
+      "reports.view",
+    ],
+  },
+  {
+    name: "operations-manager",
+    permissions: [
+      "companies.view",
+      "branches.view",
+      "customers.view",
+      "customers.manage",
+      "vehicles.view",
+      "vehicles.manage",
+      "reservations.view",
+      "reservations.manage",
+      "rentals.view",
+      "rentals.manage",
+      "documents.view",
+      "documents.manage",
+      "messages.view",
+      "messages.send",
+      "reports.view",
+    ],
+  },
+  {
+    name: "maintenance-manager",
+    permissions: [
+      "companies.view",
+      "branches.view",
+      "vehicles.view",
+      "work_orders.view",
+      "work_orders.manage",
+      "parts.view",
+      "parts.manage",
+      "suppliers.view",
+      "suppliers.manage",
+      "purchase_orders.view",
+      "purchase_orders.manage",
+      "documents.view",
+      "messages.view",
+      "messages.send",
+      "reports.view",
+    ],
+  },
+  {
+    name: "finance-manager",
+    permissions: [
+      "companies.view",
+      "branches.view",
+      "customers.view",
+      "vehicles.view",
+      "quotations.view",
+      "quotations.approve_discount",
+      "reservations.view",
+      "rentals.view",
+      "documents.view",
+      "invoices.view",
+      "invoices.manage",
+      "payments.manage",
+      "expenses.view",
+      "expenses.manage",
+      "gl.view",
+      "purchase_orders.view",
+      "purchase_orders.approve",
+      "reports.view",
+    ],
+  },
+  {
+    name: "credit-control-manager",
+    permissions: [
+      "companies.view",
+      "branches.view",
+      "customers.view",
+      "invoices.view",
+      "documents.view",
+      "messages.view",
+      "messages.send",
+      "reports.view",
+    ],
+  },
+  {
+    name: "hr-admin-manager",
+    permissions: [
+      "companies.view",
+      "branches.view",
+      "users.view",
+      "users.manage",
+      "documents.view",
+      "documents.manage",
+      "messages.view",
+      "messages.send",
+    ],
+  },
+  {
+    name: "mechanic-technician",
+    permissions: [
+      "companies.view",
+      "branches.view",
+      "vehicles.view",
+      "work_orders.view",
+      "work_orders.manage",
+      "parts.view",
+    ],
+  },
+  {
+    name: "system-administrator",
+    permissions: [
+      "companies.view",
+      "companies.manage",
+      "branches.view",
+      "branches.manage",
+      "users.view",
+      "users.manage",
+      "roles.view",
+      "settings.manage",
+      "audit.view",
+      "customers.view",
+      "customers.manage",
+      "vehicles.view",
+      "vehicles.manage",
+      "leads.view",
+      "leads.manage",
+      "quotations.view",
+      "quotations.manage",
+      "quotations.approve_discount",
+      "reservations.view",
+      "reservations.manage",
+      "rentals.view",
+      "rentals.manage",
+      "documents.view",
+      "documents.manage",
+      "invoices.view",
+      "invoices.manage",
+      "payments.manage",
+      "expenses.view",
+      "expenses.manage",
+      "gl.view",
+      "work_orders.view",
+      "work_orders.manage",
+      "parts.view",
+      "parts.manage",
+      "suppliers.view",
+      "suppliers.manage",
+      "purchase_orders.view",
+      "purchase_orders.manage",
+      "purchase_orders.approve",
+      "messages.view",
+      "messages.send",
+      "reports.view",
+    ],
+  },
+  {
+    name: "driver",
+    permissions: ["companies.view", "branches.view"],
+  },
 ];
 
 function reset() {
@@ -291,6 +517,9 @@ function reset() {
   bankReconciliations = new Map();
   fixedAssets = new Map();
   depreciationEntries = new Map();
+  leads = new Map();
+  twoFactorState = new Map();
+  twoFactorChallenges = new Map();
   branches = new Map([
     [2, { id: 2, company_id: 1, name: "Synthetic branch" }],
     [4, { id: 4, company_id: 3, name: "Other branch" }],
@@ -930,8 +1159,22 @@ createServer(async (req, res) => {
       return;
     }
     const role = input.email?.split("@")[0];
-    const permissions =
-      role === "driver" || role === "activedriver"
+    const srsAliasMap = {
+      ceo: "ceo",
+      gm: "general-manager",
+      businessaccounts: "business-accounts-manager",
+      opsmanager: "operations-manager",
+      maintmanager: "maintenance-manager",
+      financemanager: "finance-manager",
+      creditcontrol: "credit-control-manager",
+      hradmin: "hr-admin-manager",
+      mechanic: "mechanic-technician",
+      sysadmin: "system-administrator",
+    };
+    const mappedSrsRole = srsAliasMap[role] ?? null;
+    const permissions = mappedSrsRole
+      ? (ROLE_DEFS.find((r) => r.name === mappedSrsRole)?.permissions ?? [])
+      : role === "driver" || role === "activedriver"
         ? ["companies.view", "branches.view"]
         : role === "finance"
           ? [
@@ -1021,28 +1264,62 @@ createServer(async (req, res) => {
                   ]
                 : []),
             ];
+    const userId =
+      role === "activedriver"
+        ? 2
+        : role === "operations"
+          ? 3
+          : role === "finance" || role === "financemanager"
+            ? 4
+            : role === "mechanic"
+              ? 5
+              : role === "ceo"
+                ? 6
+                : role === "businessaccounts"
+                  ? 7
+                  : role === "hradmin"
+                    ? 8
+                    : 1;
+    const userRole = mappedSrsRole ?? (role === "activedriver" ? "driver" : role);
+    const privilegedSet = new Set([
+      "ceo",
+      "general-manager",
+      "finance-manager",
+      "credit-control-manager",
+      "system-administrator",
+      "company-admin",
+      "companyadmin",
+      "finance",
+    ]);
+    const tf = twoFactorState.get(userId);
+    const tfEnabled = Boolean(tf?.enabled);
+    const require2faPolicy = Boolean(companySettings.get(1)?.require_2fa_for_privileged);
     const user = {
-      id:
-        role === "activedriver"
-          ? 2
-          : role === "operations"
-            ? 3
-            : role === "finance"
-              ? 4
-              : 1,
+      id: userId,
       name:
         role === "activedriver"
           ? "Fleet Driver"
-          : role === "finance"
+          : role === "finance" || role === "financemanager"
             ? "Finance Manager"
-            : "Synthetic operator",
+            : role === "mechanic"
+              ? "Workshop Mechanic"
+              : role === "ceo"
+                ? "Chief Executive"
+                : role === "businessaccounts"
+                  ? "Business Accounts Manager"
+                  : role === "hradmin"
+                    ? "HR Admin Manager"
+                    : "Synthetic operator",
       email:
         role === "activedriver"
           ? "driver-co1@example.test"
-          : "synthetic@example.test",
-      roles: [role === "activedriver" ? "driver" : role],
+          : `${role}@example.test`,
+      roles: [userRole],
       is_platform_admin: role === "admin",
       must_change_password: role === "mustrotate",
+      two_factor_enabled: tfEnabled,
+      two_factor_enrollment_required:
+        require2faPolicy && (role === "admin" || privilegedSet.has(userRole)) && !tfEnabled,
       permissions,
       companies:
         role === "admin"
@@ -1055,13 +1332,31 @@ createServer(async (req, res) => {
                   {
                     id: 1,
                     name: "Synthetic One",
-                    branch_id: ["unrestricted", "companyadmin"].includes(role)
+                    branch_id: [
+                      "unrestricted",
+                      "companyadmin",
+                      "sysadmin",
+                      "ceo",
+                      "gm",
+                      "hradmin",
+                      "businessaccounts",
+                      "financemanager",
+                    ].includes(role)
                       ? null
                       : 2,
                   },
                   { id: 3, name: "Synthetic Three", branch_id: 4 },
                 ],
     };
+    if (tfEnabled) {
+      const challengeToken = randomUUID();
+      twoFactorChallenges.set(challengeToken, {
+        user,
+        expiresAt: Date.now() + 300_000,
+      });
+      json(200, { two_factor_required: true, challenge_token: challengeToken });
+      return;
+    }
     const session = randomUUID();
     sessions.set(session, user);
     res.setHeader("Set-Cookie", [
@@ -1069,6 +1364,37 @@ createServer(async (req, res) => {
       `XSRF-TOKEN=${encodeURIComponent(randomUUID() + "=")}; Path=/; SameSite=Lax`,
     ]);
     json(200, { data: user });
+    return;
+  }
+  if (url.pathname === "/api/v1/auth/two-factor/challenge" && req.method === "POST") {
+    const token = String(input.challenge_token ?? "");
+    const ch = twoFactorChallenges.get(token);
+    if (!ch || ch.expiresAt <= Date.now()) {
+      fail(422, { code: ["Two-factor challenge expired. Sign in again."] });
+      return;
+    }
+    const tf = twoFactorState.get(ch.user.id);
+    const code = input.code ? String(input.code).trim() : "";
+    const rec = input.recovery_code ? String(input.recovery_code).trim().toUpperCase() : "";
+    let valid = false;
+    if (code) {
+      valid = /^\d{6}$/.test(code) && code !== "000000";
+    } else if (rec && tf?.recoveryCodes?.has(rec)) {
+      tf.recoveryCodes.delete(rec);
+      valid = true;
+    }
+    if (!valid) {
+      fail(422, { code: ["Invalid two-factor verification code."] });
+      return;
+    }
+    twoFactorChallenges.delete(token);
+    const session = randomUUID();
+    sessions.set(session, ch.user);
+    res.setHeader("Set-Cookie", [
+      `drivecore_test=${session}; Path=/; HttpOnly; SameSite=Lax`,
+      `XSRF-TOKEN=${encodeURIComponent(randomUUID() + "=")}; Path=/; SameSite=Lax`,
+    ]);
+    json(200, { data: ch.user });
     return;
   }
   if (url.pathname === "/api/v1/invitations/accept" && req.method === "POST") {
@@ -1201,8 +1527,226 @@ createServer(async (req, res) => {
     return;
   }
   if (url.pathname === "/api/v1/auth/me") {
-    json(200, { data: control.revoked ? { ...user, companies: [] } : user });
+    const tf = twoFactorState.get(user.id);
+    const tfEnabled = Boolean(tf?.enabled);
+    const require2faPolicy = Boolean(companySettings.get(1)?.require_2fa_for_privileged);
+    const privilegedSet = new Set([
+      "ceo",
+      "general-manager",
+      "finance-manager",
+      "credit-control-manager",
+      "system-administrator",
+      "company-admin",
+      "companyadmin",
+      "finance",
+    ]);
+    const enriched = {
+      ...user,
+      two_factor_enabled: tfEnabled,
+      two_factor_enrollment_required:
+        require2faPolicy &&
+        (user.is_platform_admin || user.roles.some((r) => privilegedSet.has(r))) &&
+        !tfEnabled,
+    };
+    json(200, { data: control.revoked ? { ...enriched, companies: [] } : enriched });
     return;
+  }
+  if (url.pathname === "/api/v1/auth/two-factor/setup" && req.method === "POST") {
+    const secret = "JBSWY3DPEHPK3PXP";
+    twoFactorState.set(user.id, {
+      secret,
+      enabled: false,
+      recoveryCodes: new Set(),
+    });
+    json(200, {
+      data: {
+        secret,
+        otpauth_uri: `otpauth://totp/DriveCore:${encodeURIComponent(user.email)}?secret=${secret}&issuer=DriveCore`,
+      },
+    });
+    return;
+  }
+  if (url.pathname === "/api/v1/auth/two-factor/confirm" && req.method === "POST") {
+    const code = String(input.code ?? "").trim();
+    if (!/^\d{6}$/.test(code) || code === "000000") {
+      fail(422, { code: ["Invalid 6-digit verification code."] });
+      return;
+    }
+    const codes = Array.from({ length: 8 }, (_, i) => `DC${1000 + i}-99${i}A`);
+    const existing = twoFactorState.get(user.id) ?? { secret: "JBSWY3DPEHPK3PXP" };
+    twoFactorState.set(user.id, {
+      ...existing,
+      enabled: true,
+      recoveryCodes: new Set(codes),
+    });
+    user.two_factor_enabled = true;
+    user.two_factor_enrollment_required = false;
+    const mu = managedUsers.get(user.id);
+    if (mu) mu.two_factor_enabled = true;
+    completedWrites++;
+    json(200, { data: { two_factor_enabled: true, recovery_codes: codes } });
+    return;
+  }
+  if (url.pathname === "/api/v1/auth/two-factor/disable" && req.method === "POST") {
+    if (companySettings.get(1)?.require_2fa_for_privileged) {
+      fail(409);
+      return;
+    }
+    twoFactorState.delete(user.id);
+    user.two_factor_enabled = false;
+    const mu = managedUsers.get(user.id);
+    if (mu) mu.two_factor_enabled = false;
+    completedWrites++;
+    json(200, { data: user });
+    return;
+  }
+  if (url.pathname === "/api/v1/auth/two-factor/recovery-codes" && req.method === "POST") {
+    const codes = Array.from({ length: 8 }, (_, i) => `DR${2000 + i}-88${i}B`);
+    const existing = twoFactorState.get(user.id);
+    if (existing) existing.recoveryCodes = new Set(codes);
+    completedWrites++;
+    json(200, { data: { recovery_codes: codes } });
+    return;
+  }
+  const reset2faMatch = url.pathname.match(/^\/api\/v1\/users\/(\d+)\/reset-two-factor$/);
+  if (reset2faMatch && req.method === "POST") {
+    const targetId = Number(reset2faMatch[1]);
+    if (targetId === user.id) {
+      fail(409);
+      return;
+    }
+    const isAdmin =
+      user.is_platform_admin ||
+      user.roles.includes("system-administrator") ||
+      user.roles.includes("company-admin") ||
+      user.roles.includes("companyadmin");
+    if (!isAdmin) {
+      fail(403);
+      return;
+    }
+    twoFactorState.delete(targetId);
+    const mu = managedUsers.get(targetId);
+    if (!mu) {
+      fail(404);
+      return;
+    }
+    mu.two_factor_enabled = false;
+    completedWrites++;
+    json(200, { data: mu });
+    return;
+  }
+  const leadMatch = url.pathname.match(/^\/api\/v1\/leads(?:\/(\d+)(?:\/(convert))?)?$/);
+  if (leadMatch) {
+    const leadId = leadMatch[1] ? Number(leadMatch[1]) : null;
+    const leadAction = leadMatch[2] ?? null;
+    if (req.method === "GET" && !leadId) {
+      const companyId = Number(url.searchParams.get("company_id"));
+      const stageFilter = url.searchParams.get("stage");
+      const qStr = (url.searchParams.get("q") ?? "").toLowerCase();
+      const rows = [...leads.values()].filter(
+        (l) =>
+          l.company_id === companyId &&
+          (!stageFilter || l.stage === stageFilter) &&
+          (!qStr ||
+            l.contact_name.toLowerCase().includes(qStr) ||
+            (l.company_name ?? "").toLowerCase().includes(qStr) ||
+            (l.vehicle_requirements ?? "").toLowerCase().includes(qStr)),
+      );
+      json(200, {
+        data: rows,
+        meta: { current_page: 1, last_page: 1, per_page: 25, total: rows.length },
+      });
+      return;
+    }
+    if (req.method === "POST" && !leadId) {
+      const id = nextId++;
+      const now = new Date().toISOString();
+      const rec = {
+        id,
+        company_id: Number(input.company_id ?? 1),
+        branch_id: Number(input.branch_id ?? 2),
+        contact_name: String(input.contact_name ?? "").trim(),
+        company_name: input.company_name ? String(input.company_name) : null,
+        customer_type: String(input.customer_type ?? "corporate"),
+        email: input.email ? String(input.email) : null,
+        phone: input.phone ? String(input.phone) : null,
+        source: String(input.source ?? "corporate_outreach"),
+        stage: "new",
+        vehicle_requirements: input.vehicle_requirements ? String(input.vehicle_requirements) : null,
+        expected_start_date: input.expected_start_date ? String(input.expected_start_date) : null,
+        expected_days: input.expected_days ? Number(input.expected_days) : null,
+        estimated_value_minor:
+          input.estimated_value_minor !== undefined && input.estimated_value_minor !== null
+            ? Number(input.estimated_value_minor)
+            : null,
+        assigned_to_user_id: user.id,
+        assigned_to_name: user.name,
+        next_follow_up_at: input.next_follow_up_at ? String(input.next_follow_up_at) : null,
+        lost_reason: null,
+        customer_id: null,
+        quotation_id: null,
+        notes: input.notes ? String(input.notes) : null,
+        created_at: now,
+        updated_at: now,
+      };
+      leads.set(id, rec);
+      completedWrites++;
+      json(201, { data: rec });
+      return;
+    }
+    if (req.method === "PATCH" && leadId && !leadAction) {
+      const rec = leads.get(leadId);
+      if (!rec) {
+        fail(404);
+        return;
+      }
+      if (input.stage) rec.stage = String(input.stage);
+      if (input.lost_reason !== undefined) rec.lost_reason = input.lost_reason ? String(input.lost_reason) : null;
+      if (input.next_follow_up_at !== undefined) rec.next_follow_up_at = input.next_follow_up_at ? String(input.next_follow_up_at) : null;
+      if (input.notes !== undefined) rec.notes = input.notes ? String(input.notes) : null;
+      rec.updated_at = new Date().toISOString();
+      completedWrites++;
+      json(200, { data: rec });
+      return;
+    }
+    if (req.method === "POST" && leadId && leadAction === "convert") {
+      const rec = leads.get(leadId);
+      if (!rec) {
+        fail(404);
+        return;
+      }
+      let cust =
+        (rec.customer_id && customers.get(rec.customer_id)) ||
+        (rec.email &&
+          [...customers.values()].find(
+            (c) =>
+              c.company_id === rec.company_id &&
+              c.email &&
+              c.email.toLowerCase() === rec.email.toLowerCase(),
+          ));
+      if (!cust) {
+        const cid = nextId++;
+        const now = new Date().toISOString();
+        cust = {
+          id: cid,
+          company_id: rec.company_id,
+          branch_id: rec.branch_id,
+          name: rec.company_name || rec.contact_name,
+          type: rec.customer_type,
+          email: rec.email,
+          phone: rec.phone,
+          created_at: now,
+          updated_at: now,
+        };
+        customers.set(cid, cust);
+      }
+      rec.customer_id = cust.id;
+      rec.stage = "proposal_sent";
+      rec.updated_at = new Date().toISOString();
+      completedWrites++;
+      json(200, { data: { lead: rec, customer: cust } });
+      return;
+    }
   }
   if (url.pathname === "/api/v1/auth/logout") {
     if (control.logoutFailure) {
@@ -1807,6 +2351,9 @@ createServer(async (req, res) => {
         ...(input.weight_unit ? { weight_unit: String(input.weight_unit) } : {}),
         ...(input.require_inspection_photos !== undefined
           ? { require_inspection_photos: Boolean(input.require_inspection_photos) }
+          : {}),
+        ...(input.require_2fa_for_privileged !== undefined
+          ? { require_2fa_for_privileged: Boolean(input.require_2fa_for_privileged) }
           : {}),
       };
       companySettings.set(companyId, updated);

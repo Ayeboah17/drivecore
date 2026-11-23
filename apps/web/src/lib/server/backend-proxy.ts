@@ -39,18 +39,18 @@ function failure(status: number, message: string) {
 }
 export function allowedPath(method: string, path: string) {
   if (method === "GET")
-    return /^(sanctum\/csrf-cookie|api\/v1\/(health|auth\/me|companies|companies\/[1-9]\d*\/settings|branches|customers|customers\/[1-9]\d*|customers\/[1-9]\d*\/(summary|statement)|vehicles|vehicles\/[1-9]\d*|vehicles\/[1-9]\d*\/summary|quotations|quotations\/[1-9]\d*|reservations|reservations\/[1-9]\d*|rentals|rentals\/[1-9]\d*|rate-cards|inspections|invoices|invoices\/ageing|invoices\/[1-9]\d*|credit-notes|payments|refunds|expenses|gl\/accounts|gl\/journal-entries|ap\/(invoices|ageing)|bank-accounts|bank-accounts\/[1-9]\d*\/transactions|fixed-assets|credit\/(accounts|collections)|approvals|compliance\/expiries|work-orders|work-orders\/[1-9]\d*|maintenance-schedules|vehicle-components|fuel-transactions|parts|stock-movements|suppliers|purchase-orders|purchase-orders\/[1-9]\d*|dashboard\/summary|messages|notifications|reports\/(financial|fleet|statements\/(pnl|balance-sheet|cash-flow))|stats\/(customers|vehicles|branches)|saved-filters|audit-events|(quotations|reservations|rentals|invoices)\/[1-9]\d*\/pdf|documents|documents\/[1-9]\d*|users|roles|invitations|invitations\/preview))$/.test(
+    return /^(sanctum\/csrf-cookie|api\/v1\/(health|auth\/me|companies|companies\/[1-9]\d*\/settings|branches|customers|customers\/[1-9]\d*|customers\/[1-9]\d*\/(summary|statement)|vehicles|vehicles\/[1-9]\d*|vehicles\/[1-9]\d*\/summary|leads|quotations|quotations\/[1-9]\d*|reservations|reservations\/[1-9]\d*|rentals|rentals\/[1-9]\d*|rate-cards|inspections|invoices|invoices\/ageing|invoices\/[1-9]\d*|credit-notes|payments|refunds|expenses|gl\/accounts|gl\/journal-entries|ap\/(invoices|ageing)|bank-accounts|bank-accounts\/[1-9]\d*\/transactions|fixed-assets|credit\/(accounts|collections)|approvals|compliance\/expiries|work-orders|work-orders\/[1-9]\d*|maintenance-schedules|vehicle-components|fuel-transactions|parts|stock-movements|suppliers|purchase-orders|purchase-orders\/[1-9]\d*|dashboard\/summary|messages|notifications|reports\/(financial|fleet|statements\/(pnl|balance-sheet|cash-flow))|stats\/(customers|vehicles|branches)|saved-filters|audit-events|(quotations|reservations|rentals|invoices)\/[1-9]\d*\/pdf|documents|documents\/[1-9]\d*|users|roles|invitations|invitations\/preview))$/.test(
       path,
     );
   if (method === "POST")
-    return /^api\/v1\/(auth\/(login|logout|forgot-password|reset-password|change-password)|companies|branches|customers|vehicles|quotations|quotations\/[1-9]\d*\/(approve-discount|reject-discount|cancel|convert)|reservations|reservations\/[1-9]\d*\/cancel|rentals|rentals\/[1-9]\d*\/(handover|return|extend|assign-driver)|rate-cards|invoices|invoices\/[1-9]\d*\/(issue|void|payments|refunds|credit-notes)|expenses|ap\/invoices|ap\/invoices\/[1-9]\d*\/payments|bank-accounts|bank-accounts\/[1-9]\d*\/(transactions|reconciliations)|bank-transactions\/[1-9]\d*\/(match|unmatch)|fixed-assets|fixed-assets\/depreciate|fixed-assets\/[1-9]\d*\/(request-disposal|dispose)|credit\/collections|approvals|approvals\/[1-9]\d*\/(approve|reject)|work-orders|work-orders\/[1-9]\d*\/(start|consume-parts|complete|cancel)|maintenance-schedules|vehicle-components|fuel-transactions|parts|parts\/[1-9]\d*\/adjust|suppliers|purchase-orders|purchase-orders\/[1-9]\d*\/(submit|approve|receive|cancel)|messages|messages\/[1-9]\d*\/read|notifications\/([1-9]\d*\/read|read-all)|saved-filters|invitations|invitations\/accept|invitations\/[1-9]\d*\/(resend|revoke)|documents|users)$/.test(
+    return /^api\/v1\/(auth\/(login|logout|forgot-password|reset-password|change-password|two-factor\/(setup|confirm|disable|recovery-codes|challenge))|companies|branches|customers|vehicles|leads|leads\/[1-9]\d*\/convert|quotations|quotations\/[1-9]\d*\/(approve-discount|reject-discount|cancel|convert)|reservations|reservations\/[1-9]\d*\/cancel|rentals|rentals\/[1-9]\d*\/(handover|return|extend|assign-driver)|rate-cards|invoices|invoices\/[1-9]\d*\/(issue|void|payments|refunds|credit-notes)|expenses|ap\/invoices|ap\/invoices\/[1-9]\d*\/payments|bank-accounts|bank-accounts\/[1-9]\d*\/(transactions|reconciliations)|bank-transactions\/[1-9]\d*\/(match|unmatch)|fixed-assets|fixed-assets\/depreciate|fixed-assets\/[1-9]\d*\/(request-disposal|dispose)|credit\/collections|approvals|approvals\/[1-9]\d*\/(approve|reject)|work-orders|work-orders\/[1-9]\d*\/(start|consume-parts|complete|cancel)|maintenance-schedules|vehicle-components|fuel-transactions|parts|parts\/[1-9]\d*\/adjust|suppliers|purchase-orders|purchase-orders\/[1-9]\d*\/(submit|approve|receive|cancel)|messages|messages\/[1-9]\d*\/read|notifications\/([1-9]\d*\/read|read-all)|saved-filters|invitations|invitations\/accept|invitations\/[1-9]\d*\/(resend|revoke)|documents|users|users\/[1-9]\d*\/reset-two-factor)$/.test(
       path,
     );
   if (method === "DELETE")
     return /^api\/v1\/saved-filters\/[1-9]\d*$/.test(path);
   return (
     method === "PATCH" &&
-    /^api\/v1\/(auth\/profile|(customers|vehicles|users|invoices|parts|suppliers|purchase-orders|rate-cards|maintenance-schedules|vehicle-components)\/[1-9]\d*|credit\/(accounts|collections)\/[1-9]\d*|companies\/[1-9]\d*\/settings)$/.test(
+    /^api\/v1\/(auth\/profile|(customers|vehicles|leads|users|invoices|parts|suppliers|purchase-orders|rate-cards|maintenance-schedules|vehicle-components)\/[1-9]\d*|credit\/(accounts|collections)\/[1-9]\d*|companies\/[1-9]\d*\/settings)$/.test(
       path,
     )
   );
@@ -72,7 +72,7 @@ export function allowedQuery(
   if (keys.length === 0) {
     return (
       method !== "GET" ||
-      !/^api\/v1\/(customers|vehicles|quotations|reservations|rentals|rate-cards|inspections|invoices|invoices\/ageing|credit-notes|payments|refunds|expenses|gl\/accounts|gl\/journal-entries|ap\/(invoices|ageing)|bank-accounts|fixed-assets|credit\/(accounts|collections)|approvals|compliance\/expiries|work-orders|maintenance-schedules|vehicle-components|fuel-transactions|parts|stock-movements|suppliers|purchase-orders|dashboard\/summary|messages|notifications|reports\/(financial|fleet|statements\/(pnl|balance-sheet|cash-flow))|stats\/(customers|vehicles|branches)|saved-filters|invitations|invitations\/preview|audit-events|documents|users|roles)$/.test(
+      !/^api\/v1\/(customers|vehicles|leads|quotations|reservations|rentals|rate-cards|inspections|invoices|invoices\/ageing|credit-notes|payments|refunds|expenses|gl\/accounts|gl\/journal-entries|ap\/(invoices|ageing)|bank-accounts|fixed-assets|credit\/(accounts|collections)|approvals|compliance\/expiries|work-orders|maintenance-schedules|vehicle-components|fuel-transactions|parts|stock-movements|suppliers|purchase-orders|dashboard\/summary|messages|notifications|reports\/(financial|fleet|statements\/(pnl|balance-sheet|cash-flow))|stats\/(customers|vehicles|branches)|saved-filters|invitations|invitations\/preview|audit-events|documents|users|roles)$/.test(
         path,
       )
     );
@@ -760,9 +760,23 @@ export function allowedQuery(
     const isActive = params.get("is_active");
     if (
       role !== null &&
-      !["company-admin", "operations", "finance", "viewer", "driver"].includes(
-        role,
-      )
+      ![
+        "ceo",
+        "general-manager",
+        "business-accounts-manager",
+        "operations-manager",
+        "maintenance-manager",
+        "finance-manager",
+        "credit-control-manager",
+        "hr-admin-manager",
+        "mechanic-technician",
+        "system-administrator",
+        "driver",
+        "company-admin",
+        "operations",
+        "finance",
+        "viewer",
+      ].includes(role)
     )
       return false;
     if (
@@ -1118,6 +1132,52 @@ export function allowedQuery(
     if (!checkCommon(["company_id", "branch_id", "as_of"], true)) return false;
     const asOf = params.get("as_of");
     if (asOf !== null && !validDate(asOf)) return false;
+    return true;
+  }
+  if (path === "api/v1/leads") {
+    if (
+      !checkCommon(
+        [
+          "company_id",
+          "branch_id",
+          "stage",
+          "source",
+          "assigned_to_user_id",
+          "q",
+          "page",
+        ],
+        true,
+      )
+    )
+      return false;
+    const stage = params.get("stage");
+    const source = params.get("source");
+    const assigned = params.get("assigned_to_user_id");
+    if (
+      stage !== null &&
+      ![
+        "new",
+        "contacted",
+        "qualified",
+        "proposal_sent",
+        "won",
+        "lost",
+      ].includes(stage)
+    )
+      return false;
+    if (
+      source !== null &&
+      ![
+        "website",
+        "referral",
+        "corporate_outreach",
+        "walk_in",
+        "phone",
+        "other",
+      ].includes(source)
+    )
+      return false;
+    if (assigned !== null && !posInt(assigned)) return false;
     return true;
   }
   return false;

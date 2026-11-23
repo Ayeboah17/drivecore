@@ -5,9 +5,13 @@ import {
   invitationSchema,
   normalizePage,
   pageSchema,
+  twoFactorConfirmSchema,
+  twoFactorSetupSchema,
   userSchema,
   type Invitation,
   type InvitationPreview,
+  type TwoFactorConfirm,
+  type TwoFactorSetup,
   type User,
 } from "@/lib/api/contracts";
 
@@ -114,6 +118,55 @@ export async function changePassword(
     signal,
   });
   return z.object({ data: userSchema }).parse(payload).data;
+}
+
+export async function setupTwoFactor(
+  signal?: AbortSignal,
+): Promise<TwoFactorSetup> {
+  const payload = await request("api/v1/auth/two-factor/setup", {
+    method: "POST",
+    body: {},
+    signal,
+  });
+  return z.object({ data: twoFactorSetupSchema }).parse(payload).data;
+}
+
+export async function confirmTwoFactor(
+  code: string,
+  signal?: AbortSignal,
+): Promise<TwoFactorConfirm> {
+  const payload = await request("api/v1/auth/two-factor/confirm", {
+    method: "POST",
+    body: { code },
+    signal,
+  });
+  return z.object({ data: twoFactorConfirmSchema }).parse(payload).data;
+}
+
+export async function disableTwoFactor(
+  body: { current_password: string; code: string },
+  signal?: AbortSignal,
+): Promise<User> {
+  const payload = await request("api/v1/auth/two-factor/disable", {
+    method: "POST",
+    body,
+    signal,
+  });
+  return z.object({ data: userSchema }).parse(payload).data;
+}
+
+export async function regenerateRecoveryCodes(
+  currentPassword: string,
+  signal?: AbortSignal,
+): Promise<string[]> {
+  const payload = await request("api/v1/auth/two-factor/recovery-codes", {
+    method: "POST",
+    body: { current_password: currentPassword },
+    signal,
+  });
+  return z
+    .object({ data: z.object({ recovery_codes: z.array(z.string()) }) })
+    .parse(payload).data.recovery_codes;
 }
 
 export async function listInvitations(

@@ -79,7 +79,7 @@ test("full reservation -> rental contract -> driver assignment -> handover -> ex
   await handoverDialog
     .getByRole("button", { name: "Confirm handover", exact: true })
     .click();
-  await expect(page.getByText(/handed over/i)).toBeVisible();
+  await expect(page.getByText(/Rental #\d+ handed over/i)).toBeVisible();
   await expect(page.getByText("120 km", { exact: true })).toBeVisible();
 
   // Extend rental: first trigger 409 overlap conflict, then succeed
@@ -453,7 +453,7 @@ test("inline new customer + immediate rental start, humanized 422 errors, and re
   await earlyHandoverDialog
     .getByRole("button", { name: "Confirm handover", exact: true })
     .click();
-  await expect(page.getByText(/handed over/i)).toBeVisible();
+  await expect(page.getByText(/Rental #\d+ handed over/i)).toBeVisible();
 
   // Clicking Customer, Vehicle, and Driver navigates to their records
   const rentalUrl = page.url();

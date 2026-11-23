@@ -128,3 +128,16 @@ export async function updateUser(
   }
   return parsed.data.data;
 }
+
+export async function resetUserTwoFactor(
+  userId: number,
+  companyId: number,
+  signal?: AbortSignal,
+): Promise<ManagedUser> {
+  const payload = await request(`api/v1/users/${userId}/reset-two-factor`, {
+    method: "POST",
+    body: { company_id: companyId },
+    signal,
+  });
+  return z.object({ data: managedUserSchema }).parse(payload).data;
+}

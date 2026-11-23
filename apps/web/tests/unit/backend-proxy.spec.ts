@@ -841,3 +841,49 @@ test("M15 AP, credit notes, bank reconciliation, fixed assets, and financial sta
     expect(res.status).toBe(200);
   }
 });
+
+test("M16 exact SRS roles, CRM leads, and privileged TOTP 2FA routes enforce allowlists", async () => {
+  for (const invalid of [
+    "api/v1/leads",
+    "api/v1/leads?company_id=1&stage=bogus",
+    "api/v1/leads?company_id=1&source=invalid",
+    "api/v1/users?company_id=1&role=superuser",
+  ]) {
+    const [path] = invalid.split("?");
+    const res = await proxy(make(invalid), path, config, async () => {
+      throw new Error("Must not reach upstream");
+    });
+    expect(res.status).toBe(400);
+  }
+
+  for (const valid of [
+    "api/v1/leads?company_id=1&stage=qualified&source=corporate_outreach",
+    "api/v1/users?company_id=1&role=business-accounts-manager",
+    "api/v1/users?company_id=1&role=mechanic-technician",
+    "api/v1/users?company_id=1&role=hr-admin-manager",
+    "api/v1/users?company_id=1&role=system-administrator",
+  ]) {
+    const [path] = valid.split("?");
+    const res = await proxy(make(valid), path, config, async () =>
+      Response.json({ data: [] }),
+    );
+    expect(res.status).toBe(200);
+  }
+
+  for (const [method, path] of [
+    ["POST", "api/v1/leads"],
+    ["PATCH", "api/v1/leads/10"],
+    ["POST", "api/v1/leads/10/convert"],
+    ["POST", "api/v1/auth/two-factor/setup"],
+    ["POST", "api/v1/auth/two-factor/confirm"],
+    ["POST", "api/v1/auth/two-factor/disable"],
+    ["POST", "api/v1/auth/two-factor/recovery-codes"],
+    ["POST", "api/v1/auth/two-factor/challenge"],
+    ["POST", "api/v1/users/5/reset-two-factor"],
+  ] as const) {
+    const res = await proxy(make(path, method), path, config, async () =>
+      Response.json({ data: {} }),
+    );
+    expect(res.status).toBe(200);
+  }
+});

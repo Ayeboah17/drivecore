@@ -25,8 +25,10 @@ import {
 import { CreateQuotationDialog } from "@/features/quotations/create-quotation-dialog";
 import { QuotationsDirectorySection } from "@/features/quotations/quotations-page";
 import { RateCardsPanel } from "@/features/operations-srs/rate-cards-panel";
+import { LeadsPanel } from "@/features/crm/leads-panel";
 import {
   can,
+  canAccessLeads,
   canAccessRentals,
   isDriverRole,
   type Rental,
@@ -125,6 +127,7 @@ export function RentalsDirectoryPage({
   const client = useQueryClient();
 
   const driverOnly = !!user && isDriverRole(user);
+  const canViewLeads = !!user && canAccessLeads(user);
   const canViewQuotations = !!user && can(user, "quotations.view");
   const canManageQuotations = !!user && can(user, "quotations.manage");
   const canViewReservations = !!user && can(user, "reservations.view");
@@ -134,9 +137,15 @@ export function RentalsDirectoryPage({
   const allowed = !!user && canAccessRentals(user);
 
   const requestedTab = searchParams.get("tab") ?? defaultTab;
-  const activeTab: "quotations" | "reservations" | "contracts" | "rate_cards" =
-    driverOnly
-      ? "contracts"
+  const activeTab:
+    | "leads"
+    | "quotations"
+    | "reservations"
+    | "contracts"
+    | "rate_cards" = driverOnly
+    ? "contracts"
+    : requestedTab === "leads" && canViewLeads
+      ? "leads"
       : requestedTab === "rate_cards" && (canViewRentals || canViewQuotations)
         ? "rate_cards"
         : requestedTab === "quotations" && canViewQuotations
@@ -191,7 +200,7 @@ export function RentalsDirectoryPage({
   const branchSuffix = `?branch=${scope.branch}`;
 
   function updateQuery(next: {
-    tab?: "quotations" | "reservations" | "contracts" | "rate_cards";
+    tab?: "leads" | "quotations" | "reservations" | "contracts" | "rate_cards";
     q?: string;
     status?: string;
     page?: number;
@@ -404,6 +413,7 @@ export function RentalsDirectoryPage({
         >
           {(
             [
+              ...(canViewLeads ? ([["leads", "Leads"]] as const) : []),
               ...(canViewQuotations ? ([["quotations", "Quotations"]] as const) : []),
               ...(canViewReservations
                 ? ([["reservations", "Reservations"]] as const)
@@ -430,7 +440,9 @@ export function RentalsDirectoryPage({
                   : "text-muted-foreground hover:bg-muted/80 hover:text-foreground"
               }`}
             >
-              {key === "quotations" ? (
+              {key === "leads" ? (
+                <UserCheck className="size-3.5" aria-hidden="true" />
+              ) : key === "quotations" ? (
                 <FileText className="size-3.5" aria-hidden="true" />
               ) : key === "reservations" ? (
                 <CalendarPlus className="size-3.5" aria-hidden="true" />
@@ -461,7 +473,9 @@ export function RentalsDirectoryPage({
         </div>
       ) : null}
 
-      {activeTab === "rate_cards" ? (
+      {activeTab === "leads" ? (
+        <LeadsPanel />
+      ) : activeTab === "rate_cards" ? (
         <RateCardsPanel
           canManage={canManageRentals || canManageQuotations}
         />
