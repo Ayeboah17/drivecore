@@ -83,6 +83,8 @@ const VEHICLE_STATUS_META: Record<
   rented: { label: "Rented", tone: "info" },
   maintenance: { label: "Maintenance", tone: "warning" },
   damaged: { label: "Damaged", tone: "danger" },
+  sold: { label: "Sold", tone: "neutral" },
+  decommissioned: { label: "Decommissioned", tone: "danger" },
 };
 
 const CUSTOMER_TYPES = [

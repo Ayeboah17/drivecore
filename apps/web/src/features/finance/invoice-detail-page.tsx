@@ -7,6 +7,7 @@ import {
   Ban,
   CheckCircle2,
   CreditCard,
+  FileMinus2,
   FileText,
   Plus,
   RotateCcw,
@@ -17,6 +18,7 @@ import {
 import { useSession } from "@/features/auth/session-provider";
 import { useLiveContext } from "@/features/live/context";
 import { EntityDocumentsPanel } from "@/features/documents/documents-panel";
+import { IssueCreditNoteDialog } from "@/features/accounting/credit-notes-panel";
 import {
   getInvoice,
   issueInvoice,
@@ -119,6 +121,7 @@ export function LiveInvoiceDetailPage({ invoiceId }: { invoiceId: string }) {
   );
   const [payOpen, setPayOpen] = useState(false);
   const [refundOpen, setRefundOpen] = useState(false);
+  const [creditNoteOpen, setCreditNoteOpen] = useState(false);
   const [pdfOpen, setPdfOpen] = useState(false);
 
   const query = useQuery({
@@ -135,6 +138,7 @@ export function LiveInvoiceDetailPage({ invoiceId }: { invoiceId: string }) {
       client.invalidateQueries({ queryKey: [...scope.key, "invoices"] }),
       client.invalidateQueries({ queryKey: [...scope.key, "payments"] }),
       client.invalidateQueries({ queryKey: [...scope.key, "refunds"] }),
+      client.invalidateQueries({ queryKey: [...scope.key, "credit-notes"] }),
       client.invalidateQueries({ queryKey: [...scope.key, "gl"] }),
     ]);
   }
@@ -360,6 +364,19 @@ export function LiveInvoiceDetailPage({ invoiceId }: { invoiceId: string }) {
             >
               <RotateCcw className="size-4" aria-hidden="true" />
               Record refund
+            </Button>
+          ) : null}
+          {canManageInvoices &&
+          invoice.status === "issued" &&
+          invoice.outstanding_minor > 0 ? (
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setCreditNoteOpen(true)}
+              className="gap-1.5"
+            >
+              <FileMinus2 className="size-4" aria-hidden="true" />
+              Issue credit note
             </Button>
           ) : null}
           {canVoid ? (
@@ -630,6 +647,19 @@ export function LiveInvoiceDetailPage({ invoiceId }: { invoiceId: string }) {
         onRecorded={(refund) => {
           setNotice(
             `Recorded refund of ${formatMoneyMinor(refund.amount_minor, currency)}.`,
+          );
+          setActionError(null);
+          void refreshFinance();
+        }}
+      />
+
+      <IssueCreditNoteDialog
+        invoice={invoice}
+        open={creditNoteOpen}
+        onOpenChange={setCreditNoteOpen}
+        onIssued={(cn) => {
+          setNotice(
+            `Credit note ${cn.credit_note_number} issued for ${formatMoneyMinor(cn.total_minor, currency)}.`,
           );
           setActionError(null);
           void refreshFinance();

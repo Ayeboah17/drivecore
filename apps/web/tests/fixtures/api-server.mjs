@@ -14,6 +14,14 @@ let fuelTransactions = new Map();
 let creditProfiles = new Map();
 let collectionNotes = new Map();
 let approvalRequests = new Map();
+let supplierInvoices = new Map();
+let supplierPayments = new Map();
+let creditNotes = new Map();
+let bankAccounts = new Map();
+let bankTransactions = new Map();
+let bankReconciliations = new Map();
+let fixedAssets = new Map();
+let depreciationEntries = new Map();
 let customers = new Map();
 let vehicles = new Map();
 let companies = new Map();
@@ -51,6 +59,13 @@ const SYSTEM_GL_ACCOUNTS = [
   { id: 7, code: "4000", name: "Rental Revenue", type: "revenue", is_system: true },
   { id: 8, code: "4100", name: "Sales Refunds & Credits", type: "revenue", is_system: true },
   { id: 9, code: "5000", name: "Fleet & Operating Expenses", type: "expense", is_system: true },
+  { id: 10, code: "1500", name: "Fleet & Fixed Assets", type: "asset", is_system: true },
+  { id: 11, code: "1590", name: "Accumulated Depreciation", type: "asset", is_system: true },
+  { id: 12, code: "3000", name: "Retained Earnings / Equity", type: "equity", is_system: true },
+  { id: 13, code: "4900", name: "Gain on Asset Disposal", type: "revenue", is_system: true },
+  { id: 14, code: "5500", name: "Depreciation Expense", type: "expense", is_system: true },
+  { id: 15, code: "5600", name: "Bank Charges", type: "expense", is_system: true },
+  { id: 16, code: "5900", name: "Loss on Asset Disposal", type: "expense", is_system: true },
 ];
 let collectionReads = 0;
 let completedWrites = 0;
@@ -268,6 +283,14 @@ function reset() {
   creditProfiles = new Map();
   collectionNotes = new Map();
   approvalRequests = new Map();
+  supplierInvoices = new Map();
+  supplierPayments = new Map();
+  creditNotes = new Map();
+  bankAccounts = new Map();
+  bankTransactions = new Map();
+  bankReconciliations = new Map();
+  fixedAssets = new Map();
+  depreciationEntries = new Map();
   branches = new Map([
     [2, { id: 2, company_id: 1, name: "Synthetic branch" }],
     [4, { id: 4, company_id: 3, name: "Other branch" }],
@@ -2391,6 +2414,14 @@ createServer(async (req, res) => {
           : null;
       rec.decision_notes = input.decision_notes ? String(input.decision_notes) : null;
       rec.decided_at = new Date().toISOString();
+      if (rec.entity_type === "supplier_invoice" && rec.entity_id) {
+        const si = supplierInvoices.get(rec.entity_id);
+        if (si && decision === "approve") si.status = "approved";
+      }
+      if (rec.entity_type === "fixed_asset" && rec.entity_id) {
+        const fa = fixedAssets.get(rec.entity_id);
+        if (fa) fa.disposal_approval_status = rec.status;
+      }
       completedWrites++;
       json(200, { data: rec });
       return;
@@ -2462,6 +2493,798 @@ createServer(async (req, res) => {
         per_page: 25,
         total: filtered.length,
         summary,
+      },
+    });
+    return;
+  }
+
+  // --- M15 Full Accounting: AP, Credit Notes, Bank Reconciliation, Fixed Assets & Financial Statements ---
+  const hasFinanceView =
+    user.is_platform_admin ||
+    user.permissions.includes("invoices.view") ||
+    user.permissions.includes("expenses.view") ||
+    user.permissions.includes("gl.view");
+  const hasFinanceManage =
+    user.is_platform_admin ||
+    user.permissions.includes("invoices.manage") ||
+    user.permissions.includes("expenses.manage");
+
+  const postGl = (companyId, branchId, sourceType, sourceId, memo, lines) => {
+    const jeId = nextId++;
+    journalEntries.set(jeId, {
+      id: jeId,
+      company_id: companyId,
+      branch_id: branchId ?? 2,
+      entry_number: `JE-${jeId}`,
+      source_type: sourceType,
+      source_id: sourceId,
+      memo,
+      posted_at: new Date().toISOString(),
+      created_at: new Date().toISOString(),
+      lines: lines.map((l, idx) => ({
+        id: jeId * 10 + idx,
+        account_code: l.code,
+        account_name:
+          SYSTEM_GL_ACCOUNTS.find((a) => a.code === l.code)?.name ??
+          `GL ${l.code}`,
+        debit_minor: l.debit ?? 0,
+        credit_minor: l.credit ?? 0,
+      })),
+    });
+    return jeId;
+  };
+
+  if (url.pathname === "/api/v1/ap/ageing" && req.method === "GET") {
+    if (!hasFinanceView) {
+      fail(403);
+      return;
+    }
+    const companyId = Number(url.searchParams.get("company_id"));
+    const nowMs = Date.now();
+    const buckets = { current: 0, d1_30: 0, d31_60: 0, d61_90: 0, d90_plus: 0 };
+    for (const inv of supplierInvoices.values()) {
+      if (inv.company_id !== companyId || inv.outstanding_minor <= 0 || inv.status === "void")
+        continue;
+      const overdueDays = Math.floor((nowMs - Date.parse(inv.due_at)) / 86_400_000);
+      if (overdueDays <= 0) buckets.current += inv.outstanding_minor;
+      else if (overdueDays <= 30) buckets.d1_30 += inv.outstanding_minor;
+      else if (overdueDays <= 60) buckets.d31_60 += inv.outstanding_minor;
+      else if (overdueDays <= 90) buckets.d61_90 += inv.outstanding_minor;
+      else buckets.d90_plus += inv.outstanding_minor;
+    }
+    const total =
+      buckets.current +
+      buckets.d1_30 +
+      buckets.d31_60 +
+      buckets.d61_90 +
+      buckets.d90_plus;
+    json(200, { data: { total_open_minor: total, buckets } });
+    return;
+  }
+
+  const apPayMatch = url.pathname.match(/^\/api\/v1\/ap\/invoices\/(\d+)\/payments$/);
+  if (apPayMatch && req.method === "POST") {
+    if (!hasFinanceManage) {
+      fail(403);
+      return;
+    }
+    const inv = supplierInvoices.get(Number(apPayMatch[1]));
+    if (!inv) {
+      fail(404);
+      return;
+    }
+    if (inv.match_status === "variance" && inv.status === "pending_approval") {
+      fail(409);
+      return;
+    }
+    const amt = Number(input.amount_minor ?? 0);
+    if (!Number.isInteger(amt) || amt <= 0 || amt > inv.outstanding_minor) {
+      fail(422, { amount_minor: ["Payment exceeds outstanding balance."] });
+      return;
+    }
+    const spId = nextId++;
+    inv.paid_minor += amt;
+    inv.outstanding_minor -= amt;
+    inv.status = inv.outstanding_minor === 0 ? "paid" : "partially_paid";
+    supplierPayments.set(spId, {
+      id: spId,
+      company_id: inv.company_id,
+      supplier_invoice_id: inv.id,
+      amount_minor: amt,
+      method: String(input.method ?? "bank_transfer"),
+      paid_at: String(input.paid_at ?? new Date().toISOString().slice(0, 10)),
+    });
+    postGl(inv.company_id, inv.branch_id, "supplier_payment", spId, `Supplier payment ${inv.invoice_number}`, [
+      { code: "2000", debit: amt, credit: 0 },
+      { code: "1000", debit: 0, credit: amt },
+    ]);
+    completedWrites++;
+    json(200, { data: inv });
+    return;
+  }
+
+  if (url.pathname === "/api/v1/ap/invoices") {
+    if (req.method === "GET") {
+      if (!hasFinanceView) {
+        fail(403);
+        return;
+      }
+      const companyId = Number(url.searchParams.get("company_id"));
+      const qStr = (url.searchParams.get("q") ?? "").toLowerCase();
+      const msFilter = url.searchParams.get("match_status");
+      const rows = [...supplierInvoices.values()].filter(
+        (i) =>
+          i.company_id === companyId &&
+          (!msFilter || i.match_status === msFilter) &&
+          (!qStr ||
+            i.invoice_number.toLowerCase().includes(qStr) ||
+            (i.supplier_name ?? "").toLowerCase().includes(qStr)),
+      );
+      json(200, {
+        data: rows,
+        meta: { current_page: 1, last_page: 1, per_page: 25, total: rows.length },
+      });
+      return;
+    }
+    if (req.method === "POST") {
+      if (!hasFinanceManage) {
+        fail(403);
+        return;
+      }
+      const companyId = Number(input.company_id ?? 1);
+      const branchId = Number(input.branch_id ?? 2);
+      const supplierId = Number(input.supplier_id);
+      const poId = input.purchase_order_id ? Number(input.purchase_order_id) : null;
+      const sub = Number(input.subtotal_minor ?? 0);
+      const vat = Number(input.vat_minor ?? 0);
+      const total = sub + vat;
+      let matchStatus = "non_po";
+      let variance = 0;
+      let status = "approved";
+      if (poId) {
+        const po = purchaseOrders.get(poId);
+        const poTotal = po?.total_minor ?? total;
+        variance = total - poTotal;
+        matchStatus = variance === 0 ? "matched" : "variance";
+        status = variance === 0 ? "approved" : "pending_approval";
+      }
+      const id = nextId++;
+      const sup = suppliers.get(supplierId);
+      const rec = {
+        id,
+        company_id: companyId,
+        branch_id: branchId,
+        supplier_id: supplierId,
+        supplier_name: sup?.name ?? `Supplier #${supplierId}`,
+        purchase_order_id: poId,
+        invoice_number: String(input.invoice_number ?? `SUP-${id}`),
+        invoice_date: String(input.invoice_date ?? new Date().toISOString().slice(0, 10)),
+        due_at: String(input.due_at ?? new Date().toISOString().slice(0, 10)),
+        subtotal_minor: sub,
+        vat_minor: vat,
+        total_minor: total,
+        paid_minor: 0,
+        outstanding_minor: total,
+        expense_account_code: poId ? null : String(input.expense_account_code ?? "5000"),
+        match_status: matchStatus,
+        variance_minor: variance,
+        approval_request_id: null,
+        status,
+        notes: input.notes ? String(input.notes) : null,
+        created_at: new Date().toISOString(),
+      };
+      supplierInvoices.set(id, rec);
+      if (!poId) {
+        postGl(companyId, branchId, "supplier_invoice", id, `Non-PO bill ${rec.invoice_number}`, [
+          { code: rec.expense_account_code ?? "5000", debit: total, credit: 0 },
+          { code: "2000", debit: 0, credit: total },
+        ]);
+      }
+      completedWrites++;
+      json(201, { data: rec });
+      return;
+    }
+  }
+
+  const cnPostMatch = url.pathname.match(/^\/api\/v1\/invoices\/(\d+)\/credit-notes$/);
+  if (cnPostMatch && req.method === "POST") {
+    if (!hasFinanceManage) {
+      fail(403);
+      return;
+    }
+    const inv = invoices.get(Number(cnPostMatch[1]));
+    if (!inv) {
+      fail(404);
+      return;
+    }
+    if (inv.status !== "issued") {
+      fail(409);
+      return;
+    }
+    const sub = Number(input.subtotal_minor ?? 0);
+    const vat = Number(input.vat_minor ?? 0);
+    const total = sub + vat;
+    if (total <= 0 || total > inv.outstanding_minor) {
+      fail(422, { subtotal_minor: ["Credit note exceeds remaining invoice balance."] });
+      return;
+    }
+    const id = nextId++;
+    inv.outstanding_minor = Math.max(0, inv.outstanding_minor - total);
+    const cn = {
+      id,
+      company_id: inv.company_id,
+      branch_id: inv.branch_id,
+      invoice_id: inv.id,
+      invoice_number: `INV-${inv.id}`,
+      customer_id: inv.customer_id ?? 10,
+      customer_name: inv.customer_name ?? inv.custom_customer_name ?? "Customer",
+      credit_note_number: `CN-${id}`,
+      subtotal_minor: sub,
+      vat_minor: vat,
+      total_minor: total,
+      reason: String(input.reason ?? ""),
+      status: "posted",
+      approval_request_id: null,
+      posted_at: new Date().toISOString(),
+      created_at: new Date().toISOString(),
+    };
+    creditNotes.set(id, cn);
+    postGl(inv.company_id, inv.branch_id, "credit_note", id, `Credit note ${cn.credit_note_number}`, [
+      { code: "4000", debit: sub, credit: 0 },
+      ...(vat > 0 ? [{ code: "2100", debit: vat, credit: 0 }] : []),
+      { code: "1100", debit: 0, credit: total },
+    ]);
+    completedWrites++;
+    json(201, { data: cn });
+    return;
+  }
+
+  if (url.pathname === "/api/v1/credit-notes" && req.method === "GET") {
+    if (!hasFinanceView) {
+      fail(403);
+      return;
+    }
+    const companyId = Number(url.searchParams.get("company_id"));
+    const rows = [...creditNotes.values()].filter((c) => c.company_id === companyId);
+    json(200, {
+      data: rows,
+      meta: { current_page: 1, last_page: 1, per_page: 25, total: rows.length },
+    });
+    return;
+  }
+
+  if (url.pathname === "/api/v1/bank-accounts") {
+    if (req.method === "GET") {
+      if (!hasFinanceView) {
+        fail(403);
+        return;
+      }
+      const companyId = Number(url.searchParams.get("company_id"));
+      const rows = [...bankAccounts.values()].filter((b) => b.company_id === companyId);
+      json(200, { data: rows });
+      return;
+    }
+    if (req.method === "POST") {
+      if (!hasFinanceManage) {
+        fail(403);
+        return;
+      }
+      const id = nextId++;
+      const openBal = Number(input.opening_balance_minor ?? 0);
+      const acct = {
+        id,
+        company_id: Number(input.company_id ?? 1),
+        branch_id: input.branch_id ? Number(input.branch_id) : null,
+        name: String(input.name ?? "Operating Account"),
+        bank_name: String(input.bank_name ?? "Bank"),
+        account_number_masked: String(input.account_number_masked ?? "****0000"),
+        currency: String(input.currency ?? "ZMW"),
+        gl_account_code: String(input.gl_account_code ?? "1010"),
+        opening_balance_minor: openBal,
+        ledger_balance_minor: openBal,
+        last_reconciled_at: null,
+        is_active: true,
+      };
+      bankAccounts.set(id, acct);
+      completedWrites++;
+      json(201, { data: acct });
+      return;
+    }
+  }
+
+  const bankTxMatch = url.pathname.match(/^\/api\/v1\/bank-accounts\/(\d+)\/transactions$/);
+  if (bankTxMatch) {
+    const acctId = Number(bankTxMatch[1]);
+    const acct = bankAccounts.get(acctId);
+    if (!acct) {
+      fail(404);
+      return;
+    }
+    if (req.method === "GET") {
+      if (!hasFinanceView) {
+        fail(403);
+        return;
+      }
+      const rows = [...bankTransactions.values()].filter(
+        (t) => t.bank_account_id === acctId,
+      );
+      json(200, {
+        data: rows,
+        meta: { current_page: 1, last_page: 1, per_page: 25, total: rows.length },
+      });
+      return;
+    }
+    if (req.method === "POST") {
+      if (!hasFinanceManage) {
+        fail(403);
+        return;
+      }
+      const lines = Array.isArray(input.lines) ? input.lines : [];
+      const created = [];
+      for (const l of lines) {
+        const id = nextId++;
+        const tx = {
+          id,
+          bank_account_id: acctId,
+          transaction_date: String(l.transaction_date),
+          description: String(l.description),
+          reference: l.reference ? String(l.reference) : null,
+          amount_minor: Number(l.amount_minor),
+          match_status: "unmatched",
+          matched_entity_type: null,
+          matched_entity_id: null,
+          matched_label: null,
+          reconciliation_id: null,
+          suggested_matches: [],
+        };
+        bankTransactions.set(id, tx);
+        created.push(tx);
+      }
+      completedWrites++;
+      json(201, { data: created });
+      return;
+    }
+  }
+
+  const txActionMatch = url.pathname.match(/^\/api\/v1\/bank-transactions\/(\d+)\/(match|unmatch)$/);
+  if (txActionMatch && req.method === "POST") {
+    if (!hasFinanceManage) {
+      fail(403);
+      return;
+    }
+    const tx = bankTransactions.get(Number(txActionMatch[1]));
+    if (!tx) {
+      fail(404);
+      return;
+    }
+    if (tx.reconciliation_id !== null) {
+      fail(409);
+      return;
+    }
+    if (txActionMatch[2] === "unmatch") {
+      tx.match_status = "unmatched";
+      tx.matched_entity_type = null;
+      tx.matched_entity_id = null;
+      tx.matched_label = null;
+    } else if (input.mode === "adjustment") {
+      const acct = bankAccounts.get(tx.bank_account_id);
+      const absAmt = Math.abs(tx.amount_minor);
+      const jeId = postGl(
+        acct?.company_id ?? 1,
+        acct?.branch_id ?? 2,
+        "bank_adjustment",
+        tx.id,
+        `Bank fee adjustment: ${tx.description}`,
+        tx.amount_minor < 0
+          ? [
+              { code: String(input.gl_account_code ?? "5600"), debit: absAmt, credit: 0 },
+              { code: "1000", debit: 0, credit: absAmt },
+            ]
+          : [
+              { code: "1000", debit: absAmt, credit: 0 },
+              { code: String(input.gl_account_code ?? "4000"), debit: 0, credit: absAmt },
+            ],
+      );
+      if (acct) acct.ledger_balance_minor += tx.amount_minor;
+      tx.match_status = "adjusted";
+      tx.matched_entity_type = "journal_entry";
+      tx.matched_entity_id = jeId;
+      tx.matched_label = `GL ${input.gl_account_code ?? "5600"} (JE-${jeId})`;
+    } else {
+      tx.match_status = "matched";
+      tx.matched_entity_type = String(input.entity_type ?? "payment");
+      tx.matched_entity_id = Number(input.entity_id ?? 1);
+      tx.matched_label = `${tx.matched_entity_type} #${tx.matched_entity_id}`;
+    }
+    completedWrites++;
+    json(200, { data: tx });
+    return;
+  }
+
+  const reconMatch = url.pathname.match(/^\/api\/v1\/bank-accounts\/(\d+)\/reconciliations$/);
+  if (reconMatch && req.method === "POST") {
+    if (!hasFinanceManage) {
+      fail(403);
+      return;
+    }
+    const acct = bankAccounts.get(Number(reconMatch[1]));
+    if (!acct) {
+      fail(404);
+      return;
+    }
+    const matchedTxs = [...bankTransactions.values()].filter(
+      (t) =>
+        t.bank_account_id === acct.id &&
+        t.match_status !== "unmatched" &&
+        t.reconciliation_id === null,
+    );
+    const reconciledBal =
+      acct.opening_balance_minor +
+      matchedTxs.reduce((s, t) => s + t.amount_minor, 0);
+    const stmtBal = Number(input.statement_closing_balance_minor ?? 0);
+    if (stmtBal !== reconciledBal) {
+      fail(422, {
+        statement_closing_balance_minor: [
+          "Statement closing balance does not equal reconciled balance.",
+        ],
+      });
+      return;
+    }
+    const reconId = nextId++;
+    const recon = {
+      id: reconId,
+      bank_account_id: acct.id,
+      statement_date: String(input.statement_date ?? new Date().toISOString().slice(0, 10)),
+      statement_closing_balance_minor: stmtBal,
+      reconciled_balance_minor: reconciledBal,
+      status: "closed",
+      closed_at: new Date().toISOString(),
+    };
+    bankReconciliations.set(reconId, recon);
+    for (const t of matchedTxs) t.reconciliation_id = reconId;
+    acct.last_reconciled_at = recon.closed_at;
+    completedWrites++;
+    json(201, { data: recon });
+    return;
+  }
+
+  if (url.pathname === "/api/v1/fixed-assets/depreciate" && req.method === "POST") {
+    if (!hasFinanceManage) {
+      fail(403);
+      return;
+    }
+    const companyId = Number(input.company_id ?? 1);
+    const period = String(input.period_month ?? new Date().toISOString().slice(0, 7));
+    let postedCount = 0;
+    let skippedCount = 0;
+    let totalDep = 0;
+    for (const a of fixedAssets.values()) {
+      if (a.company_id !== companyId || a.status !== "active") continue;
+      const key = `${a.id}:${period}`;
+      if (depreciationEntries.has(key) || a.net_book_value_minor <= a.residual_value_minor) {
+        skippedCount++;
+        continue;
+      }
+      const depreciable = Math.max(0, a.acquisition_cost_minor - a.residual_value_minor);
+      const rawMonthly =
+        a.depreciation_method === "reducing_balance"
+          ? Math.round((a.net_book_value_minor * 2) / a.useful_life_months)
+          : Math.round(depreciable / a.useful_life_months);
+      const amt = Math.min(rawMonthly, a.net_book_value_minor - a.residual_value_minor);
+      if (amt <= 0) {
+        skippedCount++;
+        continue;
+      }
+      a.accumulated_depreciation_minor += amt;
+      a.net_book_value_minor -= amt;
+      const jeId = postGl(companyId, a.branch_id, "depreciation", a.id, `Depreciation ${period} · ${a.asset_code}`, [
+        { code: "5500", debit: amt, credit: 0 },
+        { code: "1590", debit: 0, credit: amt },
+      ]);
+      depreciationEntries.set(key, {
+        id: nextId++,
+        fixed_asset_id: a.id,
+        period_month: period,
+        amount_minor: amt,
+        journal_entry_id: jeId,
+      });
+      postedCount++;
+      totalDep += amt;
+    }
+    completedWrites++;
+    json(200, {
+      data: {
+        period_month: period,
+        posted_count: postedCount,
+        skipped_count: skippedCount,
+        total_depreciation_minor: totalDep,
+      },
+    });
+    return;
+  }
+
+  const assetDispMatch = url.pathname.match(
+    /^\/api\/v1\/fixed-assets\/(\d+)\/(request-disposal|dispose)$/,
+  );
+  if (assetDispMatch && req.method === "POST") {
+    if (!hasFinanceManage) {
+      fail(403);
+      return;
+    }
+    const asset = fixedAssets.get(Number(assetDispMatch[1]));
+    if (!asset) {
+      fail(404);
+      return;
+    }
+    if (assetDispMatch[2] === "request-disposal") {
+      if (asset.vehicle_id) {
+        const veh = vehicles.get(asset.vehicle_id);
+        if (veh && veh.status === "rented") {
+          fail(409);
+          return;
+        }
+      }
+      const aprId = nextId++;
+      const proceeds = Number(input.disposal_proceeds_minor ?? 0);
+      approvalRequests.set(aprId, {
+        id: aprId,
+        company_id: asset.company_id,
+        branch_id: asset.branch_id,
+        type: "vehicle_disposal",
+        entity_type: "fixed_asset",
+        entity_id: asset.id,
+        title: `Asset disposal · ${asset.asset_code}`,
+        requester_id: user.id,
+        requester_name: user.name,
+        approver_id: null,
+        approver_name: null,
+        previous_value: `NBV ${(asset.net_book_value_minor / 100).toFixed(2)}`,
+        requested_value: `${input.disposal_type ?? "sold"} · ${(proceeds / 100).toFixed(2)}`,
+        approved_value: null,
+        reason: String(input.reason ?? "Fleet disposal"),
+        decision_notes: null,
+        status: "pending",
+        decided_at: null,
+        created_at: new Date().toISOString(),
+      });
+      asset.status = "pending_disposal";
+      asset.disposal_type = String(input.disposal_type ?? "sold");
+      asset.disposal_date = String(input.disposal_date ?? new Date().toISOString().slice(0, 10));
+      asset.disposal_proceeds_minor = proceeds;
+      asset.disposal_approval_id = aprId;
+      asset.disposal_approval_status = "pending";
+      completedWrites++;
+      json(200, { data: asset });
+      return;
+    } else {
+      if (asset.disposal_approval_status !== "approved") {
+        fail(409);
+        return;
+      }
+      const proceeds = Number(
+        input.disposal_proceeds_minor ?? asset.disposal_proceeds_minor ?? 0,
+      );
+      const gainLoss = proceeds - asset.net_book_value_minor;
+      asset.status = "disposed";
+      asset.disposal_proceeds_minor = proceeds;
+      asset.disposal_gain_loss_minor = gainLoss;
+      const lines = [
+        ...(proceeds > 0 ? [{ code: "1000", debit: proceeds, credit: 0 }] : []),
+        ...(asset.accumulated_depreciation_minor > 0
+          ? [{ code: "1590", debit: asset.accumulated_depreciation_minor, credit: 0 }]
+          : []),
+        { code: "1500", debit: 0, credit: asset.acquisition_cost_minor },
+        ...(gainLoss > 0
+          ? [{ code: "4900", debit: 0, credit: gainLoss }]
+          : gainLoss < 0
+            ? [{ code: "5900", debit: Math.abs(gainLoss), credit: 0 }]
+            : []),
+      ];
+      postGl(asset.company_id, asset.branch_id, "asset_disposal", asset.id, `Asset disposal ${asset.asset_code}`, lines);
+      if (asset.vehicle_id) {
+        const veh = vehicles.get(asset.vehicle_id);
+        if (veh) veh.status = asset.disposal_type ?? "sold";
+      }
+      completedWrites++;
+      json(200, { data: asset });
+      return;
+    }
+  }
+
+  if (url.pathname === "/api/v1/fixed-assets") {
+    if (req.method === "GET") {
+      if (!hasFinanceView) {
+        fail(403);
+        return;
+      }
+      const companyId = Number(url.searchParams.get("company_id"));
+      const vehFilter = url.searchParams.get("vehicle_id");
+      const rows = [...fixedAssets.values()].filter(
+        (a) =>
+          a.company_id === companyId &&
+          (!vehFilter || a.vehicle_id === Number(vehFilter)),
+      );
+      json(200, {
+        data: rows,
+        meta: { current_page: 1, last_page: 1, per_page: 25, total: rows.length },
+      });
+      return;
+    }
+    if (req.method === "POST") {
+      if (!hasFinanceManage) {
+        fail(403);
+        return;
+      }
+      const id = nextId++;
+      const cost = Number(input.acquisition_cost_minor ?? 0);
+      const res = Number(input.residual_value_minor ?? 0);
+      const vehId = input.vehicle_id ? Number(input.vehicle_id) : null;
+      const veh = vehId ? vehicles.get(vehId) : null;
+      const asset = {
+        id,
+        company_id: Number(input.company_id ?? 1),
+        branch_id: Number(input.branch_id ?? 2),
+        vehicle_id: vehId,
+        vehicle_registration: veh?.registration ?? null,
+        asset_code: String(input.asset_code ?? `FA-${id}`),
+        name: String(input.name ?? "Fixed Asset"),
+        category: String(input.category ?? "vehicle"),
+        acquisition_cost_minor: cost,
+        residual_value_minor: res,
+        capitalisation_date: String(
+          input.capitalisation_date ?? new Date().toISOString().slice(0, 10),
+        ),
+        useful_life_months: Number(input.useful_life_months ?? 60),
+        depreciation_method: String(input.depreciation_method ?? "straight_line"),
+        accumulated_depreciation_minor: 0,
+        net_book_value_minor: cost,
+        status: "active",
+        disposal_type: null,
+        disposal_date: null,
+        disposal_proceeds_minor: null,
+        disposal_gain_loss_minor: null,
+        disposal_approval_id: null,
+        disposal_approval_status: null,
+      };
+      fixedAssets.set(id, asset);
+      postGl(asset.company_id, asset.branch_id, "asset_capitalisation", id, `Capitalised ${asset.asset_code}`, [
+        { code: "1500", debit: cost, credit: 0 },
+        { code: "1000", debit: 0, credit: cost },
+      ]);
+      completedWrites++;
+      json(201, { data: asset });
+      return;
+    }
+  }
+
+  const stmtMatch = url.pathname.match(
+    /^\/api\/v1\/reports\/statements\/(pnl|balance-sheet|cash-flow)$/,
+  );
+  if (stmtMatch && req.method === "GET") {
+    if (!hasFinanceView) {
+      fail(403);
+      return;
+    }
+    const companyId = Number(url.searchParams.get("company_id"));
+    const balances = new Map();
+    for (const je of journalEntries.values()) {
+      if (je.company_id !== companyId) continue;
+      for (const line of je.lines ?? []) {
+        const prev = balances.get(line.account_code) ?? {
+          account_code: line.account_code,
+          account_name: line.account_name,
+          debit: 0,
+          credit: 0,
+        };
+        prev.debit += Number(line.debit_minor ?? 0);
+        prev.credit += Number(line.credit_minor ?? 0);
+        balances.set(line.account_code, prev);
+      }
+    }
+    const revenueLines = [];
+    const expenseLines = [];
+    const assetLines = [];
+    const liabilityLines = [];
+    const equityLines = [];
+    for (const b of balances.values()) {
+      const code = String(b.account_code);
+      if (code.startsWith("4")) {
+        revenueLines.push({
+          account_code: code,
+          account_name: b.account_name,
+          amount_minor: b.credit - b.debit,
+        });
+      } else if (code.startsWith("5")) {
+        expenseLines.push({
+          account_code: code,
+          account_name: b.account_name,
+          amount_minor: b.debit - b.credit,
+        });
+      } else if (code.startsWith("1")) {
+        assetLines.push({
+          account_code: code,
+          account_name: b.account_name,
+          amount_minor: b.debit - b.credit,
+        });
+      } else if (code.startsWith("2")) {
+        liabilityLines.push({
+          account_code: code,
+          account_name: b.account_name,
+          amount_minor: b.credit - b.debit,
+        });
+      } else if (code.startsWith("3")) {
+        equityLines.push({
+          account_code: code,
+          account_name: b.account_name,
+          amount_minor: b.credit - b.debit,
+        });
+      }
+    }
+    const totalRev = revenueLines.reduce((s, l) => s + l.amount_minor, 0);
+    const totalExp = expenseLines.reduce((s, l) => s + l.amount_minor, 0);
+    const netProfit = totalRev - totalExp;
+
+    if (stmtMatch[1] === "pnl") {
+      json(200, {
+        data: {
+          from: url.searchParams.get("from"),
+          to: url.searchParams.get("to"),
+          revenue_lines: revenueLines,
+          expense_lines: expenseLines,
+          total_revenue_minor: totalRev,
+          total_expenses_minor: totalExp,
+          net_profit_minor: netProfit,
+        },
+      });
+      return;
+    }
+    if (stmtMatch[1] === "balance-sheet") {
+      if (netProfit !== 0) {
+        equityLines.push({
+          account_code: "3900",
+          account_name: "Current Period Net Profit / (Loss)",
+          amount_minor: netProfit,
+        });
+      }
+      const totalAssets = assetLines.reduce((s, l) => s + l.amount_minor, 0);
+      const totalLiab = liabilityLines.reduce((s, l) => s + l.amount_minor, 0);
+      const totalEq = equityLines.reduce((s, l) => s + l.amount_minor, 0);
+      json(200, {
+        data: {
+          as_of: url.searchParams.get("as_of") ?? new Date().toISOString().slice(0, 10),
+          asset_lines: assetLines,
+          liability_lines: liabilityLines,
+          equity_lines: equityLines,
+          total_assets_minor: totalAssets,
+          total_liabilities_minor: totalLiab,
+          total_equity_minor: totalEq,
+          is_balanced: totalAssets === totalLiab + totalEq,
+        },
+      });
+      return;
+    }
+    const cashLine = assetLines.find((l) => l.account_code === "1000");
+    const cashDelta = cashLine?.amount_minor ?? 0;
+    const operatingLines = [
+      {
+        account_code: "1000",
+        account_name: "Net operating cash movement",
+        amount_minor: cashDelta,
+      },
+    ];
+    json(200, {
+      data: {
+        from: url.searchParams.get("from"),
+        to: url.searchParams.get("to"),
+        operating_lines: operatingLines,
+        investing_lines: [],
+        financing_lines: [],
+        operating_total_minor: cashDelta,
+        investing_total_minor: 0,
+        financing_total_minor: 0,
+        net_cash_change_minor: cashDelta,
+        opening_cash_minor: 0,
+        closing_cash_minor: cashDelta,
       },
     });
     return;

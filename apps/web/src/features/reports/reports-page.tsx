@@ -6,12 +6,14 @@ import {
   BarChart3,
   CarFront,
   Download,
+  FileSpreadsheet,
   Landmark,
   ShieldCheck,
 } from "lucide-react";
 import { useSession } from "@/features/auth/session-provider";
 import { useLiveContext } from "@/features/live/context";
 import { DetailedStatsPanel } from "@/features/stats/detailed-stats-panel";
+import { FinancialStatementsPanel } from "@/features/accounting/financial-statements-panel";
 import {
   getFinancialReport,
   getFleetReport,
@@ -22,6 +24,7 @@ import {
   can,
   canAccessReports,
   canViewAudit,
+  canViewStatements,
   formatMoneyMinor,
 } from "@/lib/api/contracts";
 import { downloadCsv } from "@/lib/csv";
@@ -42,7 +45,7 @@ import { ViewFadeIn } from "@/components/motion/primitives";
 import { Button } from "@/components/ui/button";
 import { DriveCoreDateRangePicker } from "@/components/ui/drivecore-calendar";
 
-type ReportsTab = "financial" | "fleet" | "stats" | "audit";
+type ReportsTab = "financial" | "statements" | "fleet" | "stats" | "audit";
 
 function fmtDate(iso?: string | null) {
   if (!iso) return "—";
@@ -65,6 +68,7 @@ export function LiveReportsPage() {
 
   const canAccess = !!user && canAccessReports(user);
   const canFinancial = !!user && can(user, "invoices.view");
+  const canStatements = !!user && canViewStatements(user);
   const canFleet = !!user && can(user, "vehicles.view");
   const hasAuditAccess = !!user && canViewAudit(user);
   const currency = scope.company?.currency || "ZMW";
@@ -72,10 +76,11 @@ export function LiveReportsPage() {
   const rawTab = searchParams.get("tab");
   const activeTab: ReportsTab =
     rawTab === "financial" ||
+    (rawTab === "statements" && canStatements) ||
     rawTab === "fleet" ||
     rawTab === "stats" ||
     rawTab === "audit"
-      ? rawTab
+      ? (rawTab as ReportsTab)
       : canFinancial
         ? "financial"
         : canFleet
@@ -152,6 +157,11 @@ export function LiveReportsPage() {
 
   const tabs: { key: ReportsTab; label: string; visible: boolean }[] = [
     { key: "financial", label: "Financial report", visible: canFinancial },
+    {
+      key: "statements",
+      label: "Financial statements",
+      visible: canStatements,
+    },
     { key: "fleet", label: "Fleet & maintenance", visible: canFleet },
     { key: "stats", label: "Detailed stats", visible: canAccess },
     { key: "audit", label: "Audit trail", visible: hasAuditAccess },
@@ -231,7 +241,7 @@ export function LiveReportsPage() {
           type="button"
           variant="outline"
           onClick={handleExportCsv}
-          className={`gap-1.5 ${activeTab === "stats" ? "hidden" : ""}`}
+          className={`gap-1.5 ${activeTab === "stats" || activeTab === "statements" ? "hidden" : ""}`}
         >
           <Download className="size-4" aria-hidden="true" />
           Export CSV
@@ -262,6 +272,8 @@ export function LiveReportsPage() {
               >
                 {tab.key === "financial" ? (
                   <Landmark className="size-3.5" aria-hidden="true" />
+                ) : tab.key === "statements" ? (
+                  <FileSpreadsheet className="size-3.5" aria-hidden="true" />
                 ) : tab.key === "fleet" ? (
                   <CarFront className="size-3.5" aria-hidden="true" />
                 ) : tab.key === "stats" ? (
@@ -538,6 +550,9 @@ export function LiveReportsPage() {
             )}
           </DataTableFrame>
         )
+      ) : null}
+      {activeTab === "statements" && canStatements ? (
+        <FinancialStatementsPanel />
       ) : null}
     </ViewFadeIn>
   );

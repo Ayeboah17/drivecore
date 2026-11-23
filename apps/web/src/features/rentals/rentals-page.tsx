@@ -400,7 +400,7 @@ export function RentalsDirectoryPage({
         <div
           role="tablist"
           aria-label="Rentals sections"
-          className="inline-flex rounded-xl border bg-muted/40 p-1"
+          className="flex flex-wrap gap-1.5 rounded-2xl border bg-surface p-1.5"
         >
           {(
             [
@@ -424,12 +424,21 @@ export function RentalsDirectoryPage({
               onClick={() =>
                 updateQuery({ tab: key, q: "", status: "", page: 1 })
               }
-              className={`rounded-lg px-3.5 py-1.5 text-xs font-medium transition-colors duration-150 focus-visible:outline-2 focus-visible:outline-ring ${
+              className={`inline-flex items-center gap-1.5 rounded-xl px-3.5 py-2 text-xs font-semibold transition-colors ${
                 activeTab === key
-                  ? "bg-surface text-foreground shadow-2xs"
-                  : "text-muted-foreground hover:text-foreground"
+                  ? "bg-primary text-primary-foreground shadow-xs"
+                  : "text-muted-foreground hover:bg-muted/80 hover:text-foreground"
               }`}
             >
+              {key === "quotations" ? (
+                <FileText className="size-3.5" aria-hidden="true" />
+              ) : key === "reservations" ? (
+                <CalendarPlus className="size-3.5" aria-hidden="true" />
+              ) : key === "contracts" ? (
+                <CarFront className="size-3.5" aria-hidden="true" />
+              ) : (
+                <FileSpreadsheet className="size-3.5" aria-hidden="true" />
+              )}
               {text}
             </button>
           ))}

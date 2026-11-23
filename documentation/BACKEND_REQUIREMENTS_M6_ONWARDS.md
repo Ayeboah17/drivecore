@@ -8,7 +8,7 @@
 
 ---
 
-## Master Quick-Reference Index (M6–M14)
+## Master Quick-Reference Index (M6–M15)
 
 ### A. Endpoint Index
 
@@ -76,6 +76,11 @@
 | M14 | `GET` | `/api/v1/customers/{id}/statement` | `invoices.view` | Running-balance chronological Customer Account Statement (`from`, `to`, opening/closing balance, rows) |
 | M14 | `GET/POST` | `/api/v1/approvals` & `/{id}/{approve\|reject}` | Authenticated member (request) / `invoices.manage` or `quotations.approve_discount` or `company-admin` (decide) | Unified Approval Engine across all 7 SRS §20 types; enforces strict segregation of duties (`requester_id === caller.id` → `403`) |
 | M14 | `GET` | `/api/v1/compliance/expiries` | `documents.view` | Document & compliance expiry hub (`expired`, `d7`, `d14`, `d30`, `valid` buckets across insurance, roadworthy, licences, contracts, KYC) |
+| M15 | `GET/POST` | `/api/v1/ap/invoices`, `/ap/ageing`, `/ap/invoices/{id}/payments` | `invoices.view`/`manage` or `ap.view`/`manage` | Supplier Invoices (PO 3-way match + non-PO bills), AP Ageing (5 buckets), Supplier Payments (`409` if `variance` without approval) |
+| M15 | `GET/POST` | `/api/v1/credit-notes` & `/api/v1/invoices/{id}/credit-notes` | `invoices.view` / `invoices.manage` | Formal Customer Credit Notes (`refund_writeoff` approval gating), GL reversal (`DR 4000 + 2100 / CR 1100`), updates AR & Customer Statement |
+| M15 | `GET/POST` | `/api/v1/bank-accounts`, `/{id}/transactions`, `/{id}/reconciliations`, `/bank-transactions/{id}/{match\|unmatch}` | `gl.view` / `expenses.manage` (`banking.view`/`manage`) | Cash & Bank Accounts, CSV/manual statement lines, auto-suggested matching, bank-fee posting, reconciliation close |
+| M15 | `GET/POST` | `/api/v1/fixed-assets`, `/depreciate`, `/{id}/{request-disposal\|dispose}` | `gl.view` / `expenses.manage` (`assets.view`/`manage`) | Fixed Assets (vehicle or equipment), idempotent monthly depreciation (`straight_line` / `reducing_balance`), approval-gated Vehicle Disposal (`sold` / `decommissioned`) |
+| M15 | `GET` | `/api/v1/reports/statements/{pnl\|balance-sheet\|cash-flow}` | `gl.view` (or `invoices.view`) | Server-aggregated Management P&L, Balance Sheet (`is_balanced`), and Cash Flow from posted GL journal lines |
 
 ### B. Spatie Role & Permission Matrix (M6–M10 Additions)
 
@@ -1173,10 +1178,159 @@ Schema::table('documents', function (Blueprint $table): void {
 3. `POST /api/v1/approvals` creates a pending request; requester attempting to approve their own request receives **`403`**; a different Finance/Admin approver succeeds (`200`) and second approval returns `409`.
 4. `GET /api/v1/compliance/expiries` buckets documents accurately into `expired`, `d7`, `d14`, `d30`, and `valid`.
 
-## Milestone 15 — Full Accounting: AP, Bank Reconciliation, Fixed Assets & Financial Statements (PR #18)
-*(Will be appended when Milestone 15 is implemented.)*
+## Milestone 15 — Full Accounting: AP, Credit Notes, Bank Reconciliation, Fixed Assets & Financial Statements (PR #18)
 
-## Milestone 16 — SRS Role Expansion, Lead-to-Quote CRM & Privileged 2FA (PR #19)
+### 15.1 Accounting Invariants & Role Governance (Exact SRS §3 Roles)
+- **Authoritative Access Roles (SRS §3):** Operational accounting actions (`ap.manage`, `banking.manage`, `assets.manage`, `invoices.manage`) belong to **Finance Manager** and **System Administrator**. Executive read & high-level approval decisions (`vehicle_disposal`, AP `purchase` variance overrides, `refund_writeoff` credit notes) are authorized for **CEO**, **General Manager**, **Finance Manager**, and **System Administrator** with strict segregation of duties (`requester_id !== approver_id` → `403`). **Credit Control Manager** has read access to Credit Notes & AR Ageing and may request `refund_writeoff` credit notes.
+- **3-Way Match Enforcement:** PO-linked supplier invoices compare `total_minor` against the received Purchase Order total. Any discrepancy sets `match_status = variance` and `POST /api/v1/ap/invoices/{id}/payments` MUST return **`409 Conflict`** until variance is approved via the M14 Approval Engine (`purchase`). Non-PO supplier bills (`match_status = non_po`) require `expense_account_code`.
+- **Credit Note Integrity:** `POST /api/v1/invoices/{id}/credit-notes` rejects `draft`/`void` invoices (`409`) and amounts exceeding remaining creditable balance (`422`). Posted credit notes write balanced GL (`DR 4000 Rental Revenue` + `DR 2100 VAT Payable` / `CR 1100 Accounts Receivable`) and appear in `GET /api/v1/customers/{id}/statement` and AR Ageing.
+- **Idempotent Monthly Depreciation:** `POST /api/v1/fixed-assets/depreciate` (`period_month: YYYY-MM`) enforces a unique `(fixed_asset_id, period_month)` constraint; re-running skips already-depreciated or fully-depreciated (`net_book_value_minor <= residual_value_minor`) assets and returns `{ period_month, posted_count, skipped_count, total_depreciation_minor }`. Posts balanced GL (`DR 5500 Depreciation Expense / CR 1590 Accumulated Depreciation`).
+- **Approval-Gated Vehicle Disposal:** `POST /api/v1/fixed-assets/{id}/request-disposal` creates a `vehicle_disposal` approval request (rejects `409` if linked vehicle is `rented`). `POST /api/v1/fixed-assets/{id}/dispose` requires the linked approval to be `approved` (`409` otherwise), calculates `gain_loss_minor = proceeds_minor - net_book_value_minor`, posts disposal GL (`DR 1000 Bank`, `DR 1590 Accum. Depr.`, `CR 1500 Fixed Assets`, `CR 4900 Gain` or `DR 5900 Loss`), marks asset `disposed`, and updates linked vehicle status to `sold` or `decommissioned` (blocking future reservations/handovers with `409`).
+- **Extended Chart of Accounts:** `1000` Cash & Bank (sub-accounts `1010`/`1020`), `1100` Accounts Receivable, `1200` Inventory, `1500` Fleet & Fixed Assets, `1590` Accumulated Depreciation, `2000` Accounts Payable, `2100` VAT Payable, `3000` Retained Earnings / Equity, `4000` Rental Revenue, `4100` Refunds & Allowances, `4900` Gain on Asset Disposal, `5000` Fleet Operating Expenses, `5500` Depreciation Expense, `5600` Bank Charges, `5900` Loss on Asset Disposal.
+
+### 15.2 Database Migrations
+```php
+Schema::create('supplier_invoices', function (Blueprint $table): void {
+    $table->id();
+    $table->foreignId('company_id')->constrained()->cascadeOnDelete();
+    $table->foreignId('branch_id')->constrained()->cascadeOnDelete();
+    $table->foreignId('supplier_id')->constrained()->cascadeOnDelete();
+    $table->foreignId('purchase_order_id')->nullable()->constrained()->nullOnDelete();
+    $table->string('invoice_number', 64);
+    $table->date('invoice_date');
+    $table->date('due_at');
+    $table->unsignedBigInteger('subtotal_minor');
+    $table->unsignedBigInteger('vat_minor')->default(0);
+    $table->unsignedBigInteger('total_minor');
+    $table->unsignedBigInteger('paid_minor')->default(0);
+    $table->string('expense_account_code', 20)->nullable();
+    $table->string('match_status', 16)->default('non_po'); // matched | variance | non_po
+    $table->bigInteger('variance_minor')->default(0);
+    $table->foreignId('approval_request_id')->nullable()->constrained('approval_requests')->nullOnDelete();
+    $table->string('status', 20)->default('approved'); // draft | pending_approval | approved | partially_paid | paid | void
+    $table->text('notes')->nullable();
+    $table->timestamps();
+    $table->unique(['company_id', 'supplier_id', 'invoice_number']);
+});
+
+Schema::create('supplier_payments', function (Blueprint $table): void {
+    $table->id();
+    $table->foreignId('company_id')->constrained()->cascadeOnDelete();
+    $table->foreignId('supplier_invoice_id')->constrained()->cascadeOnDelete();
+    $table->foreignId('bank_account_id')->nullable()->constrained('bank_accounts')->nullOnDelete();
+    $table->unsignedBigInteger('amount_minor');
+    $table->string('method', 24); // bank_transfer | cash | card | mobile_money
+    $table->string('reference', 80)->nullable();
+    $table->date('paid_at');
+    $table->foreignId('journal_entry_id')->nullable()->constrained()->nullOnDelete();
+    $table->timestamps();
+});
+
+Schema::create('credit_notes', function (Blueprint $table): void {
+    $table->id();
+    $table->foreignId('company_id')->constrained()->cascadeOnDelete();
+    $table->foreignId('branch_id')->constrained()->cascadeOnDelete();
+    $table->foreignId('invoice_id')->constrained()->cascadeOnDelete();
+    $table->foreignId('customer_id')->constrained()->cascadeOnDelete();
+    $table->string('credit_note_number', 48);
+    $table->unsignedBigInteger('subtotal_minor');
+    $table->unsignedBigInteger('vat_minor')->default(0);
+    $table->unsignedBigInteger('total_minor');
+    $table->text('reason');
+    $table->string('status', 20)->default('posted'); // pending_approval | posted | rejected
+    $table->foreignId('approval_request_id')->nullable()->constrained('approval_requests')->nullOnDelete();
+    $table->foreignId('journal_entry_id')->nullable()->constrained()->nullOnDelete();
+    $table->timestampTz('posted_at')->nullable();
+    $table->timestamps();
+});
+
+Schema::create('bank_accounts', function (Blueprint $table): void {
+    $table->id();
+    $table->foreignId('company_id')->constrained()->cascadeOnDelete();
+    $table->foreignId('branch_id')->nullable()->constrained()->nullOnDelete();
+    $table->string('name', 120);
+    $table->string('bank_name', 120);
+    $table->string('account_number_masked', 32);
+    $table->string('currency', 8)->default('ZMW');
+    $table->string('gl_account_code', 20)->default('1000');
+    $table->bigInteger('opening_balance_minor')->default(0);
+    $table->timestampTz('last_reconciled_at')->nullable();
+    $table->boolean('is_active')->default(true);
+    $table->timestamps();
+});
+
+Schema::create('bank_reconciliations', function (Blueprint $table): void {
+    $table->id();
+    $table->foreignId('company_id')->constrained()->cascadeOnDelete();
+    $table->foreignId('bank_account_id')->constrained()->cascadeOnDelete();
+    $table->date('statement_date');
+    $table->bigInteger('statement_closing_balance_minor');
+    $table->bigInteger('reconciled_balance_minor');
+    $table->string('status', 16)->default('closed'); // open | closed
+    $table->timestampTz('closed_at')->nullable();
+    $table->timestamps();
+});
+
+Schema::create('bank_transactions', function (Blueprint $table): void {
+    $table->id();
+    $table->foreignId('company_id')->constrained()->cascadeOnDelete();
+    $table->foreignId('bank_account_id')->constrained()->cascadeOnDelete();
+    $table->date('transaction_date');
+    $table->string('description', 200);
+    $table->string('reference', 80)->nullable();
+    $table->bigInteger('amount_minor'); // signed: +deposit, -withdrawal
+    $table->string('match_status', 16)->default('unmatched'); // unmatched | matched | adjusted
+    $table->string('matched_entity_type', 32)->nullable();
+    $table->unsignedBigInteger('matched_entity_id')->nullable();
+    $table->foreignId('reconciliation_id')->nullable()->constrained('bank_reconciliations')->nullOnDelete();
+    $table->timestamps();
+});
+
+Schema::create('fixed_assets', function (Blueprint $table): void {
+    $table->id();
+    $table->foreignId('company_id')->constrained()->cascadeOnDelete();
+    $table->foreignId('branch_id')->constrained()->cascadeOnDelete();
+    $table->foreignId('vehicle_id')->nullable()->constrained()->nullOnDelete();
+    $table->string('asset_code', 40);
+    $table->string('name', 140);
+    $table->string('category', 32)->default('vehicle'); // vehicle | workshop_equipment | office_equipment | other
+    $table->unsignedBigInteger('acquisition_cost_minor');
+    $table->unsignedBigInteger('residual_value_minor')->default(0);
+    $table->date('capitalisation_date');
+    $table->unsignedSmallInteger('useful_life_months');
+    $table->string('depreciation_method', 24)->default('straight_line'); // straight_line | reducing_balance
+    $table->unsignedBigInteger('accumulated_depreciation_minor')->default(0);
+    $table->string('status', 20)->default('active'); // active | pending_disposal | disposed
+    $table->string('disposal_type', 20)->nullable(); // sold | decommissioned
+    $table->date('disposal_date')->nullable();
+    $table->unsignedBigInteger('disposal_proceeds_minor')->nullable();
+    $table->bigInteger('disposal_gain_loss_minor')->nullable();
+    $table->foreignId('disposal_approval_id')->nullable()->constrained('approval_requests')->nullOnDelete();
+    $table->timestamps();
+});
+
+Schema::create('depreciation_entries', function (Blueprint $table): void {
+    $table->id();
+    $table->foreignId('company_id')->constrained()->cascadeOnDelete();
+    $table->foreignId('fixed_asset_id')->constrained()->cascadeOnDelete();
+    $table->string('period_month', 7); // YYYY-MM
+    $table->unsignedBigInteger('amount_minor');
+    $table->foreignId('journal_entry_id')->nullable()->constrained()->nullOnDelete();
+    $table->timestampTz('posted_at');
+    $table->timestamps();
+    $table->unique(['fixed_asset_id', 'period_month']);
+});
+```
+
+### 15.3 Required Feature Tests (`tests/Feature/MilestoneFifteenTest.php`)
+1. PO-linked supplier invoice matching PO total becomes `matched` and pays cleanly (GL `DR 2000 / CR 1000`); mismatched total becomes `variance` and blocks payment (`409`) until M14 approval by a second user.
+2. Non-PO supplier bill posts GL (`DR Expense / CR 2000`) and updates AP Ageing buckets accurately.
+3. Credit note on an issued invoice rejects over-crediting (`422`), posts balanced GL reversal, reduces invoice outstanding balance, and appears in Customer Statement.
+4. Bank account creation, CSV/manual statement transaction import, auto-match/manual match, bank-fee posting, and reconciliation close (`422` if unbalanced, `409` unmatch after close).
+5. Fixed asset registration, idempotent monthly depreciation run (`YYYY-MM`), approval-gated Vehicle Disposal calculating gain/loss, posting GL, and transitioning vehicle status to `sold` or `decommissioned` (blocking future reservations with `409`).
+6. `GET /api/v1/reports/statements/{pnl|balance-sheet|cash-flow}` returns balanced server-computed GL totals and enforces `403` for non-finance roles.
+
+## Milestone 16 — Exact SRS §3 Role Expansion, Lead-to-Quote CRM & Privileged 2FA (PR #19)
 *(Will be appended when Milestone 16 is implemented.)*
 
 ## Milestone 17 — Printing & Barcode Scanning (PR #20 — TBD)

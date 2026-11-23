@@ -15,6 +15,7 @@ import { RecordDirectory } from "./directory";
 import { RecordDetails, VehicleStatus } from "./presentation";
 import { EntityDocumentsPanel } from "@/features/documents/documents-panel";
 import { Vehicle360Panel } from "@/features/maintenance/maintenance-page";
+import { VehicleAssetCard } from "@/features/accounting/fixed-assets-panel";
 import { Customer360Panel } from "@/features/stats/customer-360-panel";
 
 export function RecordPage({ domain }: { domain: Domain }) {
@@ -222,7 +223,10 @@ export function RecordPage({ domain }: { domain: Domain }) {
             <Customer360Panel customerId={String(value.id)} />
           ) : null}
           {domain === "vehicles" && "registration" in value ? (
-            <Vehicle360Panel vehicle={value} />
+            <>
+              <Vehicle360Panel vehicle={value} />
+              <VehicleAssetCard vehicle={value} />
+            </>
           ) : null}
           {can(user!, "documents.view") ? (
             <EntityDocumentsPanel

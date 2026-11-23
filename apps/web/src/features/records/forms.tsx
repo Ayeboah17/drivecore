@@ -388,7 +388,12 @@ export function VehicleForm({ record }: { record?: Vehicle }) {
           odometer: String(record.odometer),
           daily_rate: formatMinorToInput(record.daily_rate_minor),
           functions: [...record.functions],
-          status: record.status === "rented" ? "available" : record.status,
+          status:
+            record.status === "available" ||
+            record.status === "maintenance" ||
+            record.status === "damaged"
+              ? record.status
+              : "available",
         }
       : {
           registration: "",

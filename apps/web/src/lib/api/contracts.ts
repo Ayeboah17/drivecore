@@ -185,7 +185,14 @@ export const vehicleSchema = z.object({
     .max(MAX_VEHICLE_FUNCTIONS)
     .optional()
     .default([]),
-  status: z.enum(["available", "maintenance", "damaged", "rented"]),
+  status: z.enum([
+    "available",
+    "maintenance",
+    "damaged",
+    "rented",
+    "sold",
+    "decommissioned",
+  ]),
   stats: vehicleStatsRollupSchema.optional(),
 });
 export const documentEntityTypes = [
@@ -1245,7 +1252,7 @@ export const customerStatementSchema = z.object({
   rows: z.array(
     z.object({
       date: z.string(),
-      type: z.enum(["invoice", "payment", "refund"]),
+      type: z.enum(["invoice", "payment", "refund", "credit_note"]),
       reference: z.string(),
       description: z.string(),
       debit_minor: nonNegInt,
@@ -1358,6 +1365,295 @@ export function canDecideApprovals(user: User): boolean {
     user.permissions.includes("quotations.approve_discount") ||
     user.permissions.includes("purchase_orders.approve") ||
     user.permissions.includes("invoices.manage")
+  );
+}
+
+// ---------- Milestone 15: Full Accounting (AP, Credit Notes, Banking, Fixed Assets, Statements) ----------
+
+export const supplierInvoiceMatchStatuses = [
+  "matched",
+  "variance",
+  "non_po",
+] as const;
+export type SupplierInvoiceMatchStatus =
+  (typeof supplierInvoiceMatchStatuses)[number];
+
+export const supplierInvoiceStatuses = [
+  "draft",
+  "pending_approval",
+  "approved",
+  "partially_paid",
+  "paid",
+  "void",
+] as const;
+export type SupplierInvoiceStatus = (typeof supplierInvoiceStatuses)[number];
+
+export const supplierInvoiceSchema = z.object({
+  id: numericId,
+  company_id: numericId,
+  branch_id: numericId,
+  supplier_id: numericId,
+  supplier_name: z.string().nullable().optional().default(null),
+  purchase_order_id: numericId.nullable().optional().default(null),
+  invoice_number: z.string(),
+  invoice_date: z.string(),
+  due_at: z.string(),
+  subtotal_minor: nonNegInt,
+  vat_minor: nonNegInt.optional().default(0),
+  total_minor: nonNegInt,
+  paid_minor: nonNegInt.optional().default(0),
+  outstanding_minor: nonNegInt,
+  expense_account_code: z.string().nullable().optional().default(null),
+  match_status: z.enum(supplierInvoiceMatchStatuses),
+  variance_minor: z.number().int().optional().default(0),
+  approval_request_id: numericId.nullable().optional().default(null),
+  status: z.enum(supplierInvoiceStatuses),
+  notes: z.string().nullable().optional().default(null),
+  created_at: z.string().nullable().optional().default(null),
+});
+export type SupplierInvoice = z.infer<typeof supplierInvoiceSchema>;
+
+export const apAgeingSchema = z.object({
+  total_open_minor: nonNegInt,
+  buckets: z.object({
+    current: nonNegInt,
+    d1_30: nonNegInt,
+    d31_60: nonNegInt,
+    d61_90: nonNegInt,
+    d90_plus: nonNegInt,
+  }),
+});
+export type ApAgeing = z.infer<typeof apAgeingSchema>;
+
+export const creditNoteStatuses = [
+  "pending_approval",
+  "posted",
+  "rejected",
+] as const;
+export type CreditNoteStatus = (typeof creditNoteStatuses)[number];
+
+export const creditNoteSchema = z.object({
+  id: numericId,
+  company_id: numericId,
+  branch_id: numericId,
+  invoice_id: numericId,
+  invoice_number: z.string().nullable().optional().default(null),
+  customer_id: numericId,
+  customer_name: z.string().nullable().optional().default(null),
+  credit_note_number: z.string(),
+  subtotal_minor: nonNegInt,
+  vat_minor: nonNegInt.optional().default(0),
+  total_minor: nonNegInt,
+  reason: z.string(),
+  status: z.enum(creditNoteStatuses),
+  approval_request_id: numericId.nullable().optional().default(null),
+  posted_at: z.string().nullable().optional().default(null),
+  created_at: z.string().nullable().optional().default(null),
+});
+export type CreditNote = z.infer<typeof creditNoteSchema>;
+
+export const bankAccountSchema = z.object({
+  id: numericId,
+  company_id: numericId,
+  branch_id: numericId.nullable().optional().default(null),
+  name: z.string(),
+  bank_name: z.string(),
+  account_number_masked: z.string(),
+  currency: z.string(),
+  gl_account_code: z.string(),
+  opening_balance_minor: z.number().int(),
+  ledger_balance_minor: z.number().int(),
+  last_reconciled_at: z.string().nullable().optional().default(null),
+  is_active: z.boolean().optional().default(true),
+});
+export type BankAccount = z.infer<typeof bankAccountSchema>;
+
+export const bankMatchCandidateSchema = z.object({
+  entity_type: z.enum([
+    "payment",
+    "supplier_payment",
+    "refund",
+    "expense",
+    "journal_entry",
+  ]),
+  entity_id: numericId,
+  label: z.string(),
+  date: z.string(),
+  amount_minor: z.number().int(),
+});
+export type BankMatchCandidate = z.infer<typeof bankMatchCandidateSchema>;
+
+export const bankTransactionSchema = z.object({
+  id: numericId,
+  bank_account_id: numericId,
+  transaction_date: z.string(),
+  description: z.string(),
+  reference: z.string().nullable().optional().default(null),
+  amount_minor: z.number().int(),
+  match_status: z.enum(["unmatched", "matched", "adjusted"]),
+  matched_entity_type: z.string().nullable().optional().default(null),
+  matched_entity_id: numericId.nullable().optional().default(null),
+  matched_label: z.string().nullable().optional().default(null),
+  reconciliation_id: numericId.nullable().optional().default(null),
+  suggested_matches: z.array(bankMatchCandidateSchema).optional().default([]),
+});
+export type BankTransaction = z.infer<typeof bankTransactionSchema>;
+
+export const bankReconciliationSchema = z.object({
+  id: numericId,
+  bank_account_id: numericId,
+  statement_date: z.string(),
+  statement_closing_balance_minor: z.number().int(),
+  reconciled_balance_minor: z.number().int(),
+  status: z.enum(["open", "closed"]),
+  closed_at: z.string().nullable().optional().default(null),
+});
+export type BankReconciliation = z.infer<typeof bankReconciliationSchema>;
+
+export const fixedAssetCategories = [
+  "vehicle",
+  "workshop_equipment",
+  "office_equipment",
+  "other",
+] as const;
+export type FixedAssetCategory = (typeof fixedAssetCategories)[number];
+
+export const depreciationMethods = [
+  "straight_line",
+  "reducing_balance",
+] as const;
+export type DepreciationMethod = (typeof depreciationMethods)[number];
+
+export const fixedAssetSchema = z.object({
+  id: numericId,
+  company_id: numericId,
+  branch_id: numericId,
+  vehicle_id: numericId.nullable().optional().default(null),
+  vehicle_registration: z.string().nullable().optional().default(null),
+  asset_code: z.string(),
+  name: z.string(),
+  category: z.enum(fixedAssetCategories),
+  acquisition_cost_minor: nonNegInt,
+  residual_value_minor: nonNegInt,
+  capitalisation_date: z.string(),
+  useful_life_months: id,
+  depreciation_method: z.enum(depreciationMethods),
+  accumulated_depreciation_minor: nonNegInt,
+  net_book_value_minor: nonNegInt,
+  status: z.enum(["active", "pending_disposal", "disposed"]),
+  disposal_type: z.enum(["sold", "decommissioned"]).nullable().optional().default(null),
+  disposal_date: z.string().nullable().optional().default(null),
+  disposal_proceeds_minor: nonNegInt.nullable().optional().default(null),
+  disposal_gain_loss_minor: z.number().int().nullable().optional().default(null),
+  disposal_approval_id: numericId.nullable().optional().default(null),
+  disposal_approval_status: z.string().nullable().optional().default(null),
+});
+export type FixedAsset = z.infer<typeof fixedAssetSchema>;
+
+export const depreciationRunResultSchema = z.object({
+  period_month: z.string(),
+  posted_count: nonNegInt,
+  skipped_count: nonNegInt,
+  total_depreciation_minor: nonNegInt,
+});
+export type DepreciationRunResult = z.infer<typeof depreciationRunResultSchema>;
+
+export const statementLineSchema = z.object({
+  account_code: z.string(),
+  account_name: z.string(),
+  amount_minor: z.number().int(),
+});
+export type StatementLine = z.infer<typeof statementLineSchema>;
+
+export const pnlStatementSchema = z.object({
+  from: z.string().nullable().optional().default(null),
+  to: z.string().nullable().optional().default(null),
+  revenue_lines: z.array(statementLineSchema),
+  expense_lines: z.array(statementLineSchema),
+  total_revenue_minor: z.number().int(),
+  total_expenses_minor: z.number().int(),
+  net_profit_minor: z.number().int(),
+});
+export type PnlStatement = z.infer<typeof pnlStatementSchema>;
+
+export const balanceSheetSchema = z.object({
+  as_of: z.string(),
+  asset_lines: z.array(statementLineSchema),
+  liability_lines: z.array(statementLineSchema),
+  equity_lines: z.array(statementLineSchema),
+  total_assets_minor: z.number().int(),
+  total_liabilities_minor: z.number().int(),
+  total_equity_minor: z.number().int(),
+  is_balanced: z.boolean(),
+});
+export type BalanceSheet = z.infer<typeof balanceSheetSchema>;
+
+export const cashFlowStatementSchema = z.object({
+  from: z.string().nullable().optional().default(null),
+  to: z.string().nullable().optional().default(null),
+  operating_lines: z.array(statementLineSchema),
+  investing_lines: z.array(statementLineSchema),
+  financing_lines: z.array(statementLineSchema),
+  operating_total_minor: z.number().int(),
+  investing_total_minor: z.number().int(),
+  financing_total_minor: z.number().int(),
+  net_cash_change_minor: z.number().int(),
+  opening_cash_minor: z.number().int(),
+  closing_cash_minor: z.number().int(),
+});
+export type CashFlowStatement = z.infer<typeof cashFlowStatementSchema>;
+
+export function canAccessAp(user: User): boolean {
+  return (
+    user.is_platform_admin ||
+    user.permissions.includes("ap.view") ||
+    user.permissions.includes("invoices.view") ||
+    user.permissions.includes("expenses.view")
+  );
+}
+export function canManageAp(user: User): boolean {
+  return (
+    user.is_platform_admin ||
+    user.permissions.includes("ap.manage") ||
+    user.permissions.includes("invoices.manage") ||
+    user.permissions.includes("expenses.manage")
+  );
+}
+export function canAccessBanking(user: User): boolean {
+  return (
+    user.is_platform_admin ||
+    user.permissions.includes("banking.view") ||
+    user.permissions.includes("gl.view")
+  );
+}
+export function canManageBanking(user: User): boolean {
+  return (
+    user.is_platform_admin ||
+    user.permissions.includes("banking.manage") ||
+    user.permissions.includes("expenses.manage") ||
+    user.permissions.includes("invoices.manage")
+  );
+}
+export function canAccessAssets(user: User): boolean {
+  return (
+    user.is_platform_admin ||
+    user.permissions.includes("assets.view") ||
+    user.permissions.includes("gl.view")
+  );
+}
+export function canManageAssets(user: User): boolean {
+  return (
+    user.is_platform_admin ||
+    user.permissions.includes("assets.manage") ||
+    user.permissions.includes("expenses.manage") ||
+    user.permissions.includes("invoices.manage")
+  );
+}
+export function canViewStatements(user: User): boolean {
+  return (
+    user.is_platform_admin ||
+    user.permissions.includes("gl.view") ||
+    user.permissions.includes("invoices.view")
   );
 }
 

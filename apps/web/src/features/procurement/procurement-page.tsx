@@ -18,6 +18,7 @@ import {
 import { useSession } from "@/features/auth/session-provider";
 import { useLiveContext } from "@/features/live/context";
 import { EntityDocumentsPanel } from "@/features/documents/documents-panel";
+import { CreateSupplierInvoiceDialog } from "@/features/accounting/payables-panel";
 import { listParts } from "@/features/inventory/service";
 import {
   createPurchaseOrder,
@@ -32,6 +33,7 @@ import { ApiError, errorText } from "@/lib/api/client";
 import {
   can,
   canAccessProcurement,
+  canManageAp,
   formatMoneyMinor,
   parseMajorToMinor,
   type PurchaseOrder,
@@ -558,11 +560,13 @@ export function LivePurchaseOrderDetailPage({
   const canApprove = !!user && can(user, "purchase_orders.approve");
   const canViewDocs = !!user && can(user, "documents.view");
   const canUploadDocs = !!user && can(user, "documents.manage");
+  const canCreateApInvoice = !!user && canManageAp(user);
   const currency = scope.company?.currency || "ZMW";
 
   const [notice, setNotice] = useState("");
   const [error, setError] = useState<unknown>(null);
   const [busyAction, setBusyAction] = useState("");
+  const [apInvoiceOpen, setApInvoiceOpen] = useState(false);
 
   const query = useQuery({
     queryKey: [...scope.key, "purchase-orders", "detail", purchaseOrderId],
@@ -713,6 +717,16 @@ export function LivePurchaseOrderDetailPage({
               {busyAction === "receive" ? "Receiving…" : "Receive goods"}
             </Button>
           ) : null}
+          {canCreateApInvoice && po.status === "received" ? (
+            <Button
+              type="button"
+              onClick={() => setApInvoiceOpen(true)}
+              className="gap-1.5"
+            >
+              <Plus className="size-4" aria-hidden="true" />
+              Create supplier invoice
+            </Button>
+          ) : null}
           {canManage &&
           ["draft", "submitted", "approved"].includes(po.status) ? (
             <Button
@@ -804,6 +818,25 @@ export function LivePurchaseOrderDetailPage({
           canUpload={canUploadDocs}
         />
       ) : null}
+
+      <CreateSupplierInvoiceDialog
+        open={apInvoiceOpen}
+        onOpenChange={setApInvoiceOpen}
+        presetPo={{
+          id: po.id,
+          supplier_id: po.supplier_id,
+          branch_id: po.branch_id,
+          total_minor: po.total_minor,
+        }}
+        onCreated={(inv) => {
+          setNotice(
+            inv.match_status === "variance"
+              ? `Supplier invoice ${inv.invoice_number} flagged with 3-way match variance (${formatMoneyMinor(inv.variance_minor, currency)}).`
+              : `Supplier invoice ${inv.invoice_number} matched to ${po.po_number} and posted to AP.`,
+          );
+          void refreshAll();
+        }}
+      />
     </ViewFadeIn>
   );
 }

@@ -11,6 +11,8 @@ const statusStyles: Record<Vehicle["status"], string> = {
   maintenance: "text-warning-foreground border-warning",
   damaged: "text-danger-foreground border-danger",
   rented: "text-foreground border-border",
+  sold: "text-muted-foreground border-border bg-muted/40",
+  decommissioned: "text-danger-foreground border-danger/60 bg-danger/5",
 };
 export function VehicleStatus({ status }: { status: Vehicle["status"] }) {
   return (

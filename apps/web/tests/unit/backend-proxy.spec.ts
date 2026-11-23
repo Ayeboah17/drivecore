@@ -805,3 +805,39 @@ test("M14 credit control, customer statement, unified approvals, and compliance 
     expect(res.status).toBe(200);
   }
 });
+
+test("M15 AP, credit notes, bank reconciliation, fixed assets, and financial statements routes enforce allowlists", async () => {
+  for (const invalid of [
+    "api/v1/ap/invoices",
+    "api/v1/ap/invoices?company_id=1&match_status=bogus",
+    "api/v1/credit-notes?company_id=1&status=invalid",
+    "api/v1/bank-accounts/1/transactions?match_status=bad",
+    "api/v1/fixed-assets?company_id=1&category=bogus",
+    "api/v1/reports/statements/balance-sheet?company_id=1&as_of=not-a-date",
+    "api/v1/reports/statements/pnl?company_id=1&from=2026-99",
+  ]) {
+    const [path] = invalid.split("?");
+    const res = await proxy(make(invalid), path, config, async () => {
+      throw new Error("Must not reach upstream");
+    });
+    expect(res.status).toBe(400);
+  }
+
+  for (const valid of [
+    "api/v1/ap/invoices?company_id=1&match_status=variance",
+    "api/v1/ap/ageing?company_id=1",
+    "api/v1/credit-notes?company_id=1&status=posted",
+    "api/v1/bank-accounts?company_id=1",
+    "api/v1/bank-accounts/1/transactions?match_status=unmatched&from=2026-11-01&to=2026-11-23",
+    "api/v1/fixed-assets?company_id=1&status=active&category=vehicle",
+    "api/v1/reports/statements/pnl?company_id=1&from=2026-01-01&to=2026-11-23",
+    "api/v1/reports/statements/balance-sheet?company_id=1&as_of=2026-11-23",
+    "api/v1/reports/statements/cash-flow?company_id=1&from=2026-01-01&to=2026-11-23",
+  ]) {
+    const [path] = valid.split("?");
+    const res = await proxy(make(valid), path, config, async () =>
+      Response.json({ data: {} }),
+    );
+    expect(res.status).toBe(200);
+  }
+});

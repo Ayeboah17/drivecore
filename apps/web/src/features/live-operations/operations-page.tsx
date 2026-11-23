@@ -303,7 +303,7 @@ export function LiveOperationsPage() {
         <div
           role="tablist"
           aria-label="Operations sections"
-          className="inline-flex flex-wrap rounded-xl border bg-muted/40 p-1"
+          className="flex flex-wrap gap-1.5 rounded-2xl border bg-surface p-1.5"
         >
           {canViewDispatch ? (
             <button
@@ -311,10 +311,10 @@ export function LiveOperationsPage() {
               role="tab"
               aria-selected={activeTab === "dispatch"}
               onClick={() => switchTab("dispatch")}
-              className={`inline-flex items-center gap-1.5 rounded-lg px-3.5 py-1.5 text-xs font-semibold transition-colors ${
+              className={`inline-flex items-center gap-1.5 rounded-xl px-3.5 py-2 text-xs font-semibold transition-colors ${
                 activeTab === "dispatch"
-                  ? "bg-surface text-foreground shadow-2xs"
-                  : "text-muted-foreground hover:text-foreground"
+                  ? "bg-primary text-primary-foreground shadow-xs"
+                  : "text-muted-foreground hover:bg-muted/80 hover:text-foreground"
               }`}
             >
               <ClipboardCheck className="size-3.5" aria-hidden="true" />
@@ -326,10 +326,10 @@ export function LiveOperationsPage() {
             role="tab"
             aria-selected={activeTab === "approvals"}
             onClick={() => switchTab("approvals")}
-            className={`inline-flex items-center gap-1.5 rounded-lg px-3.5 py-1.5 text-xs font-semibold transition-colors ${
+            className={`inline-flex items-center gap-1.5 rounded-xl px-3.5 py-2 text-xs font-semibold transition-colors ${
               activeTab === "approvals"
-                ? "bg-surface text-foreground shadow-2xs"
-                : "text-muted-foreground hover:text-foreground"
+                ? "bg-primary text-primary-foreground shadow-xs"
+                : "text-muted-foreground hover:bg-muted/80 hover:text-foreground"
             }`}
           >
             <ShieldCheck className="size-3.5" aria-hidden="true" />
@@ -342,10 +342,10 @@ export function LiveOperationsPage() {
                 role="tab"
                 aria-selected={activeTab === "compliance"}
                 onClick={() => switchTab("compliance")}
-                className={`inline-flex items-center gap-1.5 rounded-lg px-3.5 py-1.5 text-xs font-semibold transition-colors ${
+                className={`inline-flex items-center gap-1.5 rounded-xl px-3.5 py-2 text-xs font-semibold transition-colors ${
                   activeTab === "compliance"
-                    ? "bg-surface text-foreground shadow-2xs"
-                    : "text-muted-foreground hover:text-foreground"
+                    ? "bg-primary text-primary-foreground shadow-xs"
+                    : "text-muted-foreground hover:bg-muted/80 hover:text-foreground"
                 }`}
               >
                 <ShieldAlert className="size-3.5" aria-hidden="true" />
@@ -356,10 +356,10 @@ export function LiveOperationsPage() {
                 role="tab"
                 aria-selected={activeTab === "documents"}
                 onClick={() => switchTab("documents")}
-                className={`inline-flex items-center gap-1.5 rounded-lg px-3.5 py-1.5 text-xs font-semibold transition-colors ${
+                className={`inline-flex items-center gap-1.5 rounded-xl px-3.5 py-2 text-xs font-semibold transition-colors ${
                   activeTab === "documents"
-                    ? "bg-surface text-foreground shadow-2xs"
-                    : "text-muted-foreground hover:text-foreground"
+                    ? "bg-primary text-primary-foreground shadow-xs"
+                    : "text-muted-foreground hover:bg-muted/80 hover:text-foreground"
                 }`}
               >
                 <FileText className="size-3.5" aria-hidden="true" />

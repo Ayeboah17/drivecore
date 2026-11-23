@@ -190,8 +190,8 @@ These items bridge the newly implemented Demo features (`M4+`) into Laravel cont
 
 ---
 
-### Milestone 16 — SRS Role Expansion, Lead-to-Quote CRM Pipeline & Privileged TOTP 2FA (PR #19)
-- **Scope (SRS §3, §6, §25):** Specialized SRS roles (`commercial`, `maintenance-manager`, `mechanic`, `credit-control`), Lead-to-Quote CRM pipeline, and optional TOTP 2FA for privileged users.
+### Milestone 16 — Exact SRS §3 Role Expansion, Lead-to-Quote CRM Pipeline & Privileged TOTP 2FA (PR #19)
+- **Scope (SRS §3, §6, §25):** Exact 10 SRS §3 roles (`CEO`, `General Manager`, `Business Accounts Manager`, `Operations Manager`, `Maintenance Manager`, `Finance Manager`, `Credit Control Manager`, `HR/Admin Manager`, `Mechanic / Technician`, `System Administrator` + field `Driver`), Lead-to-Quote CRM pipeline, and TOTP 2FA for privileged users.
 
 ---
 

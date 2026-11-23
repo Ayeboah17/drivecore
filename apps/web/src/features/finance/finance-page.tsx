@@ -6,8 +6,10 @@ import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   BookOpen,
+  CarFront,
   CheckCircle2,
   CreditCard,
+  FileCheck2,
   FileText,
   Landmark,
   Plus,
@@ -19,6 +21,10 @@ import {
 import { useSession } from "@/features/auth/session-provider";
 import { useLiveContext } from "@/features/live/context";
 import { CreditControlPanel } from "@/features/governance/credit-control-panel";
+import { PayablesPanel } from "@/features/accounting/payables-panel";
+import { CreditNotesPanel } from "@/features/accounting/credit-notes-panel";
+import { BankingReconciliationPanel } from "@/features/accounting/banking-panel";
+import { FixedAssetsPanel } from "@/features/accounting/fixed-assets-panel";
 import {
   getArAgeing,
   getGlAccounts,
@@ -46,6 +52,9 @@ import {
 import { errorText } from "@/lib/api/client";
 import {
   can,
+  canAccessAp,
+  canAccessAssets,
+  canAccessBanking,
   canAccessFinance,
   canViewGl,
   expenseCategories,
@@ -75,7 +84,15 @@ import { Button } from "@/components/ui/button";
 import { DriveCoreSelect } from "@/components/ui/drivecore-select";
 import { Skeleton } from "@/components/ui/skeleton";
 
-type FinanceTab = "invoices" | "credit" | "payments" | "expenses" | "ledger";
+type FinanceTab =
+  | "invoices"
+  | "credit"
+  | "payables"
+  | "payments"
+  | "expenses"
+  | "banking"
+  | "assets"
+  | "ledger";
 
 const INVOICE_SORT_KEYS = [
   "id",
@@ -114,13 +131,19 @@ export function LiveFinancePage() {
   const canViewExpenses = !!user && can(user, "expenses.view");
   const canManageExpenses = !!user && can(user, "expenses.manage");
   const hasGlAccess = !!user && canViewGl(user);
+  const hasApAccess = !!user && canAccessAp(user);
+  const hasBankingAccess = !!user && canAccessBanking(user);
+  const hasAssetsAccess = !!user && canAccessAssets(user);
   const currency = scope.company?.currency || "ZMW";
 
   const rawTab = searchParams.get("tab");
   const activeTab: FinanceTab =
     rawTab === "credit" ||
+    rawTab === "payables" ||
     rawTab === "payments" ||
     rawTab === "expenses" ||
+    rawTab === "banking" ||
+    rawTab === "assets" ||
     rawTab === "ledger" ||
     rawTab === "invoices"
       ? rawTab
@@ -131,6 +154,7 @@ export function LiveFinancePage() {
           : "ledger";
 
   const flow = searchParams.get("flow") === "refunds" ? "refunds" : "payments";
+  const arView = searchParams.get("ar_view") === "credit_notes" ? "credit_notes" : "invoices";
   const rawQ = searchParams.get("q") ?? "";
   const status = searchParams.get("status") ?? "";
   const bucket = (searchParams.get("bucket") ?? "") as ArAgeingBucketKey | "";
@@ -363,8 +387,11 @@ export function LiveFinancePage() {
   const tabs: { key: FinanceTab; label: string; visible: boolean }[] = [
     { key: "invoices", label: "Invoices", visible: canViewInvoices },
     { key: "credit", label: "Credit control", visible: canViewInvoices },
+    { key: "payables", label: "Payables (AP)", visible: hasApAccess },
     { key: "payments", label: "Payments & Refunds", visible: canViewInvoices },
     { key: "expenses", label: "Expenses", visible: canViewExpenses },
+    { key: "banking", label: "Banking & Recon", visible: hasBankingAccess },
+    { key: "assets", label: "Fixed assets", visible: hasAssetsAccess },
     { key: "ledger", label: "General Ledger", visible: hasGlAccess },
   ];
 
@@ -494,10 +521,16 @@ export function LiveFinancePage() {
                   <Receipt className="size-3.5" aria-hidden="true" />
                 ) : tab.key === "credit" ? (
                   <ShieldAlert className="size-3.5" aria-hidden="true" />
+                ) : tab.key === "payables" ? (
+                  <FileCheck2 className="size-3.5" aria-hidden="true" />
                 ) : tab.key === "payments" ? (
                   <CreditCard className="size-3.5" aria-hidden="true" />
                 ) : tab.key === "expenses" ? (
                   <Wallet className="size-3.5" aria-hidden="true" />
+                ) : tab.key === "banking" ? (
+                  <Landmark className="size-3.5" aria-hidden="true" />
+                ) : tab.key === "assets" ? (
+                  <CarFront className="size-3.5" aria-hidden="true" />
                 ) : (
                   <BookOpen className="size-3.5" aria-hidden="true" />
                 )}
@@ -527,8 +560,38 @@ export function LiveFinancePage() {
         <CreditControlPanel canManage={canManageInvoices} />
       ) : null}
 
+      {activeTab === "payables" && hasApAccess ? <PayablesPanel /> : null}
+
+      {activeTab === "banking" && hasBankingAccess ? (
+        <BankingReconciliationPanel />
+      ) : null}
+
+      {activeTab === "assets" && hasAssetsAccess ? <FixedAssetsPanel /> : null}
+
       {activeTab === "invoices" ? (
         <div className="space-y-6">
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              type="button"
+              size="sm"
+              variant={arView === "invoices" ? "default" : "outline"}
+              onClick={() => updateQuery({ ar_view: "", page: 1 })}
+            >
+              Customer invoices
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant={arView === "credit_notes" ? "default" : "outline"}
+              onClick={() => updateQuery({ ar_view: "credit_notes", page: 1 })}
+            >
+              Credit notes
+            </Button>
+          </div>
+          {arView === "credit_notes" ? (
+            <CreditNotesPanel />
+          ) : (
+            <>
           <section
             aria-label="Accounts receivable ageing"
             className="dc-shadow-card rounded-2xl border bg-surface p-card"
@@ -825,6 +888,8 @@ export function LiveFinancePage() {
               </DataTable>
             )}
           </DataTableFrame>
+            </>
+          )}
         </div>
       ) : null}
 
