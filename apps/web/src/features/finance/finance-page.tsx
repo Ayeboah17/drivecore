@@ -12,11 +12,13 @@ import {
   Landmark,
   Plus,
   Receipt,
+  ShieldAlert,
   Wallet,
   X,
 } from "lucide-react";
 import { useSession } from "@/features/auth/session-provider";
 import { useLiveContext } from "@/features/live/context";
+import { CreditControlPanel } from "@/features/governance/credit-control-panel";
 import {
   getArAgeing,
   getGlAccounts,
@@ -73,7 +75,7 @@ import { Button } from "@/components/ui/button";
 import { DriveCoreSelect } from "@/components/ui/drivecore-select";
 import { Skeleton } from "@/components/ui/skeleton";
 
-type FinanceTab = "invoices" | "payments" | "expenses" | "ledger";
+type FinanceTab = "invoices" | "credit" | "payments" | "expenses" | "ledger";
 
 const INVOICE_SORT_KEYS = [
   "id",
@@ -116,6 +118,7 @@ export function LiveFinancePage() {
 
   const rawTab = searchParams.get("tab");
   const activeTab: FinanceTab =
+    rawTab === "credit" ||
     rawTab === "payments" ||
     rawTab === "expenses" ||
     rawTab === "ledger" ||
@@ -359,6 +362,7 @@ export function LiveFinancePage() {
 
   const tabs: { key: FinanceTab; label: string; visible: boolean }[] = [
     { key: "invoices", label: "Invoices", visible: canViewInvoices },
+    { key: "credit", label: "Credit control", visible: canViewInvoices },
     { key: "payments", label: "Payments & Refunds", visible: canViewInvoices },
     { key: "expenses", label: "Expenses", visible: canViewExpenses },
     { key: "ledger", label: "General Ledger", visible: hasGlAccess },
@@ -488,6 +492,8 @@ export function LiveFinancePage() {
               >
                 {tab.key === "invoices" ? (
                   <Receipt className="size-3.5" aria-hidden="true" />
+                ) : tab.key === "credit" ? (
+                  <ShieldAlert className="size-3.5" aria-hidden="true" />
                 ) : tab.key === "payments" ? (
                   <CreditCard className="size-3.5" aria-hidden="true" />
                 ) : tab.key === "expenses" ? (
@@ -515,6 +521,10 @@ export function LiveFinancePage() {
             <X className="size-4" aria-hidden="true" />
           </button>
         </div>
+      ) : null}
+
+      {activeTab === "credit" && canViewInvoices ? (
+        <CreditControlPanel canManage={canManageInvoices} />
       ) : null}
 
       {activeTab === "invoices" ? (

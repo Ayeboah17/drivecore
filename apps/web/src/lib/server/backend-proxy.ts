@@ -39,18 +39,18 @@ function failure(status: number, message: string) {
 }
 export function allowedPath(method: string, path: string) {
   if (method === "GET")
-    return /^(sanctum\/csrf-cookie|api\/v1\/(health|auth\/me|companies|companies\/[1-9]\d*\/settings|branches|customers|customers\/[1-9]\d*|customers\/[1-9]\d*\/summary|vehicles|vehicles\/[1-9]\d*|vehicles\/[1-9]\d*\/summary|quotations|quotations\/[1-9]\d*|reservations|reservations\/[1-9]\d*|rentals|rentals\/[1-9]\d*|rate-cards|inspections|invoices|invoices\/ageing|invoices\/[1-9]\d*|payments|refunds|expenses|gl\/accounts|gl\/journal-entries|work-orders|work-orders\/[1-9]\d*|maintenance-schedules|vehicle-components|fuel-transactions|parts|stock-movements|suppliers|purchase-orders|purchase-orders\/[1-9]\d*|dashboard\/summary|messages|notifications|reports\/(financial|fleet)|stats\/(customers|vehicles|branches)|saved-filters|audit-events|(quotations|reservations|rentals|invoices)\/[1-9]\d*\/pdf|documents|documents\/[1-9]\d*|users|roles|invitations|invitations\/preview))$/.test(
+    return /^(sanctum\/csrf-cookie|api\/v1\/(health|auth\/me|companies|companies\/[1-9]\d*\/settings|branches|customers|customers\/[1-9]\d*|customers\/[1-9]\d*\/(summary|statement)|vehicles|vehicles\/[1-9]\d*|vehicles\/[1-9]\d*\/summary|quotations|quotations\/[1-9]\d*|reservations|reservations\/[1-9]\d*|rentals|rentals\/[1-9]\d*|rate-cards|inspections|invoices|invoices\/ageing|invoices\/[1-9]\d*|payments|refunds|expenses|gl\/accounts|gl\/journal-entries|credit\/(accounts|collections)|approvals|compliance\/expiries|work-orders|work-orders\/[1-9]\d*|maintenance-schedules|vehicle-components|fuel-transactions|parts|stock-movements|suppliers|purchase-orders|purchase-orders\/[1-9]\d*|dashboard\/summary|messages|notifications|reports\/(financial|fleet)|stats\/(customers|vehicles|branches)|saved-filters|audit-events|(quotations|reservations|rentals|invoices)\/[1-9]\d*\/pdf|documents|documents\/[1-9]\d*|users|roles|invitations|invitations\/preview))$/.test(
       path,
     );
   if (method === "POST")
-    return /^api\/v1\/(auth\/(login|logout|forgot-password|reset-password|change-password)|companies|branches|customers|vehicles|quotations|quotations\/[1-9]\d*\/(approve-discount|reject-discount|cancel|convert)|reservations|reservations\/[1-9]\d*\/cancel|rentals|rentals\/[1-9]\d*\/(handover|return|extend|assign-driver)|rate-cards|invoices|invoices\/[1-9]\d*\/(issue|void|payments|refunds)|expenses|work-orders|work-orders\/[1-9]\d*\/(start|consume-parts|complete|cancel)|maintenance-schedules|vehicle-components|fuel-transactions|parts|parts\/[1-9]\d*\/adjust|suppliers|purchase-orders|purchase-orders\/[1-9]\d*\/(submit|approve|receive|cancel)|messages|messages\/[1-9]\d*\/read|notifications\/([1-9]\d*\/read|read-all)|saved-filters|invitations|invitations\/accept|invitations\/[1-9]\d*\/(resend|revoke)|documents|users)$/.test(
+    return /^api\/v1\/(auth\/(login|logout|forgot-password|reset-password|change-password)|companies|branches|customers|vehicles|quotations|quotations\/[1-9]\d*\/(approve-discount|reject-discount|cancel|convert)|reservations|reservations\/[1-9]\d*\/cancel|rentals|rentals\/[1-9]\d*\/(handover|return|extend|assign-driver)|rate-cards|invoices|invoices\/[1-9]\d*\/(issue|void|payments|refunds)|expenses|credit\/collections|approvals|approvals\/[1-9]\d*\/(approve|reject)|work-orders|work-orders\/[1-9]\d*\/(start|consume-parts|complete|cancel)|maintenance-schedules|vehicle-components|fuel-transactions|parts|parts\/[1-9]\d*\/adjust|suppliers|purchase-orders|purchase-orders\/[1-9]\d*\/(submit|approve|receive|cancel)|messages|messages\/[1-9]\d*\/read|notifications\/([1-9]\d*\/read|read-all)|saved-filters|invitations|invitations\/accept|invitations\/[1-9]\d*\/(resend|revoke)|documents|users)$/.test(
       path,
     );
   if (method === "DELETE")
     return /^api\/v1\/saved-filters\/[1-9]\d*$/.test(path);
   return (
     method === "PATCH" &&
-    /^api\/v1\/(auth\/profile|(customers|vehicles|users|invoices|parts|suppliers|purchase-orders|rate-cards|maintenance-schedules|vehicle-components)\/[1-9]\d*|companies\/[1-9]\d*\/settings)$/.test(
+    /^api\/v1\/(auth\/profile|(customers|vehicles|users|invoices|parts|suppliers|purchase-orders|rate-cards|maintenance-schedules|vehicle-components)\/[1-9]\d*|credit\/(accounts|collections)\/[1-9]\d*|companies\/[1-9]\d*\/settings)$/.test(
       path,
     )
   );
@@ -72,7 +72,7 @@ export function allowedQuery(
   if (keys.length === 0) {
     return (
       method !== "GET" ||
-      !/^api\/v1\/(customers|vehicles|quotations|reservations|rentals|rate-cards|inspections|invoices|invoices\/ageing|payments|refunds|expenses|gl\/accounts|gl\/journal-entries|work-orders|maintenance-schedules|vehicle-components|fuel-transactions|parts|stock-movements|suppliers|purchase-orders|dashboard\/summary|messages|notifications|reports\/(financial|fleet)|stats\/(customers|vehicles|branches)|saved-filters|invitations|invitations\/preview|audit-events|documents|users|roles)$/.test(
+      !/^api\/v1\/(customers|vehicles|quotations|reservations|rentals|rate-cards|inspections|invoices|invoices\/ageing|payments|refunds|expenses|gl\/accounts|gl\/journal-entries|credit\/(accounts|collections)|approvals|compliance\/expiries|work-orders|maintenance-schedules|vehicle-components|fuel-transactions|parts|stock-movements|suppliers|purchase-orders|dashboard\/summary|messages|notifications|reports\/(financial|fleet)|stats\/(customers|vehicles|branches)|saved-filters|invitations|invitations\/preview|audit-events|documents|users|roles)$/.test(
         path,
       )
     );
@@ -871,6 +871,96 @@ export function allowedQuery(
     if (abn !== null && !["0", "1", "true", "false"].includes(abn)) return false;
     if (from !== null && !validDate(from)) return false;
     if (to !== null && !validDate(to)) return false;
+    return true;
+  }
+  if (/^api\/v1\/customers\/[1-9]\d*\/statement$/.test(path)) {
+    for (const key of uniqueKeys) {
+      if (key !== "from" && key !== "to") return false;
+    }
+    const from = params.get("from");
+    const to = params.get("to");
+    if (from !== null && !validDate(from)) return false;
+    if (to !== null && !validDate(to)) return false;
+    return true;
+  }
+  if (path === "api/v1/credit/accounts") {
+    if (!checkCommon(["company_id", "branch_id", "hold_only", "q", "page"], true))
+      return false;
+    const hold = params.get("hold_only");
+    if (hold !== null && !["0", "1", "true", "false"].includes(hold))
+      return false;
+    return true;
+  }
+  if (path === "api/v1/credit/collections") {
+    if (
+      !checkCommon(
+        ["company_id", "branch_id", "customer_id", "status", "q", "page"],
+        true,
+      )
+    )
+      return false;
+    const cid = params.get("customer_id");
+    const st = params.get("status");
+    if (cid !== null && !posInt(cid)) return false;
+    if (st !== null && !["open", "kept", "broken", "resolved"].includes(st))
+      return false;
+    return true;
+  }
+  if (path === "api/v1/approvals") {
+    if (
+      !checkCommon(
+        ["company_id", "branch_id", "type", "status", "q", "page"],
+        true,
+      )
+    )
+      return false;
+    const t = params.get("type");
+    const st = params.get("status");
+    if (
+      t !== null &&
+      ![
+        "discount",
+        "credit_limit",
+        "vehicle_repair",
+        "purchase",
+        "refund_writeoff",
+        "contract_amendment",
+        "vehicle_disposal",
+      ].includes(t)
+    )
+      return false;
+    if (
+      st !== null &&
+      !["pending", "approved", "rejected", "cancelled"].includes(st)
+    )
+      return false;
+    return true;
+  }
+  if (path === "api/v1/compliance/expiries") {
+    if (
+      !checkCommon(
+        ["company_id", "branch_id", "bucket", "category", "q", "page"],
+        true,
+      )
+    )
+      return false;
+    const b = params.get("bucket");
+    const cat = params.get("category");
+    if (b !== null && !["expired", "d7", "d14", "d30", "valid"].includes(b))
+      return false;
+    if (
+      cat !== null &&
+      ![
+        "insurance",
+        "roadworthy",
+        "vehicle_licence",
+        "driver_licence",
+        "contract",
+        "kyc",
+        "other",
+      ].includes(cat)
+    )
+      return false;
     return true;
   }
   return false;

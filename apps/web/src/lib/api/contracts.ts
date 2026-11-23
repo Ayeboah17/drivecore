@@ -1186,6 +1186,181 @@ export const fuelTransactionSchema = z.object({
 });
 export type FuelTransaction = z.infer<typeof fuelTransactionSchema>;
 
+export const creditAccountSchema = z.object({
+  customer_id: numericId,
+  company_id: numericId,
+  branch_id: numericId,
+  customer_name: z.string(),
+  customer_type: z.enum(["individual", "corporate"]),
+  tin: z.string().nullable().optional().default(null),
+  credit_limit_minor: nonNegInt.nullable().optional().default(null),
+  payment_terms_days: nonNegInt.optional().default(30),
+  open_ar_minor: nonNegInt.optional().default(0),
+  overdue_minor: nonNegInt.optional().default(0),
+  is_on_credit_hold: z.boolean().optional().default(false),
+  credit_hold_reason: z.string().nullable().optional().default(null),
+});
+export type CreditAccount = z.infer<typeof creditAccountSchema>;
+
+export const collectionNoteTypes = [
+  "reminder",
+  "promise_to_pay",
+  "dispute",
+  "escalation",
+  "general",
+] as const;
+export type CollectionNoteType = (typeof collectionNoteTypes)[number];
+
+export const collectionNoteStatuses = [
+  "open",
+  "kept",
+  "broken",
+  "resolved",
+] as const;
+export type CollectionNoteStatus = (typeof collectionNoteStatuses)[number];
+
+export const collectionNoteSchema = z.object({
+  id: numericId,
+  company_id: numericId,
+  branch_id: numericId.nullable().optional().default(null),
+  customer_id: numericId,
+  customer_name: z.string().nullable().optional().default(null),
+  created_by_name: z.string().nullable().optional().default(null),
+  note_type: z.enum(collectionNoteTypes),
+  promised_amount_minor: nonNegInt.nullable().optional().default(null),
+  promised_date: z.string().nullable().optional().default(null),
+  status: z.enum(collectionNoteStatuses),
+  notes: z.string(),
+  created_at: z.string().nullable().optional().default(null),
+});
+export type CollectionNote = z.infer<typeof collectionNoteSchema>;
+
+export const customerStatementSchema = z.object({
+  customer_id: numericId,
+  customer_name: z.string(),
+  from: z.string().nullable().optional().default(null),
+  to: z.string().nullable().optional().default(null),
+  opening_balance_minor: z.number().int(),
+  closing_balance_minor: z.number().int(),
+  rows: z.array(
+    z.object({
+      date: z.string(),
+      type: z.enum(["invoice", "payment", "refund"]),
+      reference: z.string(),
+      description: z.string(),
+      debit_minor: nonNegInt,
+      credit_minor: nonNegInt,
+      balance_minor: z.number().int(),
+    }),
+  ),
+});
+export type CustomerStatement = z.infer<typeof customerStatementSchema>;
+
+export const approvalTypes = [
+  "discount",
+  "credit_limit",
+  "vehicle_repair",
+  "purchase",
+  "refund_writeoff",
+  "contract_amendment",
+  "vehicle_disposal",
+] as const;
+export type ApprovalType = (typeof approvalTypes)[number];
+
+export const approvalTypeLabels: Record<ApprovalType, string> = {
+  discount: "Discount",
+  credit_limit: "Credit limit / hold",
+  vehicle_repair: "Vehicle repair",
+  purchase: "Purchase",
+  refund_writeoff: "Refund / write-off",
+  contract_amendment: "Contract amendment",
+  vehicle_disposal: "Vehicle disposal",
+};
+
+export const approvalStatuses = [
+  "pending",
+  "approved",
+  "rejected",
+  "cancelled",
+] as const;
+export type ApprovalStatus = (typeof approvalStatuses)[number];
+
+export const approvalRequestSchema = z.object({
+  id: numericId,
+  company_id: numericId,
+  branch_id: numericId.nullable().optional().default(null),
+  type: z.enum(approvalTypes),
+  entity_type: z.string().nullable().optional().default(null),
+  entity_id: numericId.nullable().optional().default(null),
+  title: z.string(),
+  requester_id: numericId,
+  requester_name: z.string().nullable().optional().default(null),
+  approver_id: numericId.nullable().optional().default(null),
+  approver_name: z.string().nullable().optional().default(null),
+  previous_value: z.string().nullable().optional().default(null),
+  requested_value: z.string(),
+  approved_value: z.string().nullable().optional().default(null),
+  reason: z.string(),
+  decision_notes: z.string().nullable().optional().default(null),
+  status: z.enum(approvalStatuses),
+  decided_at: z.string().nullable().optional().default(null),
+  created_at: z.string().nullable().optional().default(null),
+});
+export type ApprovalRequest = z.infer<typeof approvalRequestSchema>;
+
+export const complianceCategories = [
+  "insurance",
+  "roadworthy",
+  "vehicle_licence",
+  "driver_licence",
+  "contract",
+  "kyc",
+  "other",
+] as const;
+export type ComplianceCategory = (typeof complianceCategories)[number];
+
+export const complianceBuckets = [
+  "expired",
+  "d7",
+  "d14",
+  "d30",
+  "valid",
+] as const;
+export type ComplianceBucket = (typeof complianceBuckets)[number];
+
+export const complianceExpiryRowSchema = z.object({
+  document_id: numericId,
+  company_id: numericId,
+  branch_id: numericId,
+  entity_type: z.string().nullable().optional().default(null),
+  entity_id: numericId.nullable().optional().default(null),
+  entity_label: z.string().nullable().optional().default(null),
+  original_name: z.string(),
+  category: z.enum(complianceCategories).optional().default("other"),
+  expires_at: z.string(),
+  days_remaining: z.number().int(),
+  bucket: z.enum(complianceBuckets),
+});
+export type ComplianceExpiryRow = z.infer<typeof complianceExpiryRowSchema>;
+
+export const complianceSummarySchema = z.object({
+  expired: nonNegInt,
+  d7: nonNegInt,
+  d14: nonNegInt,
+  d30: nonNegInt,
+  valid: nonNegInt,
+});
+export type ComplianceSummary = z.infer<typeof complianceSummarySchema>;
+
+export function canDecideApprovals(user: User): boolean {
+  return (
+    user.is_platform_admin ||
+    user.permissions.includes("quotations.approve_discount") ||
+    user.permissions.includes("purchase_orders.approve") ||
+    user.permissions.includes("invoices.manage")
+  );
+}
+
 export function checkPasswordStrength(password: string) {
   const minLength = password.length >= 10;
   const hasLetter = /[A-Za-z]/.test(password);

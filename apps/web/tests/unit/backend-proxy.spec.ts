@@ -775,3 +775,33 @@ test("M13 rate cards, inspections, preventive schedules, vehicle components, and
     expect(res.status).toBe(200);
   }
 });
+
+test("M14 credit control, customer statement, unified approvals, and compliance expiry routes enforce allowlists", async () => {
+  for (const invalid of [
+    "api/v1/credit/accounts",
+    "api/v1/credit/collections?company_id=1&status=bogus",
+    "api/v1/approvals?company_id=1&type=unknown",
+    "api/v1/compliance/expiries?company_id=1&bucket=bad",
+    "api/v1/customers/10/statement?from=not-a-date",
+  ]) {
+    const [path] = invalid.split("?");
+    const res = await proxy(make(invalid), path, config, async () => {
+      throw new Error("Must not reach upstream");
+    });
+    expect(res.status).toBe(400);
+  }
+
+  for (const valid of [
+    "api/v1/credit/accounts?company_id=1&hold_only=1",
+    "api/v1/credit/collections?company_id=1&status=open",
+    "api/v1/approvals?company_id=1&type=credit_limit&status=pending",
+    "api/v1/compliance/expiries?company_id=1&bucket=expired&category=insurance",
+    "api/v1/customers/10/statement?from=2026-10-01&to=2026-11-23",
+  ]) {
+    const [path] = valid.split("?");
+    const res = await proxy(make(valid), path, config, async () =>
+      Response.json({ data: {} }),
+    );
+    expect(res.status).toBe(200);
+  }
+});

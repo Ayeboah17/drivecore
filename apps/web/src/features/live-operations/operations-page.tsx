@@ -3,10 +3,19 @@
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
-import { AlertTriangle, CarFront, ClipboardCheck, FileText } from "lucide-react";
+import {
+  AlertTriangle,
+  CarFront,
+  ClipboardCheck,
+  FileText,
+  ShieldCheck,
+  ShieldAlert,
+} from "lucide-react";
 import { useSession } from "@/features/auth/session-provider";
 import { useLiveContext } from "@/features/live/context";
 import { DocumentsDirectory } from "@/features/documents/documents-panel";
+import { ApprovalsPanel } from "@/features/governance/approvals-panel";
+import { CompliancePanel } from "@/features/governance/compliance-panel";
 import { listRentals } from "@/features/rentals/service";
 import { useLiveEntityLookup } from "@/features/rentals/entity-lookup";
 import {
@@ -189,12 +198,20 @@ export function LiveOperationsPage() {
     !!user && (can(user, "rentals.view") || driverOnly);
 
   const requestedTab = searchParams.get("tab") ?? "";
-  const activeTab: "dispatch" | "documents" =
-    !canViewDispatch && canViewDocs
-      ? "documents"
-      : requestedTab === "documents" && canViewDocs
-        ? "documents"
-        : "dispatch";
+  const activeTab: "dispatch" | "approvals" | "compliance" | "documents" =
+    driverOnly
+      ? "dispatch"
+      : requestedTab === "approvals"
+        ? "approvals"
+        : requestedTab === "compliance" && canViewDocs
+          ? "compliance"
+          : requestedTab === "documents" && canViewDocs
+            ? "documents"
+            : canViewDispatch
+              ? "dispatch"
+              : canViewDocs
+                ? "documents"
+                : "approvals";
 
   const draftRentals = useQuery({
     queryKey: [...scope.key, "operations", "draft-rentals", driverOnly],
@@ -247,7 +264,9 @@ export function LiveOperationsPage() {
     );
   }
 
-  function switchTab(next: "dispatch" | "documents") {
+  function switchTab(
+    next: "dispatch" | "approvals" | "compliance" | "documents",
+  ) {
     scope.navigate(
       `/companies/${scope.companyId}/operations?tab=${next}&branch=${scope.branch}`,
     );
@@ -280,44 +299,82 @@ export function LiveOperationsPage() {
         </div>
       </div>
 
-      {canViewDispatch && canViewDocs ? (
+      {!driverOnly ? (
         <div
           role="tablist"
           aria-label="Operations sections"
-          className="inline-flex rounded-xl border bg-muted/40 p-1"
+          className="inline-flex flex-wrap rounded-xl border bg-muted/40 p-1"
         >
+          {canViewDispatch ? (
+            <button
+              type="button"
+              role="tab"
+              aria-selected={activeTab === "dispatch"}
+              onClick={() => switchTab("dispatch")}
+              className={`inline-flex items-center gap-1.5 rounded-lg px-3.5 py-1.5 text-xs font-semibold transition-colors ${
+                activeTab === "dispatch"
+                  ? "bg-surface text-foreground shadow-2xs"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              <ClipboardCheck className="size-3.5" aria-hidden="true" />
+              Dispatch desk
+            </button>
+          ) : null}
           <button
             type="button"
             role="tab"
-            aria-selected={activeTab === "dispatch"}
-            onClick={() => switchTab("dispatch")}
+            aria-selected={activeTab === "approvals"}
+            onClick={() => switchTab("approvals")}
             className={`inline-flex items-center gap-1.5 rounded-lg px-3.5 py-1.5 text-xs font-semibold transition-colors ${
-              activeTab === "dispatch"
+              activeTab === "approvals"
                 ? "bg-surface text-foreground shadow-2xs"
                 : "text-muted-foreground hover:text-foreground"
             }`}
           >
-            <ClipboardCheck className="size-3.5" aria-hidden="true" />
-            Dispatch desk
+            <ShieldCheck className="size-3.5" aria-hidden="true" />
+            Approvals
           </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={activeTab === "documents"}
-            onClick={() => switchTab("documents")}
-            className={`inline-flex items-center gap-1.5 rounded-lg px-3.5 py-1.5 text-xs font-semibold transition-colors ${
-              activeTab === "documents"
-                ? "bg-surface text-foreground shadow-2xs"
-                : "text-muted-foreground hover:text-foreground"
-            }`}
-          >
-            <FileText className="size-3.5" aria-hidden="true" />
-            Documents
-          </button>
+          {canViewDocs ? (
+            <>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={activeTab === "compliance"}
+                onClick={() => switchTab("compliance")}
+                className={`inline-flex items-center gap-1.5 rounded-lg px-3.5 py-1.5 text-xs font-semibold transition-colors ${
+                  activeTab === "compliance"
+                    ? "bg-surface text-foreground shadow-2xs"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                <ShieldAlert className="size-3.5" aria-hidden="true" />
+                Compliance
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={activeTab === "documents"}
+                onClick={() => switchTab("documents")}
+                className={`inline-flex items-center gap-1.5 rounded-lg px-3.5 py-1.5 text-xs font-semibold transition-colors ${
+                  activeTab === "documents"
+                    ? "bg-surface text-foreground shadow-2xs"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                <FileText className="size-3.5" aria-hidden="true" />
+                Documents
+              </button>
+            </>
+          ) : null}
         </div>
       ) : null}
 
-      {activeTab === "documents" && canViewDocs ? (
+      {activeTab === "approvals" && !driverOnly ? (
+        <ApprovalsPanel />
+      ) : activeTab === "compliance" && canViewDocs && !driverOnly ? (
+        <CompliancePanel />
+      ) : activeTab === "documents" && canViewDocs ? (
         <DocumentsDirectory canUpload={canUploadDocs} />
       ) : (
         <div className="space-y-6">

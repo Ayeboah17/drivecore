@@ -11,6 +11,9 @@ let inspections = new Map();
 let maintenanceSchedules = new Map();
 let vehicleComponents = new Map();
 let fuelTransactions = new Map();
+let creditProfiles = new Map();
+let collectionNotes = new Map();
+let approvalRequests = new Map();
 let customers = new Map();
 let vehicles = new Map();
 let companies = new Map();
@@ -262,6 +265,9 @@ function reset() {
   maintenanceSchedules = new Map();
   vehicleComponents = new Map();
   fuelTransactions = new Map();
+  creditProfiles = new Map();
+  collectionNotes = new Map();
+  approvalRequests = new Map();
   branches = new Map([
     [2, { id: 2, company_id: 1, name: "Synthetic branch" }],
     [4, { id: 4, company_id: 3, name: "Other branch" }],
@@ -993,8 +999,20 @@ createServer(async (req, res) => {
                 : []),
             ];
     const user = {
-      id: role === "activedriver" ? 2 : 1,
-      name: role === "activedriver" ? "Fleet Driver" : "Synthetic operator",
+      id:
+        role === "activedriver"
+          ? 2
+          : role === "operations"
+            ? 3
+            : role === "finance"
+              ? 4
+              : 1,
+      name:
+        role === "activedriver"
+          ? "Fleet Driver"
+          : role === "finance"
+            ? "Finance Manager"
+            : "Synthetic operator",
       email:
         role === "activedriver"
           ? "driver-co1@example.test"
@@ -2074,6 +2092,378 @@ createServer(async (req, res) => {
       return;
     }
     fail(404);
+    return;
+  }
+
+  // --- M14 Credit Control, Unified Approvals & Compliance Expiries ---
+  const custStmtMatch = url.pathname.match(
+    /^\/api\/v1\/customers\/(\d+)\/statement$/,
+  );
+  if (custStmtMatch && req.method === "GET") {
+    if (!user.is_platform_admin && !user.permissions.includes("invoices.view")) {
+      fail(403);
+      return;
+    }
+    const custId = Number(custStmtMatch[1]);
+    const cust = customers.get(custId);
+    if (!cust) {
+      fail(404);
+      return;
+    }
+    const custInvoices = [...invoices.values()]
+      .map(decorateInvoice)
+      .filter((i) => i.customer_id === custId && i.status === "issued");
+    let balance = 0;
+    const rows = [];
+    for (const inv of custInvoices) {
+      balance += inv.total_minor;
+      rows.push({
+        date: (inv.issued_at || inv.created_at).slice(0, 10),
+        type: "invoice",
+        reference: inv.invoice_number ?? `INV-${inv.id}`,
+        description: "Rental invoice",
+        debit_minor: inv.total_minor,
+        credit_minor: 0,
+        balance_minor: balance,
+      });
+      for (const p of [...payments.values()].filter((x) => x.invoice_id === inv.id)) {
+        balance -= p.amount_minor;
+        rows.push({
+          date: (p.paid_at || p.created_at).slice(0, 10),
+          type: "payment",
+          reference: p.reference || `PAY-${p.id}`,
+          description: `Payment (${p.method})`,
+          debit_minor: 0,
+          credit_minor: p.amount_minor,
+          balance_minor: balance,
+        });
+      }
+    }
+    json(200, {
+      data: {
+        customer_id: custId,
+        customer_name: cust.name,
+        from: url.searchParams.get("from"),
+        to: url.searchParams.get("to"),
+        opening_balance_minor: 0,
+        closing_balance_minor: balance,
+        rows,
+      },
+    });
+    return;
+  }
+
+  const creditAccMatch = url.pathname.match(
+    /^\/api\/v1\/credit\/accounts(?:\/(\d+))?$/,
+  );
+  if (creditAccMatch) {
+    const cid = creditAccMatch[1] ? Number(creditAccMatch[1]) : null;
+    if (!user.is_platform_admin && !user.permissions.includes("invoices.view")) {
+      fail(403);
+      return;
+    }
+    const buildCreditAcc = (c) => {
+      const prof = creditProfiles.get(c.id) ?? {
+        credit_limit_minor: null,
+        payment_terms_days: 30,
+        is_on_credit_hold: false,
+        credit_hold_reason: null,
+      };
+      const custInvs = [...invoices.values()]
+        .map(decorateInvoice)
+        .filter((i) => i.customer_id === c.id && i.status === "issued");
+      const openAr = custInvs.reduce((s, i) => s + i.outstanding_minor, 0);
+      return {
+        customer_id: c.id,
+        company_id: c.company_id,
+        branch_id: c.branch_id,
+        customer_name: c.name,
+        customer_type: c.type,
+        tin: null,
+        credit_limit_minor: prof.credit_limit_minor,
+        payment_terms_days: prof.payment_terms_days,
+        open_ar_minor: openAr,
+        overdue_minor: 0,
+        is_on_credit_hold: prof.is_on_credit_hold,
+        credit_hold_reason: prof.credit_hold_reason,
+      };
+    };
+    if (req.method === "GET" && !cid) {
+      const companyId = Number(url.searchParams.get("company_id"));
+      const holdOnly = url.searchParams.get("hold_only") === "1";
+      const items = [...customers.values()]
+        .filter((c) => c.company_id === companyId)
+        .map(buildCreditAcc)
+        .filter((a) => !holdOnly || a.is_on_credit_hold);
+      json(200, {
+        data: items,
+        meta: { current_page: 1, last_page: 1, per_page: 25, total: items.length },
+      });
+      return;
+    }
+    if (req.method === "PATCH" && cid) {
+      if (!user.is_platform_admin && !user.permissions.includes("invoices.manage")) {
+        fail(403);
+        return;
+      }
+      const c = customers.get(cid);
+      if (!c) {
+        fail(404);
+        return;
+      }
+      const cur = creditProfiles.get(cid) ?? {
+        credit_limit_minor: null,
+        payment_terms_days: 30,
+        is_on_credit_hold: false,
+        credit_hold_reason: null,
+      };
+      const updated = {
+        credit_limit_minor:
+          input.credit_limit_minor !== undefined
+            ? input.credit_limit_minor === null
+              ? null
+              : Number(input.credit_limit_minor)
+            : cur.credit_limit_minor,
+        payment_terms_days:
+          input.payment_terms_days !== undefined
+            ? Number(input.payment_terms_days)
+            : cur.payment_terms_days,
+        is_on_credit_hold:
+          input.is_on_credit_hold !== undefined
+            ? Boolean(input.is_on_credit_hold)
+            : cur.is_on_credit_hold,
+        credit_hold_reason:
+          input.credit_hold_reason !== undefined
+            ? input.credit_hold_reason
+            : cur.credit_hold_reason,
+      };
+      creditProfiles.set(cid, updated);
+      completedWrites++;
+      json(200, { data: buildCreditAcc(c) });
+      return;
+    }
+  }
+
+  const collMatch = url.pathname.match(
+    /^\/api\/v1\/credit\/collections(?:\/(\d+))?$/,
+  );
+  if (collMatch) {
+    const nid = collMatch[1] ? Number(collMatch[1]) : null;
+    if (!user.is_platform_admin && !user.permissions.includes("invoices.view")) {
+      fail(403);
+      return;
+    }
+    if (req.method === "GET" && !nid) {
+      const companyId = Number(url.searchParams.get("company_id"));
+      const items = [...collectionNotes.values()]
+        .filter((n) => n.company_id === companyId)
+        .sort((a, b) => b.id - a.id);
+      json(200, {
+        data: items,
+        meta: { current_page: 1, last_page: 1, per_page: 25, total: items.length },
+      });
+      return;
+    }
+    if (req.method === "POST" && !nid) {
+      if (!user.is_platform_admin && !user.permissions.includes("invoices.manage")) {
+        fail(403);
+        return;
+      }
+      const id = nextId++;
+      const cust = customers.get(Number(input.customer_id));
+      const rec = {
+        id,
+        company_id: Number(input.company_id),
+        branch_id: input.branch_id ? Number(input.branch_id) : null,
+        customer_id: Number(input.customer_id),
+        customer_name: cust?.name ?? null,
+        created_by_name: user.name,
+        note_type: String(input.note_type ?? "general"),
+        promised_amount_minor:
+          input.promised_amount_minor != null
+            ? Number(input.promised_amount_minor)
+            : null,
+        promised_date: input.promised_date ?? null,
+        status: "open",
+        notes: String(input.notes ?? "").trim(),
+        created_at: new Date().toISOString(),
+      };
+      collectionNotes.set(id, rec);
+      completedWrites++;
+      json(201, { data: rec });
+      return;
+    }
+    if (req.method === "PATCH" && nid) {
+      const rec = collectionNotes.get(nid);
+      if (!rec) {
+        fail(404);
+        return;
+      }
+      if (input.status) rec.status = String(input.status);
+      completedWrites++;
+      json(200, { data: rec });
+      return;
+    }
+  }
+
+  const aprMatch = url.pathname.match(
+    /^\/api\/v1\/approvals(?:\/(\d+)(?:\/(approve|reject))?)?$/,
+  );
+  if (aprMatch) {
+    const aid = aprMatch[1] ? Number(aprMatch[1]) : null;
+    const decision = aprMatch[2] ?? null;
+    if (req.method === "GET" && !aid) {
+      const companyId = Number(url.searchParams.get("company_id"));
+      const st = url.searchParams.get("status");
+      const tp = url.searchParams.get("type");
+      const items = [...approvalRequests.values()]
+        .filter((a) => {
+          if (a.company_id !== companyId) return false;
+          if (st && a.status !== st) return false;
+          if (tp && a.type !== tp) return false;
+          return true;
+        })
+        .sort((a, b) => b.id - a.id);
+      json(200, {
+        data: items,
+        meta: { current_page: 1, last_page: 1, per_page: 25, total: items.length },
+      });
+      return;
+    }
+    if (req.method === "POST" && !aid) {
+      const id = nextId++;
+      const rec = {
+        id,
+        company_id: Number(input.company_id),
+        branch_id: input.branch_id ? Number(input.branch_id) : null,
+        type: String(input.type ?? "credit_limit"),
+        entity_type: input.entity_type ?? null,
+        entity_id: input.entity_id ? Number(input.entity_id) : null,
+        title: String(input.title ?? "").trim(),
+        requester_id: user.id,
+        requester_name: user.name,
+        approver_id: null,
+        approver_name: null,
+        previous_value: input.previous_value ?? null,
+        requested_value: String(input.requested_value ?? "").trim(),
+        approved_value: null,
+        reason: String(input.reason ?? "").trim(),
+        decision_notes: null,
+        status: "pending",
+        decided_at: null,
+        created_at: new Date().toISOString(),
+      };
+      approvalRequests.set(id, rec);
+      completedWrites++;
+      json(201, { data: rec });
+      return;
+    }
+    if (req.method === "POST" && aid && decision) {
+      const rec = approvalRequests.get(aid);
+      if (!rec) {
+        fail(404);
+        return;
+      }
+      if (rec.status !== "pending") {
+        fail(409);
+        return;
+      }
+      // Strict segregation of duties: requester cannot approve/reject own request
+      if (rec.requester_id === user.id) {
+        fail(403);
+        return;
+      }
+      const canDecide =
+        user.is_platform_admin ||
+        user.permissions.includes("quotations.approve_discount") ||
+        user.permissions.includes("purchase_orders.approve") ||
+        user.permissions.includes("invoices.manage");
+      if (!canDecide) {
+        fail(403);
+        return;
+      }
+      rec.status = decision === "approve" ? "approved" : "rejected";
+      rec.approver_id = user.id;
+      rec.approver_name = user.name;
+      rec.approved_value =
+        decision === "approve"
+          ? String(input.approved_value ?? rec.requested_value)
+          : null;
+      rec.decision_notes = input.decision_notes ? String(input.decision_notes) : null;
+      rec.decided_at = new Date().toISOString();
+      completedWrites++;
+      json(200, { data: rec });
+      return;
+    }
+  }
+
+  if (url.pathname === "/api/v1/compliance/expiries" && req.method === "GET") {
+    if (!user.is_platform_admin && !user.permissions.includes("documents.view")) {
+      fail(403);
+      return;
+    }
+    const companyId = Number(url.searchParams.get("company_id"));
+    const bucketFilter = url.searchParams.get("bucket");
+    const catFilter = url.searchParams.get("category");
+    const nowMs = Date.now();
+    const allRows = [...documents.values()]
+      .filter((d) => d.company_id === companyId && d.expires_at)
+      .map((d) => {
+        const diffDays = Math.ceil(
+          (Date.parse(d.expires_at) - nowMs) / 86_400_000,
+        );
+        const bucket =
+          diffDays < 0
+            ? "expired"
+            : diffDays <= 7
+              ? "d7"
+              : diffDays <= 14
+                ? "d14"
+                : diffDays <= 30
+                  ? "d30"
+                  : "valid";
+        const entityLabel =
+          d.entity_type === "vehicle"
+            ? vehicles.get(d.entity_id)?.registration ?? `Vehicle #${d.entity_id}`
+            : d.entity_type === "customer"
+              ? customers.get(d.entity_id)?.name ?? `Customer #${d.entity_id}`
+              : null;
+        return {
+          document_id: d.id,
+          company_id: d.company_id,
+          branch_id: d.branch_id,
+          entity_type: d.entity_type ?? null,
+          entity_id: d.entity_id ?? null,
+          entity_label: entityLabel,
+          original_name: d.original_name,
+          category: d.category ?? "insurance",
+          expires_at: d.expires_at,
+          days_remaining: diffDays,
+          bucket,
+        };
+      });
+    const summary = {
+      expired: allRows.filter((r) => r.bucket === "expired").length,
+      d7: allRows.filter((r) => r.bucket === "d7").length,
+      d14: allRows.filter((r) => r.bucket === "d14").length,
+      d30: allRows.filter((r) => r.bucket === "d30").length,
+      valid: allRows.filter((r) => r.bucket === "valid").length,
+    };
+    const filtered = allRows.filter(
+      (r) =>
+        (!bucketFilter || r.bucket === bucketFilter) &&
+        (!catFilter || r.category === catFilter),
+    );
+    json(200, {
+      data: filtered,
+      meta: {
+        current_page: 1,
+        last_page: 1,
+        per_page: 25,
+        total: filtered.length,
+        summary,
+      },
+    });
     return;
   }
 

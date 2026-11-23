@@ -1,12 +1,21 @@
 "use client";
 
 import Link from "next/link";
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { CalendarRange, Landmark, Receipt, TrendingUp } from "lucide-react";
+import {
+  CalendarRange,
+  FileSpreadsheet,
+  Landmark,
+  Receipt,
+  TrendingUp,
+} from "lucide-react";
 import { useSession } from "@/features/auth/session-provider";
 import { useLiveContext } from "@/features/live/context";
 import { getCustomerSummary } from "@/features/stats/service";
+import { CustomerStatementDialog } from "@/features/governance/credit-control-panel";
 import { can, formatMoneyMinor } from "@/lib/api/contracts";
+import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 
 function fmtDate(iso?: string | null) {
@@ -18,6 +27,7 @@ function fmtDate(iso?: string | null) {
 export function Customer360Panel({ customerId }: { customerId: string }) {
   const { user } = useSession();
   const scope = useLiveContext();
+  const [statementOpen, setStatementOpen] = useState(false);
   const canFinance = !!user && can(user, "invoices.view");
   const currency = scope.company?.currency || "ZMW";
   const suffix = `?branch=${scope.branch}`;
@@ -61,6 +71,18 @@ export function Customer360Panel({ customerId }: { customerId: string }) {
             Lifetime rental activity{canFinance ? " and financial position" : ""}.
           </p>
         </div>
+        {canFinance ? (
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            onClick={() => setStatementOpen(true)}
+            className="gap-1.5"
+          >
+            <FileSpreadsheet className="size-3.5" aria-hidden="true" />
+            View statement
+          </Button>
+        ) : null}
       </div>
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
@@ -186,6 +208,15 @@ export function Customer360Panel({ customerId }: { customerId: string }) {
           </div>
         ) : null}
       </div>
+
+      {canFinance ? (
+        <CustomerStatementDialog
+          customerId={Number(customerId)}
+          customerName={`Customer #${customerId}`}
+          open={statementOpen}
+          onOpenChange={setStatementOpen}
+        />
+      ) : null}
     </section>
   );
 }

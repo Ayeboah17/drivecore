@@ -8,7 +8,7 @@
 
 ---
 
-## Master Quick-Reference Index (M6–M13)
+## Master Quick-Reference Index (M6–M14)
 
 ### A. Endpoint Index
 
@@ -71,6 +71,11 @@
 | M13 | `GET/POST/PATCH` | `/api/v1/maintenance-schedules` & `/{id}` | `work_orders.view` / `work_orders.manage` | Preventive km/date service schedules (`ok\|due_soon\|overdue`); work order completion updates schedule & enforces `release_passed` quality release |
 | M13 | `GET/POST/PATCH` | `/api/v1/vehicle-components` & `/{id}` | `parts.view`/`manage` or `work_orders.view`/`manage` | Tyre & battery serial, position (`FL\|FR\|RL\|RR\|SPARE\|BATTERY`), warranty, replacement history; plus `parts.location` & stock valuation |
 | M13 | `GET/POST` | `/api/v1/fuel-transactions` | `vehicles.view`/`manage`, `work_orders.view`, or assigned `driver` (active vehicle) | Canonical metric (`km`, `litres`), server-computed `litres_per_100km`, `cost_per_km_minor`, `is_abnormal`; atomically posts `fuel` Expense + balanced GL (`DR 5000 / CR 1000`) |
+| M14 | `GET/PATCH` | `/api/v1/credit/accounts` & `/{customerId}` | `invoices.view` / `invoices.manage` (or `credit.view`/`manage`) | Customer credit limits, payment terms, exposure %, manual/auto credit hold (`409` blocks new reservations, quote convert, and handovers while on hold) |
+| M14 | `GET/POST/PATCH` | `/api/v1/credit/collections` & `/{id}` | `invoices.view` / `invoices.manage` | Collection reminders, promises to pay (`promised_amount_minor`, `promised_date`), disputes, escalations |
+| M14 | `GET` | `/api/v1/customers/{id}/statement` | `invoices.view` | Running-balance chronological Customer Account Statement (`from`, `to`, opening/closing balance, rows) |
+| M14 | `GET/POST` | `/api/v1/approvals` & `/{id}/{approve\|reject}` | Authenticated member (request) / `invoices.manage` or `quotations.approve_discount` or `company-admin` (decide) | Unified Approval Engine across all 7 SRS §20 types; enforces strict segregation of duties (`requester_id === caller.id` → `403`) |
+| M14 | `GET` | `/api/v1/compliance/expiries` | `documents.view` | Document & compliance expiry hub (`expired`, `d7`, `d14`, `d30`, `valid` buckets across insurance, roadworthy, licences, contracts, KYC) |
 
 ### B. Spatie Role & Permission Matrix (M6–M10 Additions)
 
@@ -1103,7 +1108,70 @@ Also add optional columns on `work_orders` (`work_order_type`, `complaint`, `dia
 ---
 
 ## Milestone 14 — Credit Control, Unified Approval Engine & Compliance Expiry Hub (PR #17)
-*(Will be appended when Milestone 14 is implemented.)*
+
+### 14.1 Governance & Credit-Hold Invariants
+- **Credit Hold `409` Blocking:** `POST /api/v1/reservations`, `POST /api/v1/quotations/{id}/convert`, and `POST /api/v1/rentals/{id}/handover` MUST return `409 Conflict` if the customer has `is_on_credit_hold = true` OR (`credit_limit_minor > 0` and live `open_ar_minor > credit_limit_minor`). Draft quotations (`POST /api/v1/quotations`), rental returns (`POST /api/v1/rentals/{id}/return`), and customer payments (`POST /api/v1/invoices/{id}/payments`) MUST remain allowed so delinquent accounts can settle and be released.
+- **Strict Segregation of Duties (SRS §20):** `POST /api/v1/approvals/{id}/approve` and `/reject` MUST return **`403 Forbidden`** whenever `approval.requester_id === caller.id` (no self-approval). Already-decided requests (`status !== 'pending'`) return `409 Conflict`.
+- **Approval Auditability:** Every decision records `approver_id`, `approved_value`, `decision_notes`, and `decided_at` alongside `requester_id`, `previous_value`, and `requested_value`.
+
+### 14.2 Database Migrations
+```php
+Schema::table('customers', function (Blueprint $table): void {
+    $table->string('id_number', 64)->nullable();
+    $table->string('driver_licence_number', 64)->nullable();
+    $table->string('company_registration', 64)->nullable();
+    $table->string('tin', 64)->nullable();
+    $table->unsignedBigInteger('credit_limit_minor')->nullable();
+    $table->unsignedSmallInteger('payment_terms_days')->default(30);
+    $table->boolean('is_on_credit_hold')->default(false);
+    $table->string('credit_hold_reason', 255)->nullable();
+});
+
+Schema::create('collection_notes', function (Blueprint $table): void {
+    $table->id();
+    $table->foreignId('company_id')->constrained()->cascadeOnDelete();
+    $table->foreignId('branch_id')->nullable()->constrained()->nullOnDelete();
+    $table->foreignId('customer_id')->constrained()->cascadeOnDelete();
+    $table->foreignId('created_by')->nullable()->constrained('users')->nullOnDelete();
+    $table->string('note_type', 24); // reminder | promise_to_pay | dispute | escalation | general
+    $table->unsignedBigInteger('promised_amount_minor')->nullable();
+    $table->date('promised_date')->nullable();
+    $table->string('status', 16)->default('open'); // open | kept | broken | resolved
+    $table->text('notes');
+    $table->timestamps();
+});
+
+Schema::create('approval_requests', function (Blueprint $table): void {
+    $table->id();
+    $table->foreignId('company_id')->constrained()->cascadeOnDelete();
+    $table->foreignId('branch_id')->nullable()->constrained()->nullOnDelete();
+    $table->string('type', 32); // discount | credit_limit | vehicle_repair | purchase | refund_writeoff | contract_amendment | vehicle_disposal
+    $table->string('entity_type', 32)->nullable();
+    $table->unsignedBigInteger('entity_id')->nullable();
+    $table->string('title', 160);
+    $table->foreignId('requester_id')->constrained('users')->cascadeOnDelete();
+    $table->foreignId('approver_id')->nullable()->constrained('users')->nullOnDelete();
+    $table->string('previous_value', 120)->nullable();
+    $table->string('requested_value', 120);
+    $table->string('approved_value', 120)->nullable();
+    $table->text('reason');
+    $table->text('decision_notes')->nullable();
+    $table->string('status', 16)->default('pending'); // pending | approved | rejected | cancelled
+    $table->timestampTz('decided_at')->nullable();
+    $table->timestamps();
+    $table->index(['company_id', 'status', 'type']);
+});
+
+Schema::table('documents', function (Blueprint $table): void {
+    $table->string('category', 32)->nullable()->after('entity_id'); // insurance | roadworthy | vehicle_licence | driver_licence | contract | kyc | other
+});
+```
+
+### 14.3 Required Feature Tests (`tests/Feature/MilestoneFourteenTest.php`)
+1. Placing a customer on Credit Hold blocks `POST /api/v1/reservations` & `POST /api/v1/rentals/{id}/handover` with `409`, while still allowing payments; releasing hold unblocks booking.
+2. `GET /api/v1/customers/{id}/statement` computes accurate running balances across issued invoices, payments, and refunds (`403` without `invoices.view`).
+3. `POST /api/v1/approvals` creates a pending request; requester attempting to approve their own request receives **`403`**; a different Finance/Admin approver succeeds (`200`) and second approval returns `409`.
+4. `GET /api/v1/compliance/expiries` buckets documents accurately into `expired`, `d7`, `d14`, `d30`, and `valid`.
 
 ## Milestone 15 — Full Accounting: AP, Bank Reconciliation, Fixed Assets & Financial Statements (PR #18)
 *(Will be appended when Milestone 15 is implemented.)*
