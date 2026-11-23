@@ -14,6 +14,8 @@ Next.js web ERP foundation with Laravel Sanctum session integration. The fronten
 
 See [Milestone 3 handoff](documentation/MILESTONE_3_HANDOFF.md) for phase status, backend owner requests, verification and limitations. [Design system](documentation/DESIGN_SYSTEM.md) defines the authoritative red/charcoal branding.
 
+Milestone 4 improves customer/vehicle single-record screens and submission safety. Live directories, server search/filtering and pagination remain blocked by the inspected Laravel collection contract; no collection GET is enabled. Numeric live odometer entry/display is withheld until its distance unit is confirmed. Existing readings are preserved on edit; new vehicles use the API's default reading. See [Milestone 4 status and backend handoff](documentation/MILESTONE_4_HANDOFF.md).
+
 ## Run locally
 
 Use a supported Node.js runtime and npm. The installed Next.js package requires Node >=20.9.0; verification used Node 24.8.0. The lockfile is authoritative for package versions.
@@ -110,3 +112,7 @@ If `.env.local` configures an API origin, remove that setting for this isolated 
 - `tests/unit`, `tests/e2e`, `tests/live`: unit, demo regression and synthetic live-path tests.
 
 Reuse the existing tokens, Inter, spacing, focus styles and red/charcoal themes. Do not infer permissions from job titles or add unsupported endpoints. Report backend dependencies to the backend owner; do not edit that repository.
+
+## Interactive backend-independent ERP prototype
+
+Open /demo/erp after starting the frontend. It needs no credentials, backend, database or environment variables. Demo changes persist locally in IndexedDB and can be explicitly reset. All data and business workflows are simulations. See [Demo mode](documentation/DEMO_MODE.md) for accounts, workflows, architecture, limitations and tests.

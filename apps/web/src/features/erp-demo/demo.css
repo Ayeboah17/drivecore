@@ -1,0 +1,36 @@
+/* Motion and interactive surfaces scoped cleanly to the DriveCore ERP prototype. */
+[data-erp-demo] .demo-feedback {
+  transition:
+    opacity 160ms var(--ease-out, cubic-bezier(0.23, 1, 0.32, 1)),
+    transform 160ms var(--ease-out, cubic-bezier(0.23, 1, 0.32, 1));
+}
+
+[data-erp-demo] .erp-gauge-arc {
+  transition: stroke-dashoffset 520ms var(--ease-out, cubic-bezier(0.23, 1, 0.32, 1));
+}
+
+@media (hover: hover) and (pointer: fine) and (prefers-reduced-motion: no-preference) {
+  [data-erp-demo] button:not(:disabled):not(:focus-visible) {
+    transition:
+      transform 120ms var(--ease-out, cubic-bezier(0.23, 1, 0.32, 1)),
+      background-color 140ms ease,
+      border-color 140ms ease,
+      color 140ms ease;
+  }
+  [data-erp-demo] button:not(:disabled):not(:focus-visible):active {
+    transform: scale(0.97);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-erp-demo] *,
+  [data-erp-demo] *::before,
+  [data-erp-demo] *::after {
+    transition-duration: 0ms !important;
+    animation-duration: 0ms !important;
+  }
+}
+
+[data-erp-demo]:has(:focus-visible) .demo-feedback {
+  transition: none;
+}

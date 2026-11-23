@@ -10,7 +10,7 @@ test("workspace selection visual captures with synthetic data", async ({
   page,
   request,
 }) => {
-  await request.post("http://127.0.0.1:3201/__test/reset");
+  await request.post("http://127.0.0.1:4201/__test/reset");
   await page.goto("/login");
   await page.getByLabel("Email", { exact: true }).fill("admin@example.test");
   await page.getByLabel("Password", { exact: true }).fill(randomUUID());

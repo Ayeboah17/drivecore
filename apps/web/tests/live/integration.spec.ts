@@ -6,7 +6,7 @@ import {
   type APIRequestContext,
 } from "@playwright/test";
 import { randomUUID } from "node:crypto";
-const fixture = "http://127.0.0.1:3201";
+const fixture = "http://127.0.0.1:4201";
 async function control(request: APIRequestContext, data: object) {
   await request.post(`${fixture}/__test/control`, { data });
 }
@@ -47,8 +47,8 @@ test("anonymous protection, login rotation, restoration, no mock data and cross-
   await expect(page).toHaveURL(/\/login\?next=/);
   await login(page);
   await expect(
-    page.getByRole("link", { name: "Try workflow demo", exact: true }),
-  ).toHaveAttribute("href", "/demo/workflow");
+    page.getByRole("link", { name: "Explore full ERP demo", exact: true }),
+  ).toHaveAttribute("href", "/demo/erp");
   await page
     .getByRole("link", { name: "Open workspace: Synthetic One" })
     .click();
@@ -77,15 +77,18 @@ test("anonymous protection, login rotation, restoration, no mock data and cross-
   await expect(page).toHaveURL(/\/login/);
   await expect(other).toHaveURL(/\/login/);
 });
-test("customer create/edit uses backend records, maps 422, prevents double submission and never lists unscoped data", async ({
+test("customer create/edit uses backend records, maps 422, prevents double submission and scopes collections", async ({
   page,
   request,
 }) => {
   await login(page);
   await page.goto("/companies/1/customers?branch=all");
   await expect(
-    page.getByRole("heading", { name: "Scoped list unavailable" }),
+    page.getByRole("table").getByText("Synthetic customer", { exact: true }),
   ).toBeVisible();
+  await expect(
+    page.getByText("Other company customer", { exact: true }),
+  ).toHaveCount(0);
   await page
     .getByRole("link", { name: "Create customer", exact: true })
     .click();
@@ -136,7 +139,7 @@ test("customer create/edit uses backend records, maps 422, prevents double submi
   expect(
     (await (await request.get(`${fixture}/__test/stats`)).json())
       .collectionReads,
-  ).toBe(0);
+  ).toBeGreaterThanOrEqual(1);
   expect(
     (await (await request.get(`${fixture}/__test/stats`)).json())
       .completedWrites,
@@ -282,7 +285,9 @@ test("proxy rejects missing CSRF and hostile origins through the actual Next han
   });
   expect(origin.status()).toBe(403);
   const collection = await request.get("/api/backend/api/v1/customers");
-  expect(collection.status()).toBe(404);
+  expect(collection.status()).toBe(400);
+  const blocked = await request.get("/api/backend/api/v1/gps-trackers");
+  expect(blocked.status()).toBe(404);
   await request.get("/api/backend/sanctum/csrf-cookie");
   const mismatch = await request.post("/api/backend/api/v1/auth/login", {
     headers: {
@@ -390,15 +395,29 @@ test("live shell preserves light/dark tokens, keyboard navigation and mobile lay
 }) => {
   await login(page, "admin");
   await page.goto("/companies/1/dashboard?branch=all");
-  await expect(page.getByTestId("sidebar")).toHaveCSS("width", "248px");
-  await page.getByRole("button", { name: "Toggle sidebar" }).click();
-  await expect(page.getByTestId("sidebar")).toHaveCSS("width", "72px");
+  await expect(page.getByTestId("topbar")).toBeVisible();
+  const mainNav = page.getByRole("navigation", {
+    name: "Main navigation",
+    exact: true,
+  });
+  await expect(mainNav).toBeVisible();
   const primary = await page.evaluate(() =>
     getComputedStyle(document.documentElement)
       .getPropertyValue("--primary")
       .trim(),
   );
-  await page.evaluate(() => document.documentElement.classList.add("dark"));
+  await page.getByRole("button", { name: "Switch to dark mode" }).click();
+  await expect
+    .poll(() =>
+      page.evaluate(() => document.documentElement.classList.contains("dark")),
+    )
+    .toBe(true);
+  await page.reload();
+  await expect
+    .poll(() =>
+      page.evaluate(() => document.documentElement.classList.contains("dark")),
+    )
+    .toBe(true);
   expect(
     await page.evaluate(() =>
       getComputedStyle(document.documentElement)
@@ -418,4 +437,30 @@ test("live shell preserves light/dark tokens, keyboard navigation and mobile lay
     ),
   ).toBe(true);
   await page.screenshot({ path: "test-results/live-shell-dark-mobile.png" });
+});
+
+test("post-login 401 on auth/me surfaces an explicit session cookie notice", async ({
+  page,
+}) => {
+  let rejectPostLoginMe = false;
+  await page.route("**/api/backend/api/v1/auth/me", async (route) => {
+    if (rejectPostLoginMe) {
+      await route.fulfill({
+        status: 401,
+        contentType: "application/json",
+        json: { message: "API request failed.", errors: {} },
+      });
+      return;
+    }
+    await route.continue();
+  });
+  await page.goto("/login");
+  rejectPostLoginMe = true;
+  await page.getByLabel("Email", { exact: true }).fill("admin@example.test");
+  await page.getByLabel("Password", { exact: true }).fill("synthetic");
+  await page.getByRole("button", { name: "Sign in", exact: true }).click();
+  await expect(page).toHaveURL(/\/login/);
+  await expect(
+    page.getByRole("alert").filter({ hasText: "SANCTUM_STATEFUL_DOMAINS" }),
+  ).toBeVisible();
 });

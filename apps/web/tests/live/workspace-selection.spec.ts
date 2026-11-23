@@ -2,7 +2,7 @@ import { test, expect, type Page } from "@playwright/test";
 import { randomUUID } from "node:crypto";
 import { mkdir } from "node:fs/promises";
 import { resolve } from "node:path";
-const fixture = "http://127.0.0.1:3201";
+const fixture = "http://127.0.0.1:4201";
 const screenshots = resolve(
   process.cwd(),
   "../../documentation/screenshots/workspace-selection",
@@ -53,7 +53,7 @@ test("workspace cards and create dialog support keyboard focus and escape", asyn
   ).toBeFocused();
   await expect(
     dialog.getByRole("combobox", { name: "Currency", exact: true }),
-  ).toHaveValue("GHC");
+  ).toHaveText(/^GHC/);
   for (let index = 0; index < 6; index++) {
     await page.keyboard.press("Tab");
     await expect
@@ -236,14 +236,9 @@ test("full live navigation distinguishes planned modules from restricted working
     page.getByRole("heading", { name: "Dashboard", exact: true }),
   ).toBeVisible();
   await capture(page, "live-navigation");
-  await nav
-    .getByRole("link", { name: "Maintenance · Planned", exact: true })
-    .click();
+  await nav.getByRole("link", { name: "Reports", exact: true }).click();
   await expect(
-    page.getByRole("heading", { name: "Maintenance", exact: true }),
-  ).toBeVisible();
-  await expect(
-    page.getByRole("heading", { name: "Live data unavailable", exact: true }),
+    page.getByRole("heading", { name: "Reports", exact: true }),
   ).toBeVisible();
   await page.route("**/api/backend/api/v1/auth/me", async (route) => {
     const response = await route.fetch();

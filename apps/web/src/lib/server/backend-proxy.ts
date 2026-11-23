@@ -2,8 +2,29 @@
 export interface ProxyConfig {
   backend: string;
   app: string;
+  apps?: readonly string[];
   cookie: string;
   timeout: number;
+}
+function appOrigins(config: ProxyConfig): readonly string[] {
+  return config.apps?.length ? config.apps : [config.app];
+}
+function resolvedAppOrigin(request: Request, config: ProxyConfig): string {
+  const allowed = appOrigins(config);
+  const requestOrigin = request.headers.get("origin");
+  if (requestOrigin && allowed.includes(requestOrigin)) return requestOrigin;
+  const referer = request.headers.get("referer");
+  if (referer) {
+    try {
+      const refererOrigin = new URL(referer).origin;
+      if (allowed.includes(refererOrigin)) return refererOrigin;
+    } catch {
+      // Ignore malformed referer headers.
+    }
+  }
+  const urlOrigin = new URL(request.url).origin;
+  if (allowed.includes(urlOrigin)) return urlOrigin;
+  return allowed[0];
 }
 const privateHeaders = {
   "Cache-Control": "private, no-store, max-age=0",
@@ -18,16 +39,1215 @@ function failure(status: number, message: string) {
 }
 export function allowedPath(method: string, path: string) {
   if (method === "GET")
-    return /^(sanctum\/csrf-cookie|api\/v1\/(health|auth\/me|companies|branches|customers\/[1-9]\d*|vehicles\/[1-9]\d*))$/.test(
+    return /^(sanctum\/csrf-cookie|api\/v1\/(health|auth\/me|companies|companies\/[1-9]\d*\/(settings|approval-thresholds)|branches|customers|customers\/[1-9]\d*|customers\/[1-9]\d*\/(summary|statement)|vehicles|vehicles\/[1-9]\d*|vehicles\/[1-9]\d*\/(summary|history)|leads|quotations|quotations\/[1-9]\d*|reservations|reservations\/[1-9]\d*|rentals|rentals\/[1-9]\d*|rate-cards|inspections|invoices|invoices\/ageing|invoices\/[1-9]\d*|credit-notes|payments|refunds|expenses|gl\/accounts|gl\/journal-entries|ap\/(invoices|ageing)|bank-accounts|bank-accounts\/[1-9]\d*\/transactions|fixed-assets|credit\/(accounts|collections)|approvals|compliance\/expiries|work-orders|work-orders\/[1-9]\d*|incidents|maintenance-schedules|vehicle-components|fuel-transactions|parts|stock-movements|suppliers|suppliers\/[1-9]\d*\/statement|purchase-requisitions|purchase-orders|purchase-orders\/[1-9]\d*|dashboard\/summary|messages|notifications|reports\/(financial|fleet|statements\/(pnl|balance-sheet|cash-flow|vat-return))|stats\/(customers|vehicles|branches)|saved-filters|audit-events|(quotations|reservations|rentals|invoices)\/[1-9]\d*\/pdf|documents|documents\/[1-9]\d*|users|roles|invitations|invitations\/preview))$/.test(
       path,
     );
   if (method === "POST")
-    return /^api\/v1\/(auth\/(login|logout)|companies|branches|customers|vehicles)$/.test(
+    return /^api\/v1\/(auth\/(login|logout|forgot-password|reset-password|change-password|two-factor\/(setup|confirm|disable|recovery-codes|challenge))|companies|branches|customers|vehicles|leads|leads\/[1-9]\d*\/convert|quotations|quotations\/[1-9]\d*\/(approve-discount|reject-discount|accept|cancel|convert)|reservations|reservations\/[1-9]\d*\/cancel|rentals|rentals\/[1-9]\d*\/(handover|return|extend|amend|assign-driver)|rate-cards|invoices|invoices\/[1-9]\d*\/(issue|void|payments|refunds|credit-notes)|expenses|ap\/invoices|ap\/invoices\/[1-9]\d*\/payments|bank-accounts|bank-accounts\/[1-9]\d*\/(transactions|reconciliations)|bank-transactions\/[1-9]\d*\/(match|unmatch)|fixed-assets|fixed-assets\/depreciate|fixed-assets\/[1-9]\d*\/(request-disposal|dispose)|credit\/collections|approvals|approvals\/[1-9]\d*\/(approve|reject)|work-orders|work-orders\/[1-9]\d*\/(start|consume-parts|complete|cancel)|incidents|incidents\/[1-9]\d*\/create-work-order|maintenance-schedules|vehicle-components|fuel-transactions|parts|parts\/[1-9]\d*\/adjust|suppliers|purchase-requisitions|purchase-requisitions\/[1-9]\d*\/(approve|reject|convert-to-po)|purchase-orders|purchase-orders\/[1-9]\d*\/(submit|approve|receive|cancel)|messages|messages\/[1-9]\d*\/read|notifications\/([1-9]\d*\/read|read-all)|saved-filters|invitations|invitations\/accept|invitations\/[1-9]\d*\/(resend|revoke)|documents|users|users\/[1-9]\d*\/reset-two-factor)$/.test(
       path,
     );
+  if (method === "DELETE")
+    return /^api\/v1\/saved-filters\/[1-9]\d*$/.test(path);
   return (
-    method === "PATCH" && /^api\/v1\/(customers|vehicles)\/[1-9]\d*$/.test(path)
+    method === "PATCH" &&
+    /^api\/v1\/(auth\/profile|(customers|vehicles|leads|incidents|users|invoices|parts|suppliers|purchase-orders|rate-cards|maintenance-schedules|vehicle-components)\/[1-9]\d*|credit\/(accounts|collections)\/[1-9]\d*|companies\/[1-9]\d*\/(settings|approval-thresholds))$/.test(
+      path,
+    )
   );
+}
+
+const posInt = (value: string) =>
+  /^[1-9]\d{0,14}$/.test(value) && Number.isSafeInteger(Number(value));
+const nonNegIntStr = (value: string) =>
+  /^(?:0|[1-9]\d{0,14})$/.test(value) && Number.isSafeInteger(Number(value));
+const validPage = (value: string) =>
+  /^[1-9]\d{0,6}$/.test(value) && Number(value) >= 1 && Number(value) <= 1000000;
+
+export function allowedQuery(
+  method: string,
+  path: string,
+  params: URLSearchParams,
+): boolean {
+  const keys = [...params.keys()];
+  if (keys.length === 0) {
+    return (
+      method !== "GET" ||
+      !/^api\/v1\/(customers|vehicles|leads|quotations|reservations|rentals|rate-cards|inspections|invoices|invoices\/ageing|credit-notes|payments|refunds|expenses|gl\/accounts|gl\/journal-entries|ap\/(invoices|ageing)|bank-accounts|fixed-assets|credit\/(accounts|collections)|approvals|compliance\/expiries|work-orders|incidents|maintenance-schedules|vehicle-components|fuel-transactions|parts|stock-movements|suppliers|purchase-requisitions|purchase-orders|dashboard\/summary|messages|notifications|reports\/(financial|fleet|statements\/(pnl|balance-sheet|cash-flow|vat-return))|stats\/(customers|vehicles|branches)|saved-filters|invitations|invitations\/preview|audit-events|documents|users|roles)$/.test(
+        path,
+      )
+    );
+  }
+  if (method !== "GET") return false;
+  const uniqueKeys = new Set(keys);
+  if (uniqueKeys.size !== keys.length) return false;
+
+  const checkCommon = (allowed: readonly string[], requireCompany: boolean) => {
+    for (const key of uniqueKeys) {
+      if (!allowed.includes(key)) return false;
+    }
+    const companyId = params.get("company_id");
+    const branchId = params.get("branch_id");
+    const page = params.get("page");
+    const q = params.get("q");
+    if (requireCompany && (!companyId || !posInt(companyId))) return false;
+    if (companyId !== null && !posInt(companyId)) return false;
+    if (branchId !== null && (!companyId || !posInt(branchId))) return false;
+    if (page !== null && !validPage(page)) return false;
+    if (q !== null && q.length > 100) return false;
+    return true;
+  };
+
+  const checkSort = (allowedSorts: readonly string[]) => {
+    const sort = params.get("sort");
+    const dir = params.get("dir");
+    if (dir !== null && !sort) return false;
+    if (dir !== null && dir !== "asc" && dir !== "desc") return false;
+    if (sort !== null && !allowedSorts.includes(sort)) return false;
+    return true;
+  };
+
+  if (path === "api/v1/companies") {
+    return checkCommon(["q", "page"], false);
+  }
+  if (path === "api/v1/branches") {
+    return checkCommon(["company_id", "branch_id", "q", "page"], false);
+  }
+  const validDate = (v: string) => /^\d{4}-\d{2}-\d{2}$/.test(v);
+  if (path === "api/v1/customers" || path === "api/v1/stats/customers") {
+    if (
+      !checkCommon(
+        [
+          "company_id",
+          "branch_id",
+          "type",
+          "include_stats",
+          "from",
+          "to",
+          "min_spend_minor",
+          "max_spend_minor",
+          "has_open_ar",
+          "q",
+          "page",
+          "sort",
+          "dir",
+        ],
+        true,
+      )
+    )
+      return false;
+    const type = params.get("type");
+    const inc = params.get("include_stats");
+    const from = params.get("from");
+    const to = params.get("to");
+    const minSpend = params.get("min_spend_minor");
+    const maxSpend = params.get("max_spend_minor");
+    const hasOpenAr = params.get("has_open_ar");
+    if (type !== null && !["individual", "corporate"].includes(type))
+      return false;
+    if (inc !== null && !["0", "1", "true", "false"].includes(inc))
+      return false;
+    if (from !== null && !validDate(from)) return false;
+    if (to !== null && !validDate(to)) return false;
+    if (minSpend !== null && !nonNegIntStr(minSpend)) return false;
+    if (maxSpend !== null && !nonNegIntStr(maxSpend)) return false;
+    if (hasOpenAr !== null && !["0", "1", "true", "false"].includes(hasOpenAr))
+      return false;
+    return checkSort([
+      "name",
+      "type",
+      "email",
+      "rental_count",
+      "total_spent_minor",
+      "open_ar_minor",
+      "last_rental_at",
+    ]);
+  }
+  if (path === "api/v1/vehicles" || path === "api/v1/stats/vehicles") {
+    if (
+      !checkCommon(
+        [
+          "company_id",
+          "branch_id",
+          "status",
+          "include_stats",
+          "from",
+          "to",
+          "min_rate_minor",
+          "max_rate_minor",
+          "functions",
+          "idle_days_min",
+          "unpriced_only",
+          "q",
+          "page",
+          "sort",
+          "dir",
+        ],
+        true,
+      )
+    )
+      return false;
+    const status = params.get("status");
+    const inc = params.get("include_stats");
+    const from = params.get("from");
+    const to = params.get("to");
+    const minRate = params.get("min_rate_minor");
+    const maxRate = params.get("max_rate_minor");
+    const fns = params.get("functions");
+    const idleMin = params.get("idle_days_min");
+    const unpriced = params.get("unpriced_only");
+    if (
+      status !== null &&
+      ![
+        "available",
+        "reserved",
+        "rented",
+        "maintenance",
+        "damaged",
+        "accident",
+        "awaiting_inspection",
+        "awaiting_repair",
+        "sold",
+        "decommissioned",
+      ].includes(status)
+    )
+      return false;
+    if (inc !== null && !["0", "1", "true", "false"].includes(inc))
+      return false;
+    if (from !== null && !validDate(from)) return false;
+    if (to !== null && !validDate(to)) return false;
+    if (minRate !== null && !nonNegIntStr(minRate)) return false;
+    if (maxRate !== null && !nonNegIntStr(maxRate)) return false;
+    if (fns !== null && (fns.length > 200 || /[<>\\]/.test(fns))) return false;
+    if (idleMin !== null && !nonNegIntStr(idleMin)) return false;
+    if (unpriced !== null && !["0", "1", "true", "false"].includes(unpriced))
+      return false;
+    return checkSort([
+      "registration",
+      "make",
+      "daily_rate_minor",
+      "odometer",
+      "status",
+      "rental_count",
+      "utilization_pct",
+      "idle_days",
+      "revenue_minor",
+      "net_roi_minor",
+    ]);
+  }
+  if (path === "api/v1/quotations") {
+    if (
+      !checkCommon(
+        [
+          "company_id",
+          "branch_id",
+          "status",
+          "customer_id",
+          "q",
+          "page",
+          "sort",
+          "dir",
+        ],
+        true,
+      )
+    )
+      return false;
+    const status = params.get("status");
+    const customerId = params.get("customer_id");
+    if (
+      status !== null &&
+      ![
+        "draft",
+        "pending_approval",
+        "approved",
+        "rejected",
+        "cancelled",
+        "converted",
+      ].includes(status)
+    )
+      return false;
+    if (customerId !== null && !posInt(customerId)) return false;
+    return checkSort(["id", "customer_name", "total_minor", "status"]);
+  }
+  if (/^api\/v1\/(quotations|reservations|rentals|invoices)\/[1-9]\d*\/pdf$/.test(path)) {
+    for (const key of uniqueKeys) {
+      if (key !== "download") return false;
+    }
+    const dl = params.get("download");
+    return dl === null || dl === "1" || dl === "0";
+  }
+  if (path === "api/v1/invoices") {
+    if (
+      !checkCommon(
+        [
+          "company_id",
+          "branch_id",
+          "status",
+          "customer_id",
+          "rental_id",
+          "ageing_bucket",
+          "q",
+          "page",
+          "sort",
+          "dir",
+        ],
+        true,
+      )
+    )
+      return false;
+    const status = params.get("status");
+    const customerId = params.get("customer_id");
+    const rentalId = params.get("rental_id");
+    const bucket = params.get("ageing_bucket");
+    if (
+      status !== null &&
+      !["draft", "issued", "paid", "overdue", "void"].includes(status)
+    )
+      return false;
+    if (customerId !== null && !posInt(customerId)) return false;
+    if (rentalId !== null && !posInt(rentalId)) return false;
+    if (
+      bucket !== null &&
+      !["current", "d1_30", "d31_60", "d61_90", "d90_plus"].includes(bucket)
+    )
+      return false;
+    return checkSort([
+      "id",
+      "customer_name",
+      "due_at",
+      "total_minor",
+      "outstanding_minor",
+      "status",
+      "created_at",
+    ]);
+  }
+  if (path === "api/v1/invoices/ageing") {
+    return checkCommon(["company_id", "branch_id"], true);
+  }
+  if (path === "api/v1/payments") {
+    if (
+      !checkCommon(
+        [
+          "company_id",
+          "branch_id",
+          "invoice_id",
+          "method",
+          "q",
+          "page",
+          "sort",
+          "dir",
+        ],
+        true,
+      )
+    )
+      return false;
+    const invoiceId = params.get("invoice_id");
+    const methodParam = params.get("method");
+    if (invoiceId !== null && !posInt(invoiceId)) return false;
+    if (
+      methodParam !== null &&
+      !["cash", "card", "bank_transfer", "mobile_money"].includes(methodParam)
+    )
+      return false;
+    return checkSort(["id", "paid_at", "amount_minor", "method"]);
+  }
+  if (path === "api/v1/refunds") {
+    if (
+      !checkCommon(
+        ["company_id", "branch_id", "invoice_id", "q", "page", "sort", "dir"],
+        true,
+      )
+    )
+      return false;
+    const invoiceId = params.get("invoice_id");
+    if (invoiceId !== null && !posInt(invoiceId)) return false;
+    return checkSort(["id", "refunded_at", "amount_minor"]);
+  }
+  if (path === "api/v1/expenses") {
+    if (
+      !checkCommon(
+        [
+          "company_id",
+          "branch_id",
+          "category",
+          "vehicle_id",
+          "q",
+          "page",
+          "sort",
+          "dir",
+        ],
+        true,
+      )
+    )
+      return false;
+    const category = params.get("category");
+    const vehicleId = params.get("vehicle_id");
+    if (
+      category !== null &&
+      ![
+        "maintenance",
+        "fuel",
+        "insurance",
+        "tolls_parking",
+        "general",
+      ].includes(category)
+    )
+      return false;
+    if (vehicleId !== null && !posInt(vehicleId)) return false;
+    return checkSort(["id", "incurred_at", "description", "category", "amount_minor"]);
+  }
+  if (path === "api/v1/gl/accounts") {
+    return checkCommon(["company_id", "branch_id"], true);
+  }
+  if (path === "api/v1/gl/journal-entries") {
+    if (
+      !checkCommon(
+        [
+          "company_id",
+          "branch_id",
+          "account_code",
+          "source_type",
+          "q",
+          "page",
+        ],
+        true,
+      )
+    )
+      return false;
+    const accountCode = params.get("account_code");
+    const sourceType = params.get("source_type");
+    if (accountCode !== null && !/^[A-Za-z0-9_-]{1,20}$/.test(accountCode))
+      return false;
+    if (
+      sourceType !== null &&
+      ![
+        "invoice",
+        "payment",
+        "refund",
+        "credit_note",
+        "expense",
+        "supplier_invoice",
+        "supplier_payment",
+        "bank_adjustment",
+        "depreciation",
+        "asset_disposal",
+        "work_order",
+        "purchase_order",
+        "stock_adjustment",
+      ].includes(sourceType)
+    )
+      return false;
+    return true;
+  }
+  if (path === "api/v1/work-orders") {
+    if (
+      !checkCommon(
+        [
+          "company_id",
+          "branch_id",
+          "status",
+          "vehicle_id",
+          "q",
+          "page",
+          "sort",
+          "dir",
+        ],
+        true,
+      )
+    )
+      return false;
+    const status = params.get("status");
+    const vehicleId = params.get("vehicle_id");
+    if (
+      status !== null &&
+      !["open", "in_progress", "completed", "cancelled"].includes(status)
+    )
+      return false;
+    if (vehicleId !== null && !posInt(vehicleId)) return false;
+    return checkSort([
+      "id",
+      "vehicle_registration",
+      "title",
+      "due_at",
+      "total_cost_minor",
+      "status",
+    ]);
+  }
+  if (path === "api/v1/parts") {
+    if (
+      !checkCommon(
+        [
+          "company_id",
+          "branch_id",
+          "low_stock_only",
+          "q",
+          "page",
+          "sort",
+          "dir",
+        ],
+        true,
+      )
+    )
+      return false;
+    const low = params.get("low_stock_only");
+    if (low !== null && !["0", "1", "true", "false"].includes(low))
+      return false;
+    return checkSort([
+      "id",
+      "sku",
+      "name",
+      "unit_cost_minor",
+      "on_hand",
+      "min_stock",
+    ]);
+  }
+  if (path === "api/v1/stock-movements") {
+    if (
+      !checkCommon(
+        [
+          "company_id",
+          "branch_id",
+          "part_id",
+          "work_order_id",
+          "purchase_order_id",
+          "q",
+          "page",
+          "sort",
+          "dir",
+        ],
+        true,
+      )
+    )
+      return false;
+    for (const fk of ["part_id", "work_order_id", "purchase_order_id"]) {
+      const v = params.get(fk);
+      if (v !== null && !posInt(v)) return false;
+    }
+    return checkSort([
+      "id",
+      "created_at",
+      "part_name",
+      "quantity",
+      "unit_cost_minor",
+    ]);
+  }
+  if (path === "api/v1/suppliers") {
+    if (
+      !checkCommon(["company_id", "is_active", "q", "page", "sort", "dir"], true)
+    )
+      return false;
+    const isActive = params.get("is_active");
+    if (isActive !== null && !["0", "1", "true", "false"].includes(isActive))
+      return false;
+    return checkSort(["id", "name", "email", "is_active"]);
+  }
+  if (path === "api/v1/purchase-orders") {
+    if (
+      !checkCommon(
+        [
+          "company_id",
+          "branch_id",
+          "status",
+          "supplier_id",
+          "q",
+          "page",
+          "sort",
+          "dir",
+        ],
+        true,
+      )
+    )
+      return false;
+    const status = params.get("status");
+    const supplierId = params.get("supplier_id");
+    if (
+      status !== null &&
+      !["draft", "submitted", "approved", "received", "cancelled"].includes(
+        status,
+      )
+    )
+      return false;
+    if (supplierId !== null && !posInt(supplierId)) return false;
+    return checkSort([
+      "id",
+      "supplier_name",
+      "total_minor",
+      "status",
+      "created_at",
+    ]);
+  }
+  if (
+    path === "api/v1/dashboard/summary" ||
+    path === "api/v1/reports/financial" ||
+    path === "api/v1/reports/fleet" ||
+    path === "api/v1/stats/branches"
+  ) {
+    if (!checkCommon(["company_id", "branch_id", "from", "to"], true))
+      return false;
+    const from = params.get("from");
+    const to = params.get("to");
+    if (from !== null && !validDate(from)) return false;
+    if (to !== null && !validDate(to)) return false;
+    return true;
+  }
+  if (path === "api/v1/saved-filters") {
+    if (!checkCommon(["company_id", "module"], true)) return false;
+    const mod = params.get("module");
+    if (
+      mod !== null &&
+      ![
+        "customers",
+        "vehicles",
+        "stats_customers",
+        "stats_vehicles",
+        "stats_branches",
+      ].includes(mod)
+    )
+      return false;
+    return true;
+  }
+  if (path === "api/v1/messages") {
+    if (!checkCommon(["company_id", "branch_id", "channel", "page"], true))
+      return false;
+    const channel = params.get("channel");
+    if (
+      channel !== null &&
+      !["dispatch", "drivers", "customers", "support"].includes(channel)
+    )
+      return false;
+    return true;
+  }
+  if (path === "api/v1/notifications") {
+    if (!checkCommon(["company_id", "branch_id", "unread_only", "page"], true))
+      return false;
+    const unread = params.get("unread_only");
+    if (unread !== null && !["0", "1", "true", "false"].includes(unread))
+      return false;
+    return true;
+  }
+  if (path === "api/v1/audit-events") {
+    if (
+      !checkCommon(
+        ["company_id", "action", "entity_type", "q", "page"],
+        true,
+      )
+    )
+      return false;
+    const act = params.get("action");
+    const et = params.get("entity_type");
+    if (act !== null && !/^[a-z0-9._-]{1,64}$/i.test(act)) return false;
+    if (et !== null && !/^[a-z0-9_-]{1,32}$/i.test(et)) return false;
+    return true;
+  }
+  if (path === "api/v1/reservations") {
+    if (
+      !checkCommon(
+        [
+          "company_id",
+          "branch_id",
+          "status",
+          "vehicle_id",
+          "customer_id",
+          "q",
+          "page",
+          "sort",
+          "dir",
+        ],
+        true,
+      )
+    )
+      return false;
+    const status = params.get("status");
+    const vehicleId = params.get("vehicle_id");
+    const customerId = params.get("customer_id");
+    if (
+      status !== null &&
+      !["confirmed", "cancelled", "completed"].includes(status)
+    )
+      return false;
+    if (vehicleId !== null && !posInt(vehicleId)) return false;
+    if (customerId !== null && !posInt(customerId)) return false;
+    return checkSort([
+      "id",
+      "customer_name",
+      "vehicle_registration",
+      "starts_at",
+      "status",
+    ]);
+  }
+  if (path === "api/v1/rentals") {
+    if (
+      !checkCommon(
+        [
+          "company_id",
+          "branch_id",
+          "status",
+          "driver_user_id",
+          "vehicle_id",
+          "q",
+          "page",
+          "sort",
+          "dir",
+        ],
+        true,
+      )
+    )
+      return false;
+    const status = params.get("status");
+    const driverId = params.get("driver_user_id");
+    const vehicleId = params.get("vehicle_id");
+    if (status !== null && !["draft", "active", "returned"].includes(status))
+      return false;
+    if (driverId !== null && !posInt(driverId)) return false;
+    if (vehicleId !== null && !posInt(vehicleId)) return false;
+    return checkSort([
+      "id",
+      "vehicle_registration",
+      "customer_name",
+      "driver_name",
+      "status",
+    ]);
+  }
+  if (path === "api/v1/documents") {
+    if (
+      !checkCommon(
+        [
+          "company_id",
+          "branch_id",
+          "entity_type",
+          "entity_id",
+          "q",
+          "page",
+          "sort",
+          "dir",
+        ],
+        true,
+      )
+    )
+      return false;
+    const entityType = params.get("entity_type");
+    const entityId = params.get("entity_id");
+    if (
+      entityType !== null &&
+      ![
+        "vehicle",
+        "customer",
+        "reservation",
+        "rental",
+        "quotation",
+        "invoice",
+        "work_order",
+        "purchase_order",
+      ].includes(entityType)
+    )
+      return false;
+    if (entityId !== null && (!entityType || !posInt(entityId))) return false;
+    return checkSort(["original_name", "size", "expires_at"]);
+  }
+  if (path === "api/v1/users") {
+    if (
+      !checkCommon(
+        [
+          "company_id",
+          "branch_id",
+          "role",
+          "is_active",
+          "q",
+          "page",
+          "sort",
+          "dir",
+        ],
+        true,
+      )
+    )
+      return false;
+    const role = params.get("role");
+    const isActive = params.get("is_active");
+    if (
+      role !== null &&
+      ![
+        "ceo",
+        "general-manager",
+        "business-accounts-manager",
+        "operations-manager",
+        "maintenance-manager",
+        "finance-manager",
+        "credit-control-manager",
+        "hr-admin-manager",
+        "mechanic-technician",
+        "system-administrator",
+        "driver",
+        "company-admin",
+        "operations",
+        "finance",
+        "viewer",
+      ].includes(role)
+    )
+      return false;
+    if (
+      isActive !== null &&
+      !["0", "1", "true", "false"].includes(isActive)
+    )
+      return false;
+    return checkSort(["name", "email", "role", "is_active"]);
+  }
+  if (path === "api/v1/roles") {
+    return checkCommon(["company_id"], true);
+  }
+  if (path === "api/v1/invitations") {
+    if (!checkCommon(["company_id", "status", "q", "page"], true)) return false;
+    const status = params.get("status");
+    if (
+      status !== null &&
+      !["pending", "accepted", "revoked", "expired"].includes(status)
+    )
+      return false;
+    return true;
+  }
+  if (path === "api/v1/invitations/preview") {
+    for (const key of uniqueKeys) {
+      if (key !== "token") return false;
+    }
+    const token = params.get("token");
+    return !!token && /^[A-Za-z0-9_-]{16,128}$/.test(token);
+  }
+  if (path === "api/v1/rate-cards") {
+    if (
+      !checkCommon(
+        ["company_id", "branch_id", "customer_id", "is_active", "q", "page"],
+        true,
+      )
+    )
+      return false;
+    const cid = params.get("customer_id");
+    const act = params.get("is_active");
+    if (cid !== null && !posInt(cid)) return false;
+    if (act !== null && !["0", "1", "true", "false"].includes(act)) return false;
+    return true;
+  }
+  if (path === "api/v1/inspections") {
+    if (
+      !checkCommon(
+        ["company_id", "branch_id", "rental_id", "vehicle_id", "page"],
+        true,
+      )
+    )
+      return false;
+    const rid = params.get("rental_id");
+    const vid = params.get("vehicle_id");
+    if (rid !== null && !posInt(rid)) return false;
+    if (vid !== null && !posInt(vid)) return false;
+    return true;
+  }
+  if (path === "api/v1/maintenance-schedules") {
+    if (
+      !checkCommon(
+        ["company_id", "branch_id", "vehicle_id", "status", "q", "page"],
+        true,
+      )
+    )
+      return false;
+    const vid = params.get("vehicle_id");
+    const st = params.get("status");
+    if (vid !== null && !posInt(vid)) return false;
+    if (st !== null && !["ok", "due_soon", "overdue"].includes(st)) return false;
+    return true;
+  }
+  if (path === "api/v1/vehicle-components") {
+    if (
+      !checkCommon(
+        [
+          "company_id",
+          "branch_id",
+          "vehicle_id",
+          "component_type",
+          "status",
+          "q",
+          "page",
+        ],
+        true,
+      )
+    )
+      return false;
+    const vid = params.get("vehicle_id");
+    const ct = params.get("component_type");
+    const st = params.get("status");
+    if (vid !== null && !posInt(vid)) return false;
+    if (ct !== null && !["tyre", "battery"].includes(ct)) return false;
+    if (st !== null && !["active", "replaced", "scrapped"].includes(st))
+      return false;
+    return true;
+  }
+  if (path === "api/v1/fuel-transactions") {
+    if (
+      !checkCommon(
+        [
+          "company_id",
+          "branch_id",
+          "vehicle_id",
+          "abnormal_only",
+          "from",
+          "to",
+          "q",
+          "page",
+        ],
+        true,
+      )
+    )
+      return false;
+    const vid = params.get("vehicle_id");
+    const abn = params.get("abnormal_only");
+    const from = params.get("from");
+    const to = params.get("to");
+    if (vid !== null && !posInt(vid)) return false;
+    if (abn !== null && !["0", "1", "true", "false"].includes(abn)) return false;
+    if (from !== null && !validDate(from)) return false;
+    if (to !== null && !validDate(to)) return false;
+    return true;
+  }
+  if (/^api\/v1\/customers\/[1-9]\d*\/statement$/.test(path)) {
+    for (const key of uniqueKeys) {
+      if (key !== "from" && key !== "to") return false;
+    }
+    const from = params.get("from");
+    const to = params.get("to");
+    if (from !== null && !validDate(from)) return false;
+    if (to !== null && !validDate(to)) return false;
+    return true;
+  }
+  if (path === "api/v1/credit/accounts") {
+    if (!checkCommon(["company_id", "branch_id", "hold_only", "q", "page"], true))
+      return false;
+    const hold = params.get("hold_only");
+    if (hold !== null && !["0", "1", "true", "false"].includes(hold))
+      return false;
+    return true;
+  }
+  if (path === "api/v1/credit/collections") {
+    if (
+      !checkCommon(
+        ["company_id", "branch_id", "customer_id", "status", "q", "page"],
+        true,
+      )
+    )
+      return false;
+    const cid = params.get("customer_id");
+    const st = params.get("status");
+    if (cid !== null && !posInt(cid)) return false;
+    if (st !== null && !["open", "kept", "broken", "resolved"].includes(st))
+      return false;
+    return true;
+  }
+  if (path === "api/v1/approvals") {
+    if (
+      !checkCommon(
+        ["company_id", "branch_id", "type", "status", "q", "page"],
+        true,
+      )
+    )
+      return false;
+    const t = params.get("type");
+    const st = params.get("status");
+    if (
+      t !== null &&
+      ![
+        "discount",
+        "credit_limit",
+        "vehicle_repair",
+        "purchase",
+        "refund_writeoff",
+        "contract_amendment",
+        "vehicle_disposal",
+      ].includes(t)
+    )
+      return false;
+    if (
+      st !== null &&
+      !["pending", "approved", "rejected", "cancelled"].includes(st)
+    )
+      return false;
+    return true;
+  }
+  if (path === "api/v1/compliance/expiries") {
+    if (
+      !checkCommon(
+        ["company_id", "branch_id", "bucket", "category", "q", "page"],
+        true,
+      )
+    )
+      return false;
+    const b = params.get("bucket");
+    const cat = params.get("category");
+    if (b !== null && !["expired", "d7", "d14", "d30", "valid"].includes(b))
+      return false;
+    if (
+      cat !== null &&
+      ![
+        "insurance",
+        "roadworthy",
+        "vehicle_licence",
+        "driver_licence",
+        "contract",
+        "kyc",
+        "other",
+      ].includes(cat)
+    )
+      return false;
+    return true;
+  }
+  if (path === "api/v1/ap/invoices") {
+    if (
+      !checkCommon(
+        [
+          "company_id",
+          "branch_id",
+          "supplier_id",
+          "purchase_order_id",
+          "status",
+          "match_status",
+          "ageing_bucket",
+          "q",
+          "page",
+        ],
+        true,
+      )
+    )
+      return false;
+    const sid = params.get("supplier_id");
+    const poid = params.get("purchase_order_id");
+    const st = params.get("status");
+    const ms = params.get("match_status");
+    const bucket = params.get("ageing_bucket");
+    if (sid !== null && !posInt(sid)) return false;
+    if (poid !== null && !posInt(poid)) return false;
+    if (
+      st !== null &&
+      ![
+        "draft",
+        "pending_approval",
+        "approved",
+        "partially_paid",
+        "paid",
+        "void",
+      ].includes(st)
+    )
+      return false;
+    if (ms !== null && !["matched", "variance", "non_po"].includes(ms))
+      return false;
+    if (
+      bucket !== null &&
+      !["current", "d1_30", "d31_60", "d61_90", "d90_plus"].includes(bucket)
+    )
+      return false;
+    return true;
+  }
+  if (path === "api/v1/ap/ageing") {
+    return checkCommon(["company_id", "branch_id"], true);
+  }
+  if (path === "api/v1/credit-notes") {
+    if (
+      !checkCommon(
+        [
+          "company_id",
+          "branch_id",
+          "invoice_id",
+          "customer_id",
+          "status",
+          "q",
+          "page",
+        ],
+        true,
+      )
+    )
+      return false;
+    const iid = params.get("invoice_id");
+    const cid = params.get("customer_id");
+    const st = params.get("status");
+    if (iid !== null && !posInt(iid)) return false;
+    if (cid !== null && !posInt(cid)) return false;
+    if (st !== null && !["pending_approval", "posted", "rejected"].includes(st))
+      return false;
+    return true;
+  }
+  if (path === "api/v1/bank-accounts") {
+    return checkCommon(["company_id", "branch_id"], true);
+  }
+  if (/^api\/v1\/bank-accounts\/[1-9]\d*\/transactions$/.test(path)) {
+    for (const key of uniqueKeys) {
+      if (!["match_status", "from", "to", "page"].includes(key)) return false;
+    }
+    const ms = params.get("match_status");
+    const from = params.get("from");
+    const to = params.get("to");
+    const page = params.get("page");
+    if (ms !== null && !["unmatched", "matched", "adjusted"].includes(ms))
+      return false;
+    if (from !== null && !validDate(from)) return false;
+    if (to !== null && !validDate(to)) return false;
+    if (page !== null && !validPage(page)) return false;
+    return true;
+  }
+  if (path === "api/v1/fixed-assets") {
+    if (
+      !checkCommon(
+        [
+          "company_id",
+          "branch_id",
+          "vehicle_id",
+          "status",
+          "category",
+          "q",
+          "page",
+        ],
+        true,
+      )
+    )
+      return false;
+    const vid = params.get("vehicle_id");
+    const st = params.get("status");
+    const cat = params.get("category");
+    if (vid !== null && !posInt(vid)) return false;
+    if (st !== null && !["active", "pending_disposal", "disposed"].includes(st))
+      return false;
+    if (
+      cat !== null &&
+      ![
+        "vehicle",
+        "workshop_equipment",
+        "office_equipment",
+        "other",
+      ].includes(cat)
+    )
+      return false;
+    return true;
+  }
+  if (
+    path === "api/v1/reports/statements/pnl" ||
+    path === "api/v1/reports/statements/cash-flow" ||
+    path === "api/v1/reports/statements/vat-return"
+  ) {
+    if (!checkCommon(["company_id", "branch_id", "from", "to"], true))
+      return false;
+    const from = params.get("from");
+    const to = params.get("to");
+    if (from !== null && !validDate(from)) return false;
+    if (to !== null && !validDate(to)) return false;
+    return true;
+  }
+  if (path === "api/v1/reports/statements/balance-sheet") {
+    if (!checkCommon(["company_id", "branch_id", "as_of"], true)) return false;
+    const asOf = params.get("as_of");
+    if (asOf !== null && !validDate(asOf)) return false;
+    return true;
+  }
+  if (path === "api/v1/leads") {
+    if (
+      !checkCommon(
+        [
+          "company_id",
+          "branch_id",
+          "stage",
+          "source",
+          "assigned_to_user_id",
+          "q",
+          "page",
+        ],
+        true,
+      )
+    )
+      return false;
+    const stage = params.get("stage");
+    const source = params.get("source");
+    const assigned = params.get("assigned_to_user_id");
+    if (
+      stage !== null &&
+      ![
+        "new",
+        "contacted",
+        "qualified",
+        "proposal_sent",
+        "won",
+        "lost",
+      ].includes(stage)
+    )
+      return false;
+    if (
+      source !== null &&
+      ![
+        "website",
+        "referral",
+        "corporate_outreach",
+        "walk_in",
+        "phone",
+        "other",
+      ].includes(source)
+    )
+      return false;
+    if (assigned !== null && !posInt(assigned)) return false;
+    return true;
+  }
+  if (/^api\/v1\/vehicles\/[1-9]\d*\/history$/.test(path)) {
+    return checkCommon(["company_id"], false);
+  }
+  if (/^api\/v1\/suppliers\/[1-9]\d*\/statement$/.test(path)) {
+    for (const key of uniqueKeys) {
+      if (key !== "from" && key !== "to") return false;
+    }
+    const from = params.get("from");
+    const to = params.get("to");
+    if (from !== null && !validDate(from)) return false;
+    if (to !== null && !validDate(to)) return false;
+    return true;
+  }
+  if (path === "api/v1/incidents") {
+    if (
+      !checkCommon(
+        [
+          "company_id",
+          "branch_id",
+          "vehicle_id",
+          "incident_type",
+          "severity",
+          "status",
+          "q",
+          "page",
+        ],
+        true,
+      )
+    )
+      return false;
+    const vid = params.get("vehicle_id");
+    const it = params.get("incident_type");
+    const sev = params.get("severity");
+    const st = params.get("status");
+    if (vid !== null && !posInt(vid)) return false;
+    if (
+      it !== null &&
+      !["accident", "breakdown", "damage", "theft_vandalism"].includes(it)
+    )
+      return false;
+    if (sev !== null && !["minor", "moderate", "major", "total_loss"].includes(sev))
+      return false;
+    if (st !== null && !["reported", "assessing", "repairing", "closed"].includes(st))
+      return false;
+    return true;
+  }
+  if (path === "api/v1/purchase-requisitions") {
+    if (
+      !checkCommon(
+        ["company_id", "branch_id", "status", "q", "page"],
+        true,
+      )
+    )
+      return false;
+    const st = params.get("status");
+    if (
+      st !== null &&
+      !["pending", "approved", "rejected", "converted"].includes(st)
+    )
+      return false;
+    return true;
+  }
+  return false;
 }
 export function forwardedCookies(raw: string, name: string) {
   return raw
@@ -46,7 +1266,9 @@ export function browserCookie(raw: string, config: ProxyConfig): string | null {
     ...retained,
     "Path=/",
     "SameSite=Lax",
-    ...(new URL(config.app).protocol === "https:" ? ["Secure"] : []),
+    ...(appOrigins(config).some((item) => new URL(item).protocol === "https:")
+      ? ["Secure"]
+      : []),
     ...(name === config.cookie ? ["HttpOnly"] : []),
   ].join("; ");
 }
@@ -100,27 +1322,31 @@ export async function proxy(
   )
     return failure(404, "Unsupported API operation.");
   const url = new URL(request.url);
-  if (
-    [...url.searchParams.keys()].some((key) => key !== "page") ||
-    (url.search &&
-      (!/^api\/v1\/(companies|branches)$/.test(path) ||
-        url.searchParams.getAll("page").length !== 1 ||
-        !/^[1-9]\d{0,5}$/.test(url.searchParams.get("page") ?? "")))
-  )
+  if (!allowedQuery(request.method, path, url.searchParams))
     return failure(400, "Unsupported query parameters.");
   const mutation = request.method !== "GET";
-  if (mutation && request.headers.get("origin") !== config.app)
+  const isDocumentUpload =
+    request.method === "POST" && path === "api/v1/documents";
+  const isDocumentDownload =
+    request.method === "GET" &&
+    /^api\/v1\/(documents\/[1-9]\d*|(quotations|reservations|rentals|invoices)\/[1-9]\d*\/pdf)$/.test(
+      path,
+    );
+  const allowed = appOrigins(config);
+  const requestOrigin = request.headers.get("origin");
+  if (mutation && (!requestOrigin || !allowed.includes(requestOrigin)))
     return failure(403, "Invalid request origin.");
   if (mutation && !request.headers.get("x-xsrf-token"))
     return failure(419, "CSRF verification required.");
-  if (
-    mutation &&
-    !/^application\/json(?:;|$)/i.test(
-      request.headers.get("content-type") ?? "",
-    )
-  )
+  const contentType = request.headers.get("content-type") ?? "";
+  if (isDocumentUpload) {
+    if (!/^multipart\/form-data;\s*boundary=/i.test(contentType))
+      return failure(415, "Multipart form data is required.");
+  } else if (mutation && !/^application\/json(?:;|$)/i.test(contentType)) {
     return failure(415, "JSON is required.");
-  if (Number(request.headers.get("content-length") ?? 0) > 65536)
+  }
+  const maxRequestBytes = isDocumentUpload ? 11 * 1024 * 1024 : 65536;
+  if (Number(request.headers.get("content-length") ?? 0) > maxRequestBytes)
     return failure(413, "Request too large.");
   const controller = new AbortController();
   const abort = () => controller.abort();
@@ -128,13 +1354,25 @@ export async function proxy(
   if (request.signal.aborted) controller.abort();
   const timer = setTimeout(abort, config.timeout);
   try {
-    let body: string | undefined;
+    let body: string | Uint8Array<ArrayBuffer> | undefined;
     if (mutation) {
       try {
-        body = new TextDecoder().decode(
-          await limitedBody(request.body, 65536, controller.signal),
+        const rawBytes = await limitedBody(
+          request.body,
+          maxRequestBytes,
+          controller.signal,
         );
-        JSON.parse(body);
+        if (isDocumentUpload) {
+          body = rawBytes;
+        } else {
+          const decoded = new TextDecoder().decode(rawBytes);
+          if (request.method === "DELETE" && decoded.trim() === "") {
+            body = undefined;
+          } else {
+            JSON.parse(decoded);
+            body = decoded;
+          }
+        }
       } catch (error) {
         return failure(
           controller.signal.aborted
@@ -146,10 +1384,13 @@ export async function proxy(
         );
       }
     }
+    const activeOrigin = resolvedAppOrigin(request, config);
     const headers = new Headers({
-      Accept: "application/json",
-      Origin: config.app,
-      Referer: `${config.app}/`,
+      Accept: isDocumentDownload
+        ? "application/pdf, image/jpeg, image/png, application/json"
+        : "application/json",
+      Origin: activeOrigin,
+      Referer: `${activeOrigin}/`,
       "X-Requested-With": "XMLHttpRequest",
     });
     const cookies = forwardedCookies(
@@ -158,7 +1399,10 @@ export async function proxy(
     );
     if (cookies) headers.set("Cookie", cookies);
     if (mutation) {
-      headers.set("Content-Type", "application/json");
+      headers.set(
+        "Content-Type",
+        isDocumentUpload ? contentType : "application/json",
+      );
       headers.set("X-XSRF-TOKEN", request.headers.get("x-xsrf-token")!);
     }
     const upstream = await transport(`${config.backend}/${path}${url.search}`, {
@@ -186,7 +1430,38 @@ export async function proxy(
       return new Response(null, { status: 204, headers: output });
     if (upstream.status >= 300 && upstream.status < 400)
       return failure(502, "Unexpected API redirect.");
-    if (!upstream.headers.get("content-type")?.includes("application/json"))
+    const upstreamType = upstream.headers.get("content-type") ?? "";
+    if (isDocumentDownload && upstream.ok) {
+      const mime = upstreamType.split(";")[0]?.trim().toLowerCase() ?? "";
+      if (!["application/pdf", "image/jpeg", "image/png"].includes(mime))
+        return failure(502, "Unexpected document content type.");
+      let fileBytes: Uint8Array<ArrayBuffer>;
+      try {
+        fileBytes = await limitedBody(
+          upstream.body,
+          12 * 1024 * 1024,
+          controller.signal,
+        );
+      } catch {
+        return failure(
+          controller.signal.aborted ? 504 : 502,
+          "Invalid document response.",
+        );
+      }
+      output.set("Content-Type", mime);
+      const disposition = upstream.headers.get("content-disposition");
+      output.set(
+        "Content-Disposition",
+        disposition && /^attachment\b/i.test(disposition)
+          ? disposition
+          : "attachment",
+      );
+      return new Response(fileBytes, {
+        status: upstream.status,
+        headers: output,
+      });
+    }
+    if (!upstreamType.includes("application/json"))
       return failure(502, "Unexpected API response.");
     let payload: unknown;
     try {

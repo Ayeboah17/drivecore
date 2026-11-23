@@ -21,7 +21,7 @@ export const profiles: Record<
 > = {
   operator: {
     id: "operator",
-    name: "Kwame Mensah",
+    name: "Kwame Yeboah",
     profileLabel: "Multi-company operator",
     modules: allModules,
     access: { akwaaba: ["accra", "kumasi"], sankofa: ["tema", "takoradi"] },

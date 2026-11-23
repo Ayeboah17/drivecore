@@ -1,0 +1,480 @@
+"use client";
+import { FileText } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import {
+  Table,
+  TableHeader,
+  TableBody,
+  TableRow,
+  TableHead,
+  TableCell,
+} from "@/components/ui/table";
+import { DriveCoreSelect } from "@/components/ui/drivecore-select";
+import {
+  DataSearchForm,
+  DataTableFrame,
+  type ActiveFilterChip,
+} from "@/components/data/data-table";
+import type {
+  Database,
+  DemoContext,
+  Entity,
+  Kind,
+  Of,
+} from "@/lib/demo/types";
+import { valueOf, entities } from "@/lib/demo/types";
+import {
+  label,
+  rows,
+  displayStatus,
+  money,
+  inRange,
+  type Range,
+} from "@/lib/demo/selectors";
+import { stock, invoiceBalance } from "@/lib/demo/rules";
+import { fieldLabel, screens } from "./config";
+import { isPrintableEntity, type PrintableEntity } from "./pdf-modal";
+export function Status({ value }: { value: string }) {
+  const style = [
+    "available",
+    "paid",
+    "completed",
+    "received",
+    "confirmed",
+    "active",
+    "approved",
+    "in stock",
+  ].includes(value)
+    ? "border-success text-success-foreground"
+    : [
+          "overdue",
+          "damaged",
+          "unpaid",
+          "cancelled",
+          "rejected",
+          "inactive",
+          "void",
+          "low stock",
+        ].includes(value)
+      ? "border-danger text-danger-foreground"
+      : [
+            "reserved",
+            "maintenance",
+            "in_progress",
+            "partial",
+            "submitted",
+            "pending",
+            "pending_approval",
+            "unread",
+          ].includes(value)
+        ? "border-warning text-warning-foreground"
+        : "border-border text-muted-foreground";
+  return value ? (
+    <Badge variant="outline" className={style}>
+      {value.replaceAll("_", " ")}
+    </Badge>
+  ) : null;
+}
+const financial = new Set([
+  "dailyRate",
+  "subtotal",
+  "discountAmount",
+  "vatAmount",
+  "total",
+  "amount",
+  "unitCost",
+  "labourCost",
+  "partsCost",
+]);
+export function cell(db: Database, entity: Entity, key: string): string {
+  if (key === "condition" && entity.kind === "vehicle")
+    return displayStatus(db, entity);
+  if (key === "status") return displayStatus(db, entity);
+  const value = valueOf(entity, key);
+  if (key === "vehicleIds" && Array.isArray(value)) {
+    const names = value
+      .map((vId) => db.entities.find((e) => e.id === vId))
+      .filter((e): e is Entity => !!e)
+      .map(label);
+    return names.join(", ") || cell(db, entity, "vehicleId");
+  }
+  if (key === "discountPct" && typeof value === "number") return `${value}%`;
+  if (key === "vatRate" && typeof value === "number") return `${value}%`;
+  if (key.endsWith("Id")) {
+    const related = db.entities.find((e) => e.id === value);
+    return related ? label(related) : String(value || "—");
+  }
+  if (financial.has(key) && typeof value === "number")
+    return money(db, entity.companyId, value);
+  if (key === "odometer") return `${value} km (demo)`;
+  if (key.endsWith("At") && typeof value === "string") {
+    const d = new Date(value);
+    return value && Number.isFinite(d.getTime()) ? d.toLocaleString() : "—";
+  }
+  if (Array.isArray(value)) return value.join(", ") || "None";
+  if (typeof value === "boolean") return value ? "Yes" : "No";
+  return String(value || (value === 0 ? 0 : "—"));
+}
+export interface TableState {
+  q: string;
+  filter: string;
+  sort: string;
+  page: number;
+}
+const monoColumns = new Set([
+  "registration",
+  "odometer",
+  "dailyRate",
+  "subtotal",
+  "discountPct",
+  "discountAmount",
+  "vatAmount",
+  "total",
+  "amount",
+  "unitCost",
+  "labourCost",
+  "partsCost",
+  "sku",
+  "minimum",
+  "quantity",
+]);
+
+export function RecordTable({
+  db,
+  ctx,
+  kind,
+  state,
+  onState,
+  onView,
+  onOpen360,
+  onGeneratePdf,
+  range,
+}: {
+  db: Database;
+  ctx: DemoContext;
+  kind: Kind;
+  state: TableState;
+  onState: (next: Partial<TableState>) => void;
+  onView: (id: string) => void;
+  onOpen360?: (vehicle: Of<"vehicle">) => void;
+  onGeneratePdf?: (entity: PrintableEntity) => void;
+  range: Range;
+}) {
+  const spec = screens[kind];
+  const dated = ![
+    "company",
+    "branch",
+    "role",
+    "user",
+    "customer",
+    "vehicle",
+    "part",
+    "supplier",
+    "setting",
+  ].includes(kind);
+  let source = rows(db, ctx, kind).filter(
+    (e) => !dated || inRange(e.createdAt, range),
+  );
+  const statuses = [
+    ...new Set(source.map((e) => displayStatus(db, e)).filter(Boolean)),
+  ].sort();
+  const query = state.q.toLocaleLowerCase().trim();
+  source = source.filter(
+    (e) =>
+      (!query ||
+        [label(e), ...spec.columns.map((key) => cell(db, e, key))]
+          .join(" ")
+          .toLocaleLowerCase()
+          .includes(query)) &&
+      (!state.filter || displayStatus(db, e) === state.filter),
+  );
+  const [sort, dir] = state.sort.split(":");
+  source.sort((a, b) => {
+    const av = valueOf(a, sort),
+      bv = valueOf(b, sort);
+    const comparison =
+      typeof av === "number" && typeof bv === "number"
+        ? av - bv
+        : cell(db, a, sort).localeCompare(cell(db, b, sort), undefined, {
+            numeric: true,
+          });
+    return comparison * (dir === "desc" ? -1 : 1) || a.id.localeCompare(b.id);
+  });
+  const configured = Number(
+    entities(db, "setting").find(
+      (s) => s.companyId === ctx.companyId && s.name === "Rows per page",
+    )?.value ?? "10",
+  );
+  const pageSize = [10, 25, 50].includes(configured) ? configured : 10;
+  const last = Math.max(1, Math.ceil(source.length / pageSize)),
+    page = Math.min(state.page, last),
+    visible = source.slice((page - 1) * pageSize, page * pageSize);
+
+  const chips: ActiveFilterChip[] = [
+    ...(state.q
+      ? [
+          {
+            key: "q",
+            label: `Search: "${state.q}"`,
+            onRemove: () => onState({ q: "", page: 1 }),
+          },
+        ]
+      : []),
+    ...(state.filter
+      ? [
+          {
+            key: "filter",
+            label: `Status: ${state.filter.replaceAll("_", " ")}`,
+            onRemove: () => onState({ filter: "", page: 1 }),
+          },
+        ]
+      : []),
+  ];
+
+  const sortOptions = spec.columns.flatMap((key) => [
+    { value: `${key}:asc`, label: `${fieldLabel(key, kind)} ↑` },
+    { value: `${key}:desc`, label: `${fieldLabel(key, kind)} ↓` },
+  ]);
+
+  return (
+    <DataTableFrame
+      ariaLabel={spec.label}
+      chips={chips}
+      onClearAll={() => onState({ q: "", filter: "", page: 1 })}
+      toolbar={
+        <div className="flex flex-col flex-wrap items-end gap-3 lg:flex-row">
+          <DataSearchForm
+            formKey={kind + state.q}
+            label={`Search ${spec.label.toLowerCase()}`}
+            placeholder="Search all records in this scope"
+            defaultValue={state.q}
+            onSubmitQuery={(q) => onState({ q, page: 1 })}
+          />
+          <div className="w-full space-y-1.5 text-label font-semibold lg:w-44">
+            <span>Status</span>
+            <DriveCoreSelect
+              ariaLabel="Filter status"
+              value={state.filter}
+              onValueChange={(value) => onState({ filter: value, page: 1 })}
+              options={[
+                { value: "", label: "All statuses" },
+                ...statuses.map((s) => ({
+                  value: s,
+                  label: s.replaceAll("_", " "),
+                })),
+              ]}
+            />
+          </div>
+          <div className="w-full space-y-1.5 text-label font-semibold lg:w-52">
+            <span>Sort</span>
+            <DriveCoreSelect
+              ariaLabel="Sort records"
+              value={state.sort}
+              onValueChange={(value) => onState({ sort: value, page: 1 })}
+              options={sortOptions}
+            />
+          </div>
+        </div>
+      }
+      footer={
+        <>
+          <p className="font-mono text-xs tabular-nums">
+            {source.length} records · Page {page} of {last}
+          </p>
+          <div className="flex gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              className="rounded-xl"
+              disabled={page <= 1}
+              onClick={() => onState({ page: page - 1 })}
+            >
+              Previous
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="rounded-xl"
+              disabled={page >= last}
+              onClick={() => onState({ page: page + 1 })}
+            >
+              Next
+            </Button>
+          </div>
+        </>
+      }
+    >
+      {!source.length ? (
+        <div className="space-y-2 p-8">
+          <h2 className="text-section-heading">No matching records</h2>
+          <p className="text-sm text-muted-foreground">
+            Change the date range, search or filters, or create a record when
+            your role allows it.
+          </p>
+          <Button
+            variant="outline"
+            onClick={() => onState({ q: "", filter: "", page: 1 })}
+          >
+            Clear search and status
+          </Button>
+        </div>
+      ) : (
+        <>
+          <div className="hidden md:block">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  {spec.columns.map((key) => (
+                    <TableHead key={key}>{fieldLabel(key, kind)}</TableHead>
+                  ))}
+                  {kind === "part" ? (
+                    <TableHead>Stock</TableHead>
+                  ) : kind === "invoice" ? (
+                    <TableHead>Outstanding</TableHead>
+                  ) : null}
+                  <TableHead>
+                    <span className="sr-only">Actions</span>
+                  </TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {visible.map((e) => (
+                  <TableRow key={e.id}>
+                    {spec.columns.map((key) => (
+                      <TableCell
+                        key={key}
+                        className={`${
+                          key === spec.columns[0]
+                            ? "max-w-64 truncate font-medium"
+                            : "max-w-56 truncate"
+                        } ${monoColumns.has(key) ? "font-mono tabular-nums" : ""}`}
+                      >
+                        {["status", "condition"].includes(key) ? (
+                          <Status value={cell(db, e, key)} />
+                        ) : key === "registration" ? (
+                          <span className="inline-block rounded-md bg-structural px-2 py-0.5 text-xs font-bold text-structural-foreground">
+                            {cell(db, e, key)}
+                          </span>
+                        ) : (
+                          cell(db, e, key)
+                        )}
+                      </TableCell>
+                    ))}
+                    {e.kind === "part" ? (
+                      <TableCell className="font-mono tabular-nums">
+                        {stock(db, e.id)}
+                      </TableCell>
+                    ) : e.kind === "invoice" ? (
+                      <TableCell className="font-mono tabular-nums">
+                        {money(
+                          db,
+                          e.companyId,
+                          invoiceBalance(db, e.id).outstanding,
+                        )}
+                      </TableCell>
+                    ) : null}
+                    <TableCell>
+                      <div className="flex items-center justify-end gap-1">
+                        {isPrintableEntity(e) && onGeneratePdf ? (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => onGeneratePdf(e)}
+                            aria-label={`Generate PDF for ${label(e)}`}
+                          >
+                            <FileText className="mr-1 size-3.5" aria-hidden="true" />
+                            PDF
+                          </Button>
+                        ) : null}
+                        {e.kind === "vehicle" && onOpen360 ? (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => onOpen360(e)}
+                          >
+                            360° File
+                          </Button>
+                        ) : null}
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => onView(e.id)}
+                          aria-label={`View ${label(e)}`}
+                        >
+                          View
+                        </Button>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+          <ul className="divide-y md:hidden">
+            {visible.map((e) => (
+              <li key={e.id} className="space-y-3 p-card">
+                <div className="flex items-start justify-between gap-3">
+                  <h2 className="min-w-0 break-words text-card-heading">
+                    {label(e)}
+                  </h2>
+                  <Status value={displayStatus(db, e)} />
+                </div>
+                <dl className="grid grid-cols-2 gap-3 text-label">
+                  {spec.columns.slice(1, 4).map((key) => (
+                    <div key={key}>
+                      <dt className="text-muted-foreground">
+                        {fieldLabel(key, kind)}
+                      </dt>
+                      <dd className="break-words">{cell(db, e, key)}</dd>
+                    </div>
+                  ))}
+                </dl>
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => onView(e.id)}
+                  >
+                    View record
+                  </Button>
+                  {isPrintableEntity(e) && onGeneratePdf ? (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => onGeneratePdf(e)}
+                    >
+                      <FileText className="mr-1 size-3.5" aria-hidden="true" />
+                      PDF
+                    </Button>
+                  ) : null}
+                </div>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+    </DataTableFrame>
+  );
+}
+export function exportCsv(
+  name: string,
+  headers: string[],
+  data: (string | number)[][],
+) {
+  const escape = (v: string | number) => {
+    let value = String(v);
+    if (/^[=+\-@\t\r]/.test(value)) value = `'${value}`;
+    return `"${value.replaceAll('"', '""')}"`;
+  };
+  const blob = new Blob(
+    [[headers, ...data].map((row) => row.map(escape).join(",")).join("\r\n")],
+    { type: "text/csv;charset=utf-8" },
+  );
+  const url = URL.createObjectURL(blob),
+    a = document.createElement("a");
+  a.href = url;
+  a.download = `${name}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
