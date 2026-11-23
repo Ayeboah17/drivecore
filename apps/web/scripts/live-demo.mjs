@@ -28,7 +28,7 @@ console.log("  DriveCore ERP — Full Live Demo Workspace (Seeded)");
 console.log("  Company: DriveCore Solutions Ghana Ltd (GHS)");
 console.log("  Branches: Accra Airport HQ · Kumasi Branch");
 console.log("==============================================================");
-console.log(`  App URL : http://127.0.0.1:${webPort}/login`);
+console.log(`  App URL : http://localhost:${webPort}/login (or http://127.0.0.1:${webPort}/login)`);
 console.log(`  Demo API: ${apiBaseUrl} (in-memory seeded loopback)`);
 console.log("--------------------------------------------------------------");
 console.log("  Demo Accounts (any password works, e.g. demo1234):");
@@ -46,19 +46,17 @@ const apiProc = spawn(process.execPath, [fixtureScript, "--seed=demo"], {
   stdio: "inherit",
 });
 
-const nextBin = path.join(
-  webDir,
-  "node_modules",
-  ".bin",
-  process.platform === "win32" ? "next.cmd" : "next",
-);
+const nextCli = path.join(webDir, "node_modules", "next", "dist", "bin", "next");
 
-const webProc = spawn(nextBin, ["dev", "-p", webPort, "-H", "127.0.0.1"], {
+const webProc = spawn(process.execPath, [nextCli, "dev", "-p", webPort], {
   cwd: webDir,
-  shell: process.platform === "win32",
   env: {
     ...process.env,
-    DRIVECORE_API_BASE_URL: apiBaseUrl,
+    DRIVECORE_MODE: "live",
+    DRIVECORE_API_ORIGIN: apiBaseUrl,
+    DRIVECORE_APP_ORIGIN: `http://localhost:${webPort},http://127.0.0.1:${webPort}`,
+    DRIVECORE_SESSION_COOKIE_NAME: "drivecore_test",
+    DRIVECORE_API_TIMEOUT_MS: "15000",
   },
   stdio: "inherit",
 });
