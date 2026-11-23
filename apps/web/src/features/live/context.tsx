@@ -51,7 +51,11 @@ export async function loadDirectory(
     user.is_platform_admin
       ? directoryPages<Company>("api/v1/companies", companySchema, signal)
       : Promise.resolve(
-          user.companies.map((c) => ({ id: c.id, name: c.name, currency: "" })),
+          user.companies.map((c) => ({
+            id: c.id,
+            name: c.name,
+            currency: c.currency ?? "",
+          })),
         ),
     can(user, "branches.view")
       ? directoryPages<Branch>("api/v1/branches", branchSchema, signal)

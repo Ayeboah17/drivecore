@@ -1,9 +1,15 @@
 import { proxy } from "@/lib/server/backend-proxy";
 import { proxyConfig } from "@/lib/server/backend-config";
+import { isLiveDemoMode, proxyLiveDemo } from "@/lib/server/vercel-live-demo";
+
 async function handle(
   request: Request,
   context: { params: Promise<{ path: string[] }> },
 ) {
+  const path = (await context.params).path.join("/");
+  if (isLiveDemoMode()) {
+    return proxyLiveDemo(request, path);
+  }
   let config;
   try {
     config = proxyConfig();
@@ -13,7 +19,7 @@ async function handle(
       { status: 503, headers: { "Cache-Control": "private, no-store" } },
     );
   }
-  return proxy(request, (await context.params).path.join("/"), config);
+  return proxy(request, path, config);
 }
 export {
   handle as GET,

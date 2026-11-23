@@ -28,7 +28,12 @@ export const userSchema = z.object({
   roles: z.array(z.string()),
   permissions: z.array(z.string()),
   companies: z.array(
-    z.object({ id, name: z.string(), branch_id: id.nullable() }),
+    z.object({
+      id,
+      name: z.string(),
+      branch_id: id.nullable(),
+      currency: z.string().optional(),
+    }),
   ),
 });
 export type User = z.infer<typeof userSchema>;
