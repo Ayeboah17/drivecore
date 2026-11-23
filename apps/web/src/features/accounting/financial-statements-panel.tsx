@@ -6,6 +6,7 @@ import {
   CheckCircle2,
   Download,
   FileSpreadsheet,
+  Percent,
   Scale,
   TrendingUp,
   Waves,
@@ -16,6 +17,7 @@ import {
   getCashFlowStatement,
   getPnlStatement,
 } from "./service";
+import { getVatReturn } from "@/features/srs-parity/service";
 import { errorText } from "@/lib/api/client";
 import { formatMoneyMinor, type StatementLine } from "@/lib/api/contracts";
 import { downloadCsv } from "@/lib/csv";
@@ -37,7 +39,7 @@ import {
   DriveCoreDateRangePicker,
 } from "@/components/ui/drivecore-calendar";
 
-type StatementKind = "pnl" | "balance-sheet" | "cash-flow";
+type StatementKind = "pnl" | "balance-sheet" | "cash-flow" | "vat-return";
 
 function StatementSection({
   title,
@@ -145,6 +147,13 @@ export function FinancialStatementsPanel() {
     enabled: kind === "cash-flow",
   });
 
+  const vatQuery = useQuery({
+    queryKey: [...scope.key, "statements", "vat", branchId ?? "all", from, to],
+    queryFn: ({ signal }) =>
+      getVatReturn({ companyId: scope.companyId, branchId, from, to }, signal),
+    enabled: kind === "vat-return",
+  });
+
   function exportCsv() {
     if (kind === "pnl" && pnlQuery.data) {
       downloadCsv(
@@ -221,6 +230,20 @@ export function FinancialStatementsPanel() {
           ]),
         ],
       );
+    } else if (kind === "vat-return" && vatQuery.data) {
+      downloadCsv(
+        `drivecore-vat-return-co${scope.companyId}.csv`,
+        ["Metric", "Amount"],
+        [
+          ["Output VAT (AR Invoices)", (vatQuery.data.output_vat_minor / 100).toFixed(2)],
+          [
+            "Less: Credit Note VAT",
+            (vatQuery.data.credit_note_vat_minor / 100).toFixed(2),
+          ],
+          ["Input VAT (Supplier Bills)", (vatQuery.data.input_vat_minor / 100).toFixed(2)],
+          ["Net VAT Payable / (Refundable)", (vatQuery.data.net_vat_payable_minor / 100).toFixed(2)],
+        ],
+      );
     }
   }
 
@@ -237,6 +260,7 @@ export function FinancialStatementsPanel() {
               ["pnl", "Profit & Loss", TrendingUp],
               ["balance-sheet", "Balance Sheet", Scale],
               ["cash-flow", "Cash Flow", Waves],
+              ["vat-return", "VAT Return", Percent],
             ] as const
           ).map(([k, label, Icon]) => (
             <button
@@ -384,6 +408,153 @@ export function FinancialStatementsPanel() {
               totalMinor={bsQuery.data.total_equity_minor}
               currency={currency}
             />
+          </div>
+        ) : null
+      ) : kind === "vat-return" ? (
+        vatQuery.isLoading ? (
+          <DataTableSkeleton columns={4} rows={5} />
+        ) : vatQuery.isError ? (
+          <StatePanel title="Could not load VAT Return">
+            {errorText(vatQuery.error)}
+          </StatePanel>
+        ) : vatQuery.data ? (
+          <div className="space-y-5">
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              <div className="rounded-2xl border bg-surface p-4">
+                <p className="text-xs text-muted-foreground">
+                  Output VAT (AR invoices)
+                </p>
+                <p className="mt-1 font-mono text-lg font-extrabold tabular-nums">
+                  {formatMoneyMinor(vatQuery.data.output_vat_minor, currency)}
+                </p>
+              </div>
+              <div className="rounded-2xl border bg-surface p-4">
+                <p className="text-xs text-muted-foreground">
+                  Credit note VAT relief
+                </p>
+                <p className="mt-1 font-mono text-lg font-extrabold tabular-nums text-warning-foreground">
+                  -
+                  {formatMoneyMinor(
+                    vatQuery.data.credit_note_vat_minor,
+                    currency,
+                  )}
+                </p>
+              </div>
+              <div className="rounded-2xl border bg-surface p-4">
+                <p className="text-xs text-muted-foreground">
+                  Input VAT (AP bills)
+                </p>
+                <p className="mt-1 font-mono text-lg font-extrabold tabular-nums">
+                  {formatMoneyMinor(vatQuery.data.input_vat_minor, currency)}
+                </p>
+              </div>
+              <div className="rounded-2xl border bg-surface p-4">
+                <p className="text-xs text-muted-foreground">
+                  {vatQuery.data.net_vat_payable_minor >= 0
+                    ? "Net VAT payable"
+                    : "Net VAT refundable"}
+                </p>
+                <p
+                  className={`mt-1 font-mono text-lg font-extrabold tabular-nums ${
+                    vatQuery.data.net_vat_payable_minor >= 0
+                      ? "text-primary"
+                      : "text-success-foreground"
+                  }`}
+                >
+                  {vatQuery.data.net_vat_payable_minor < 0 ? "-" : ""}
+                  {formatMoneyMinor(
+                    Math.abs(vatQuery.data.net_vat_payable_minor),
+                    currency,
+                  )}
+                </p>
+              </div>
+            </div>
+
+            <DataTableFrame ariaLabel="VAT return summary breakdown">
+              <DataTable>
+                <DataTableHead>
+                  <tr>
+                    <DataTableHeaderCell>Component</DataTableHeaderCell>
+                    <DataTableHeaderCell>Source</DataTableHeaderCell>
+                    <DataTableHeaderCell align="right">
+                      Taxable / Net base
+                    </DataTableHeaderCell>
+                    <DataTableHeaderCell align="right">
+                      VAT amount
+                    </DataTableHeaderCell>
+                  </tr>
+                </DataTableHead>
+                <DataTableBody>
+                  <DataTableRow>
+                    <DataTableCell className="font-medium">
+                      Standard-rated sales (Output VAT)
+                    </DataTableCell>
+                    <DataTableCell className="text-xs text-muted-foreground">
+                      Issued AR customer invoices
+                    </DataTableCell>
+                    <DataTableCell align="right" numeric>
+                      {formatMoneyMinor(
+                        vatQuery.data.taxable_sales_minor,
+                        currency,
+                      )}
+                    </DataTableCell>
+                    <DataTableCell align="right" numeric>
+                      {formatMoneyMinor(vatQuery.data.output_vat_minor, currency)}
+                    </DataTableCell>
+                  </DataTableRow>
+                  <DataTableRow>
+                    <DataTableCell className="font-medium">
+                      Credit note VAT relief
+                    </DataTableCell>
+                    <DataTableCell className="text-xs text-muted-foreground">
+                      Posted AR credit notes
+                    </DataTableCell>
+                    <DataTableCell align="right" numeric>
+                      —
+                    </DataTableCell>
+                    <DataTableCell align="right" numeric>
+                      -
+                      {formatMoneyMinor(
+                        vatQuery.data.credit_note_vat_minor,
+                        currency,
+                      )}
+                    </DataTableCell>
+                  </DataTableRow>
+                  <DataTableRow>
+                    <DataTableCell className="font-medium">
+                      Recoverable purchases (Input VAT)
+                    </DataTableCell>
+                    <DataTableCell className="text-xs text-muted-foreground">
+                      Recorded AP supplier invoices
+                    </DataTableCell>
+                    <DataTableCell align="right" numeric>
+                      {formatMoneyMinor(
+                        vatQuery.data.taxable_purchases_minor,
+                        currency,
+                      )}
+                    </DataTableCell>
+                    <DataTableCell align="right" numeric>
+                      -
+                      {formatMoneyMinor(vatQuery.data.input_vat_minor, currency)}
+                    </DataTableCell>
+                  </DataTableRow>
+                  <DataTableRow>
+                    <td colSpan={3} className="px-3 py-2.5 text-xs font-bold">
+                      Net VAT {vatQuery.data.net_vat_payable_minor >= 0 ? "payable to revenue authority" : "refundable credit"}
+                    </td>
+                    <DataTableCell align="right" numeric>
+                      <strong>
+                        {vatQuery.data.net_vat_payable_minor < 0 ? "-" : ""}
+                        {formatMoneyMinor(
+                          Math.abs(vatQuery.data.net_vat_payable_minor),
+                          currency,
+                        )}
+                      </strong>
+                    </DataTableCell>
+                  </DataTableRow>
+                </DataTableBody>
+              </DataTable>
+            </DataTableFrame>
           </div>
         ) : null
       ) : cfQuery.isLoading ? (

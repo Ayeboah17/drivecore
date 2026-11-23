@@ -48,8 +48,10 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { DriveCoreSelect } from "@/components/ui/drivecore-select";
+import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
+import { acceptQuotation } from "@/features/srs-parity/service";
 import {
   CreateQuotationDialog,
   type QuotationDraftSeed,
@@ -442,6 +444,8 @@ export function QuotationDetailPage() {
   const [notice, setNotice] = useState("");
   const [pdfOpen, setPdfOpen] = useState(false);
   const [reviseOpen, setReviseOpen] = useState(false);
+  const [acceptOpen, setAcceptOpen] = useState(false);
+  const [acceptRef, setAcceptRef] = useState("");
 
   const query = useQuery({
     queryKey: [...scope.key, "quotations", quotationId],
@@ -576,6 +580,26 @@ export function QuotationDetailPage() {
     }
   }
 
+  async function handleCustomerAccept() {
+    if (busyAction) return;
+    setBusyAction(true);
+    setError(null);
+    try {
+      await acceptQuotation(
+        quote.id,
+        acceptRef.trim() || "Customer confirmed acceptance",
+      );
+      setAcceptOpen(false);
+      setAcceptRef("");
+      setNotice(`Customer acceptance recorded for Quotation #${quote.id}.`);
+      await refreshAll();
+    } catch (failure) {
+      setError(failure);
+    } finally {
+      setBusyAction(false);
+    }
+  }
+
   const pdfDoc: LivePdfDocument = {
     kind: "quotation",
     id: quote.id,
@@ -699,6 +723,23 @@ export function QuotationDetailPage() {
               </Button>
             </>
           ) : null}
+          {quote.status === "approved" &&
+          !quote.customer_accepted_at &&
+          canManage ? (
+            <Button
+              type="button"
+              variant="outline"
+              disabled={busyAction}
+              onClick={() => {
+                setAcceptRef("");
+                setAcceptOpen(true);
+              }}
+              className="gap-1.5"
+            >
+              <CheckCircle2 className="size-4" aria-hidden="true" />
+              Mark customer accepted
+            </Button>
+          ) : null}
           {quote.status === "approved" && canConvert ? (
             <Button
               type="button"
@@ -792,6 +833,22 @@ export function QuotationDetailPage() {
           {quote.discount_decision_notes ? (
             <p className="mt-1 text-xs text-muted-foreground">
               {quote.discount_decision_notes}
+            </p>
+          ) : null}
+        </section>
+      ) : null}
+
+      {quote.customer_accepted_at ? (
+        <section
+          role="status"
+          className="rounded-2xl border border-success/40 bg-success/10 px-4 py-3 text-sm text-success-foreground"
+        >
+          <p className="font-semibold">
+            Customer accepted · {fmtDate(quote.customer_accepted_at)}
+          </p>
+          {quote.customer_acceptance_ref ? (
+            <p className="mt-0.5 text-xs">
+              Reference: {quote.customer_acceptance_ref}
             </p>
           ) : null}
         </section>
@@ -991,6 +1048,55 @@ export function QuotationDetailPage() {
                   : decisionMode === "approve-discount"
                     ? "Confirm approval"
                     : "Confirm rejection"}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={acceptOpen}
+        onOpenChange={(open) => {
+          if (!open && !busyAction) setAcceptOpen(false);
+        }}
+      >
+        <DialogContent className="rounded-2xl p-card sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Record customer acceptance</DialogTitle>
+            <DialogDescription>
+              Log the customer’s signed quotation reference, LPO number, or
+              email confirmation for Quotation #{quote.id}.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-1.5">
+              <label htmlFor="quote-accept-ref" className="text-sm font-medium">
+                Customer reference / LPO #
+              </label>
+              <Input
+                id="quote-accept-ref"
+                placeholder="e.g. LPO-2026-4412 / Signed email"
+                value={acceptRef}
+                onChange={(e) => setAcceptRef(e.target.value)}
+              />
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                disabled={busyAction}
+                onClick={() => setAcceptOpen(false)}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                disabled={busyAction}
+                onClick={() => {
+                  void handleCustomerAccept();
+                }}
+              >
+                {busyAction ? "Saving…" : "Confirm acceptance"}
               </Button>
             </div>
           </div>

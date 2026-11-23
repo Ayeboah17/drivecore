@@ -27,6 +27,7 @@ import { Button } from "@/components/ui/button";
 import { DriveCoreSelect } from "@/components/ui/drivecore-select";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
+import { ApprovalThresholdsCard } from "@/features/srs-parity/approval-thresholds-card";
 
 function SettingsForm({
   initial,
@@ -365,21 +366,24 @@ export function FinancialSettingsPanel() {
   }
 
   return (
-    <SettingsForm
-      key={`${query.data.company_id}:${query.data.vat_rate_pct}:${query.data.discount_approval_threshold_pct}:${query.data.fuel_efficiency_unit}:${query.data.distance_unit}:${query.data.volume_unit}:${query.data.weight_unit}:${query.data.require_inspection_photos}:${query.data.require_2fa_for_privileged}`}
-      initial={query.data}
-      currency={query.data.currency || scope.company?.currency || "ZMW"}
-      canEdit={canEdit}
-      notice={notice}
-      onSaved={() => {
-        setNotice("Financial settings updated.");
-        void client.invalidateQueries({
-          queryKey: [...scope.key, "company-settings"],
-        });
-        void client.invalidateQueries({
-          queryKey: ["live", "company-settings", scope.companyId],
-        });
-      }}
-    />
+    <div className="space-y-6">
+      <SettingsForm
+        key={`${query.data.company_id}:${query.data.vat_rate_pct}:${query.data.discount_approval_threshold_pct}:${query.data.fuel_efficiency_unit}:${query.data.distance_unit}:${query.data.volume_unit}:${query.data.weight_unit}:${query.data.require_inspection_photos}:${query.data.require_2fa_for_privileged}`}
+        initial={query.data}
+        currency={query.data.currency || scope.company?.currency || "ZMW"}
+        canEdit={canEdit}
+        notice={notice}
+        onSaved={() => {
+          setNotice("Financial settings updated.");
+          void client.invalidateQueries({
+            queryKey: [...scope.key, "company-settings"],
+          });
+          void client.invalidateQueries({
+            queryKey: ["live", "company-settings", scope.companyId],
+          });
+        }}
+      />
+      <ApprovalThresholdsCard canEdit={canEdit} />
+    </div>
   );
 }

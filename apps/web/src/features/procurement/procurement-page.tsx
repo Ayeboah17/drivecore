@@ -8,6 +8,8 @@ import {
   Ban,
   Building2,
   CheckCircle2,
+  ClipboardList,
+  FileSpreadsheet,
   PackageCheck,
   Plus,
   Send,
@@ -19,6 +21,8 @@ import { useSession } from "@/features/auth/session-provider";
 import { useLiveContext } from "@/features/live/context";
 import { EntityDocumentsPanel } from "@/features/documents/documents-panel";
 import { CreateSupplierInvoiceDialog } from "@/features/accounting/payables-panel";
+import { RequisitionsPanel } from "@/features/srs-parity/requisitions-panel";
+import { SupplierStatementDialog } from "@/features/srs-parity/supplier-statement-dialog";
 import { listParts } from "@/features/inventory/service";
 import {
   createPurchaseOrder,
@@ -67,7 +71,7 @@ import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
 
-type ProcurementTab = "purchase-orders" | "suppliers";
+type ProcurementTab = "requisitions" | "purchase-orders" | "suppliers";
 
 const PO_STATUS_TONES: Record<PurchaseOrder["status"], StatusDotTone> = {
   draft: "neutral",
@@ -107,8 +111,13 @@ export function LiveProcurementPage() {
   const canManageSuppliers = !!user && can(user, "suppliers.manage");
   const currency = scope.company?.currency || "ZMW";
 
+  const rawTab = searchParams.get("tab");
   const activeTab: ProcurementTab =
-    searchParams.get("tab") === "suppliers" ? "suppliers" : "purchase-orders";
+    rawTab === "requisitions"
+      ? "requisitions"
+      : rawTab === "suppliers"
+        ? "suppliers"
+        : "purchase-orders";
   const rawQ = searchParams.get("q") ?? "";
   const status = searchParams.get("status") ?? "";
   const rawPage = Number(searchParams.get("page") ?? "1");
@@ -121,6 +130,10 @@ export function LiveProcurementPage() {
 
   const [createPoOpen, setCreatePoOpen] = useState(false);
   const [createSupplierOpen, setCreateSupplierOpen] = useState(false);
+  const [statementSupplier, setStatementSupplier] = useState<{
+    id: number;
+    name: string;
+  } | null>(null);
   const [notice, setNotice] = useState("");
   const branchId = scope.branch !== "all" ? scope.branch : undefined;
   const branchSuffix = `?branch=${encodeURIComponent(scope.branch)}`;
@@ -239,6 +252,29 @@ export function LiveProcurementPage() {
         <button
           type="button"
           role="tab"
+          aria-selected={activeTab === "requisitions"}
+          onClick={() =>
+            updateQuery({
+              tab: "requisitions",
+              status: "",
+              q: "",
+              sort: "",
+              dir: "",
+              page: 1,
+            })
+          }
+          className={`inline-flex items-center gap-1.5 rounded-xl px-3.5 py-2 text-xs font-semibold transition-colors ${
+            activeTab === "requisitions"
+              ? "bg-primary text-primary-foreground shadow-xs"
+              : "text-muted-foreground hover:bg-muted/80 hover:text-foreground"
+          }`}
+        >
+          <ClipboardList className="size-3.5" aria-hidden="true" />
+          Requisitions
+        </button>
+        <button
+          type="button"
+          role="tab"
           aria-selected={activeTab === "purchase-orders"}
           onClick={() =>
             updateQuery({
@@ -299,7 +335,9 @@ export function LiveProcurementPage() {
         </div>
       ) : null}
 
-      {activeTab === "purchase-orders" ? (
+      {activeTab === "requisitions" ? (
+        <RequisitionsPanel />
+      ) : activeTab === "purchase-orders" ? (
         <DataTableFrame
           ariaLabel="Purchase orders table"
           toolbar={
@@ -480,6 +518,13 @@ export function LiveProcurementPage() {
                     Email
                   </DataTableHeaderCell>
                   <DataTableHeaderCell>Phone</DataTableHeaderCell>
+                  <DataTableHeaderCell align="right">POs</DataTableHeaderCell>
+                  <DataTableHeaderCell align="right">
+                    Total spend
+                  </DataTableHeaderCell>
+                  <DataTableHeaderCell align="right">
+                    Open AP
+                  </DataTableHeaderCell>
                   <DataTableHeaderCell
                     sortKey="is_active"
                     activeSort={sort}
@@ -487,6 +532,9 @@ export function LiveProcurementPage() {
                     onSort={handleSort}
                   >
                     Status
+                  </DataTableHeaderCell>
+                  <DataTableHeaderCell align="right">
+                    Statement
                   </DataTableHeaderCell>
                 </tr>
               </DataTableHead>
@@ -502,10 +550,37 @@ export function LiveProcurementPage() {
                     </DataTableCell>
                     <DataTableCell>{s.email ?? "—"}</DataTableCell>
                     <DataTableCell>{s.phone ?? "—"}</DataTableCell>
+                    <DataTableCell align="right" numeric>
+                      {s.po_count ?? "—"}
+                    </DataTableCell>
+                    <DataTableCell align="right" numeric>
+                      {s.total_spend_minor != null
+                        ? formatMoneyMinor(s.total_spend_minor, currency)
+                        : "—"}
+                    </DataTableCell>
+                    <DataTableCell align="right" numeric>
+                      {s.open_ap_minor != null
+                        ? formatMoneyMinor(s.open_ap_minor, currency)
+                        : "—"}
+                    </DataTableCell>
                     <DataTableCell>
                       <StatusDotBadge tone={s.is_active ? "success" : "neutral"}>
                         {s.is_active ? "Active" : "Inactive"}
                       </StatusDotBadge>
+                    </DataTableCell>
+                    <DataTableCell align="right">
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        className="gap-1"
+                        onClick={() =>
+                          setStatementSupplier({ id: s.id, name: s.name })
+                        }
+                      >
+                        <FileSpreadsheet className="size-3.5" aria-hidden="true" />
+                        Statement
+                      </Button>
                     </DataTableCell>
                   </DataTableRow>
                 ))}
@@ -514,6 +589,15 @@ export function LiveProcurementPage() {
           )}
         </DataTableFrame>
       )}
+
+      <SupplierStatementDialog
+        supplierId={statementSupplier?.id ?? null}
+        supplierName={statementSupplier?.name ?? ""}
+        open={!!statementSupplier}
+        onOpenChange={(open) => {
+          if (!open) setStatementSupplier(null);
+        }}
+      />
 
       <CreatePurchaseOrderDialog
         open={createPoOpen}

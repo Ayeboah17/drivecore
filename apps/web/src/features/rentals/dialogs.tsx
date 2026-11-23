@@ -47,6 +47,7 @@ import {
 import { DriveCoreDateTimeField } from "@/components/ui/drivecore-calendar";
 import { DriveCoreSelect } from "@/components/ui/drivecore-select";
 import { Input } from "@/components/ui/input";
+import { DigitalSignaturePad } from "@/components/ui/signature-pad";
 import { Textarea } from "@/components/ui/textarea";
 import {
   listInspections,
@@ -1235,8 +1236,10 @@ function StartRentalForm({
   onCreated: (rental: Rental) => void;
 }) {
   const session = useSession();
+  const scope = useLiveContext();
   const formId = useId();
   const [driverId, setDriverId] = useState("");
+  const [deposit, setDeposit] = useState("");
   const [busy, setBusy] = useState(false);
   const [creatingDriver, setCreatingDriver] = useState(false);
   const [error, setError] = useState<unknown>(null);
@@ -1256,6 +1259,15 @@ function StartRentalForm({
       setError(new Error("Enter a valid positive driver ID."));
       return;
     }
+    let depositMinor: number | undefined;
+    if (deposit.trim()) {
+      const parsed = parseMajorToMinor(deposit);
+      if (parsed === null || parsed < 0) {
+        setError(new Error("Enter a valid security deposit amount (e.g. 1500.00)."));
+        return;
+      }
+      depositMinor = parsed;
+    }
     lock.current = true;
     setBusy(true);
     onBusyChange(true);
@@ -1267,6 +1279,9 @@ function StartRentalForm({
           reservation_id: reservation.id,
           ...(driverId.trim()
             ? { driver_user_id: Number(driverId.trim()) }
+            : {}),
+          ...(depositMinor && depositMinor > 0
+            ? { security_deposit_minor: depositMinor }
             : {}),
         },
         controller.current.signal,
@@ -1306,6 +1321,18 @@ function StartRentalForm({
           }}
           onChange={setDriverId}
         />
+        <div className="space-y-1.5">
+          <label htmlFor={`${formId}-deposit`} className="text-sm font-medium">
+            Security deposit ({scope.company?.currency || "ZMW"}, optional)
+          </label>
+          <Input
+            id={`${formId}-deposit`}
+            inputMode="decimal"
+            placeholder="0.00"
+            value={deposit}
+            onChange={(e) => setDeposit(e.target.value)}
+          />
+        </div>
       </fieldset>
       <FormErrorBanner
         error={error}
@@ -1429,6 +1456,7 @@ function HandoverReturnForm({
   });
   const [signatoryName, setSignatoryName] = useState("");
   const [customerAck, setCustomerAck] = useState(false);
+  const [signatureDataUrl, setSignatureDataUrl] = useState("");
   const [notes, setNotes] = useState("");
   const [extraCharge, setExtraCharge] = useState("");
   const [extraChargeDesc, setExtraChargeDesc] = useState("");
@@ -1547,7 +1575,8 @@ function HandoverReturnForm({
             ...checks,
             damage_notes: notes.trim(),
             customer_acknowledged_by: signatoryName.trim() || null,
-            customer_acknowledged: customerAck,
+            customer_acknowledged: customerAck || !!signatureDataUrl,
+            signature_data_url: signatureDataUrl || null,
           },
         },
         controller.current.signal,
@@ -1740,9 +1769,14 @@ function HandoverReturnForm({
                 />
                 <span>Customer acknowledges condition &amp; fuel reading</span>
               </label>
-              <p className="text-[11px] text-muted-foreground">
-                Touch/canvas signature pad will be added in a future update.
-              </p>
+            </div>
+            <div className="sm:col-span-2">
+              <DigitalSignaturePad
+                label="Customer / driver digital signature (optional)"
+                value={signatureDataUrl}
+                onChange={setSignatureDataUrl}
+                disabled={busy}
+              />
             </div>
           </div>
         </div>

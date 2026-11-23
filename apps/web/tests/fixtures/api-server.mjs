@@ -23,6 +23,9 @@ let bankReconciliations = new Map();
 let fixedAssets = new Map();
 let depreciationEntries = new Map();
 let leads = new Map();
+let incidents = new Map();
+let purchaseRequisitions = new Map();
+let approvalThresholds = new Map();
 let twoFactorState = new Map();
 let twoFactorChallenges = new Map();
 let customers = new Map();
@@ -518,6 +521,9 @@ function reset() {
   fixedAssets = new Map();
   depreciationEntries = new Map();
   leads = new Map();
+  incidents = new Map();
+  purchaseRequisitions = new Map();
+  approvalThresholds = new Map();
   twoFactorState = new Map();
   twoFactorChallenges = new Map();
   branches = new Map([
@@ -771,6 +777,302 @@ function reset() {
   ]);
 }
 reset();
+
+function defaultApprovalThresholds() {
+  return [
+    { type: "discount", threshold_minor: null, threshold_pct: 10, approver_role: "finance-manager", is_active: true },
+    { type: "purchase_order", threshold_minor: 500000, threshold_pct: null, approver_role: "finance-manager", is_active: true },
+    { type: "expense", threshold_minor: 250000, threshold_pct: null, approver_role: "finance-manager", is_active: true },
+    { type: "credit_limit", threshold_minor: 1000000, threshold_pct: null, approver_role: "credit-control-manager", is_active: true },
+    { type: "credit_note", threshold_minor: 100000, threshold_pct: null, approver_role: "finance-manager", is_active: true },
+    { type: "vehicle_repair", threshold_minor: 300000, threshold_pct: null, approver_role: "maintenance-manager", is_active: true },
+    { type: "vehicle_disposal", threshold_minor: 0, threshold_pct: null, approver_role: "ceo", is_active: true },
+  ];
+}
+
+function seedDemo() {
+  reset();
+  const now = Date.now();
+  const iso = (hoursOffset) => new Date(now + hoursOffset * 3600000).toISOString();
+  const day = (daysOffset) => new Date(now + daysOffset * 86400000).toISOString().slice(0, 10);
+  const demoBase = { company_id: 1, branch_id: 2, created_at: iso(-240), updated_at: iso(-12) };
+
+  companies = new Map([
+    [1, { id: 1, name: "DriveCore Solutions Ghana Ltd", currency: "GHS" }],
+  ]);
+  branches = new Map([
+    [2, { id: 2, company_id: 1, name: "Accra Airport HQ" }],
+    [5, { id: 5, company_id: 1, name: "Kumasi Branch" }],
+  ]);
+  companySettings = new Map([
+    [
+      1,
+      {
+        company_id: 1,
+        currency: "GHS",
+        vat_rate_pct: 15,
+        discount_approval_threshold_pct: 10,
+        require_inspection_photos: false,
+        distance_unit: "km",
+        volume_unit: "l",
+        fuel_efficiency_unit: "l_per_100km",
+        weight_unit: "kg",
+        require_2fa_for_privileged: false,
+      },
+    ],
+  ]);
+  approvalThresholds.set(1, defaultApprovalThresholds());
+
+  managedUsers = new Map([
+    [1, { id: 1, name: "Kofi Mensah (System Admin)", email: "sysadmin@drivecore.demo", is_active: true, is_platform_admin: false, roles: ["system-administrator"], memberships: [{ company_id: 1, branch_id: null }] }],
+    [2, { id: 2, name: "Yaw Boateng (Fleet Driver)", email: "activedriver@drivecore.demo", is_active: true, is_platform_admin: false, roles: ["driver"], memberships: [{ company_id: 1, branch_id: 2 }] }],
+    [3, { id: 3, name: "Ama Osei (Operations Mgr)", email: "opsmanager@drivecore.demo", is_active: true, is_platform_admin: false, roles: ["operations-manager"], memberships: [{ company_id: 1, branch_id: null }] }],
+    [4, { id: 4, name: "Efua Appiah (Finance Mgr)", email: "financemanager@drivecore.demo", is_active: true, is_platform_admin: false, roles: ["finance-manager"], memberships: [{ company_id: 1, branch_id: null }] }],
+    [5, { id: 5, name: "Kojo Tetteh (Lead Mechanic)", email: "mechanic@drivecore.demo", is_active: true, is_platform_admin: false, roles: ["mechanic-technician"], memberships: [{ company_id: 1, branch_id: 2 }] }],
+    [6, { id: 6, name: "Nana Akufo (CEO)", email: "ceo@drivecore.demo", is_active: true, is_platform_admin: false, roles: ["ceo"], memberships: [{ company_id: 1, branch_id: null }] }],
+    [7, { id: 7, name: "Abena Darko (Business Accounts)", email: "businessaccounts@drivecore.demo", is_active: true, is_platform_admin: false, roles: ["business-accounts-manager"], memberships: [{ company_id: 1, branch_id: null }] }],
+    [8, { id: 8, name: "Akua Sarpong (HR / Admin)", email: "hradmin@drivecore.demo", is_active: true, is_platform_admin: false, roles: ["hr-admin-manager"], memberships: [{ company_id: 1, branch_id: null }] }],
+    [9, { id: 9, name: "Kwabena Owusu (Maintenance Mgr)", email: "maintmanager@drivecore.demo", is_active: true, is_platform_admin: false, roles: ["maintenance-manager"], memberships: [{ company_id: 1, branch_id: null }] }],
+    [10, { id: 10, name: "Esi Koomson (Credit Control)", email: "creditcontrol@drivecore.demo", is_active: true, is_platform_admin: false, roles: ["credit-control-manager"], memberships: [{ company_id: 1, branch_id: null }] }],
+  ]);
+
+  customers = new Map([
+    [10, { ...demoBase, id: 10, name: "GoldFields Mining Services Ltd", type: "corporate", email: "fleet@goldfields.demo", phone: "+233 30 274 1100", company_registration: "CS-2016-88412", tin: "C0019283741", contact_person_name: "Daniel Asante", contact_person_phone: "+233 24 411 2200", billing_address: "Plot 14 Liberation Rd, Airport City, Accra", credit_limit_minor: 5000000, payment_terms_days: 30 }],
+    [11, { ...demoBase, id: 11, name: "Atlantic Energy Ghana Ltd", type: "corporate", email: "procurement@atlanticenergy.demo", phone: "+233 30 278 4410", company_registration: "CS-2019-41029", tin: "C0044128910", contact_person_name: "Grace Owusu", contact_person_phone: "+233 20 882 9911", billing_address: "8 Ridge Towers, North Ridge, Accra", credit_limit_minor: 3500000, payment_terms_days: 30 }],
+    [12, { ...demoBase, id: 12, branch_id: 5, name: "Ashanti Infrastructure Consult", type: "corporate", email: "ops@ashanticonsult.demo", phone: "+233 32 204 5100", company_registration: "CS-2021-19044", tin: "C0098123114", contact_person_name: "Samuel Frimpong", contact_person_phone: "+233 24 900 3312", billing_address: "22 Harper Road, Adum, Kumasi", credit_limit_minor: 2000000, payment_terms_days: 15 }],
+    [13, { ...demoBase, id: 13, name: "Kwame Nkrumah-Mensah", type: "individual", email: "kwame.mensah@demo.gh", phone: "+233 24 555 0192", id_number: "GHA-719283741-2", driver_licence_number: "DL-ACC-2024-9910", driver_licence_expires_at: day(420), billing_address: "18 Cantonments Crescent, Accra" }],
+    [14, { ...demoBase, id: 14, name: "Abena Serwaa Boateng", type: "individual", email: "abena.boateng@demo.gh", phone: "+233 20 612 8840", id_number: "GHA-882910344-7", driver_licence_number: "DL-ACC-2025-4418", driver_licence_expires_at: day(20), billing_address: "42 East Legon Hills, Accra" }],
+  ]);
+
+  vehicles = new Map([
+    [10, { ...demoBase, id: 10, registration: "GW-4821-24", vin: "JTEBU3FJ7PK294821", make: "Toyota", model: "Land Cruiser Prado", year: 2024, category: "suv", fuel_type: "diesel", transmission: "automatic", current_location: "Accra Airport Bay 1", odometer: 28450, odometer_unit: "km", daily_rate_minor: 185000, functions: ["awd_4x4", "automatic", "gps_tracker", "chauffeur_ready"], status: "available", acquisition_date: "2024-03-15", acquisition_cost_minor: 85000000, financing_type: "loan", financing_provider: "Stanbic Asset Finance", financing_monthly_minor: 1950000, financing_end_date: "2028-03-15", current_book_value_minor: 68000000, residual_value_minor: 25000000, insurance_provider: "Enterprise Insurance", insurance_policy_number: "ENT-COMP-2026-4821", insurance_expires_at: day(210), roadworthy_expires_at: day(18), licence_expires_at: day(145) }],
+    [11, { ...demoBase, id: 11, registration: "GE-9104-23", vin: "MROHA3CD102199104", make: "Toyota", model: "Hilux Double Cab 4x4", year: 2023, category: "pickup_4x4", fuel_type: "diesel", transmission: "manual", current_location: "GoldFields Tarkwa Site", odometer: 64210, odometer_unit: "km", daily_rate_minor: 145000, functions: ["awd_4x4", "mining_spec", "gps_tracker"], status: "rented", acquisition_date: "2023-06-10", acquisition_cost_minor: 54000000, financing_type: "finance_lease", financing_provider: "Ecobank Leasing", financing_monthly_minor: 1250000, financing_end_date: "2027-06-10", current_book_value_minor: 39600000, residual_value_minor: 15000000, insurance_provider: "SIC Insurance", insurance_policy_number: "SIC-FLT-9104", insurance_expires_at: day(160), roadworthy_expires_at: day(95), licence_expires_at: day(160) }],
+    [12, { ...demoBase, id: 12, registration: "GR-3310-25", vin: "W1KZF8DB9SA033310", make: "Mercedes-Benz", model: "E 300 Executive", year: 2025, category: "luxury", fuel_type: "petrol", transmission: "automatic", current_location: "Accra Airport VIP Lounge", odometer: 11200, odometer_unit: "km", daily_rate_minor: 260000, functions: ["automatic", "chauffeur_ready", "airport_vip"], status: "available", acquisition_date: "2025-01-20", acquisition_cost_minor: 112000000, financing_type: "cash_purchase", financing_provider: null, financing_monthly_minor: null, financing_end_date: null, current_book_value_minor: 98500000, residual_value_minor: 40000000, insurance_provider: "Enterprise Insurance", insurance_policy_number: "ENT-VIP-3310", insurance_expires_at: day(310), roadworthy_expires_at: day(290), licence_expires_at: day(310) }],
+    [13, { ...demoBase, id: 13, registration: "GT-7742-22", vin: "JTFSX23P206077742", make: "Toyota", model: "HiAce Commuter 15-Seater", year: 2022, category: "van_minibus", fuel_type: "diesel", transmission: "manual", current_location: "Accra Main Workshop Bay 2", odometer: 118400, odometer_unit: "km", daily_rate_minor: 165000, functions: ["passenger_van", "ac_dual_zone"], status: "maintenance", acquisition_date: "2022-05-01", acquisition_cost_minor: 49000000, financing_type: "cash_purchase", financing_provider: null, financing_monthly_minor: null, financing_end_date: null, current_book_value_minor: 29400000, residual_value_minor: 12000000, insurance_provider: "Hollard Ghana", insurance_policy_number: "HOL-BUS-7742", insurance_expires_at: day(-5), roadworthy_expires_at: day(45), licence_expires_at: day(80) }],
+    [14, { ...demoBase, id: 14, branch_id: 5, registration: "AS-5518-24", vin: "JTDKBRFU9R3055518", make: "Toyota", model: "Corolla Cross Hybrid", year: 2024, category: "suv", fuel_type: "hybrid", transmission: "cvt", current_location: "Kumasi Branch Yard", odometer: 19300, odometer_unit: "km", daily_rate_minor: 110000, functions: ["automatic", "fuel_saver", "gps_tracker"], status: "available", acquisition_date: "2024-08-01", acquisition_cost_minor: 42000000, financing_type: "operating_lease", financing_provider: "CalBank Fleet", financing_monthly_minor: 980000, financing_end_date: "2027-08-01", current_book_value_minor: 37800000, residual_value_minor: 14000000, insurance_provider: "Enterprise Insurance", insurance_policy_number: "ENT-KUM-5518", insurance_expires_at: day(240), roadworthy_expires_at: day(210), licence_expires_at: day(240) }],
+    [15, { ...demoBase, id: 15, registration: "GW-6090-23", vin: "6FPPXXMJ2PN606090", make: "Ford", model: "Ranger Wildtrak 4x4", year: 2023, category: "pickup_4x4", fuel_type: "diesel", transmission: "automatic", current_location: "Bodyshop Yard", odometer: 51800, odometer_unit: "km", daily_rate_minor: 160000, functions: ["awd_4x4", "automatic", "tow_bar"], status: "awaiting_repair", acquisition_date: "2023-09-12", acquisition_cost_minor: 62000000, financing_type: "loan", financing_provider: "Stanbic Asset Finance", financing_monthly_minor: 1420000, financing_end_date: "2027-09-12", current_book_value_minor: 48200000, residual_value_minor: 18000000, insurance_provider: "Enterprise Insurance", insurance_policy_number: "ENT-4X4-6090", insurance_expires_at: day(120), roadworthy_expires_at: day(90), licence_expires_at: day(120) }],
+  ]);
+
+  rateCards = new Map([
+    [100, { id: 100, company_id: 1, branch_id: 2, customer_id: 10, customer_name: "GoldFields Mining Services Ltd", name: "Mining Spec 4x4 Corporate Tariff", vehicle_category: "pickup_4x4", daily_rate_minor: 145000, weekly_rate_minor: 920000, monthly_rate_minor: 3600000, chauffeur_daily_minor: 35000, daily_km_limit: 250, excess_km_rate_minor: 450, security_deposit_minor: 500000, late_return_hourly_minor: 25000, fuel_policy: "full_to_full", is_active: true, created_at: iso(-200) }],
+    [101, { id: 101, company_id: 1, branch_id: 2, customer_id: null, customer_name: null, name: "Executive VIP Airport Chauffeur", vehicle_category: "luxury", daily_rate_minor: 260000, weekly_rate_minor: 1650000, monthly_rate_minor: 6200000, chauffeur_daily_minor: 45000, daily_km_limit: 200, excess_km_rate_minor: 650, security_deposit_minor: 1000000, late_return_hourly_minor: 40000, fuel_policy: "full_to_full", is_active: true, created_at: iso(-180) }],
+  ]);
+
+  leads = new Map([
+    [110, { id: 110, company_id: 1, branch_id: 2, contact_name: "Dr. Michael Addo", company_name: "West Africa Infrastructure Partners", email: "m.addo@waip.demo", phone: "+233 24 881 4400", source: "corporate_rfq", stage: "qualified", estimated_value_minor: 4200000, vehicle_requirements: "3x Land Cruiser Prado + 1x HiAce for 14-day project site tour", assigned_to_user_id: 7, assigned_to_name: "Abena Darko (Business Accounts)", customer_id: null, quotation_id: null, lost_reason: null, notes: "Requires mining-spec safety kit and vetted chauffeurs.", created_at: iso(-72), updated_at: iso(-10) }],
+    [111, { id: 111, company_id: 1, branch_id: 2, contact_name: "Sophia Mensah", company_name: "Accra Diplomatic Summit Secretariat", email: "protocol@summit.demo", phone: "+233 20 912 3300", source: "referral", stage: "proposal_sent", estimated_value_minor: 6500000, vehicle_requirements: "2x Mercedes E-Class Executive + 2x Prado VIP", assigned_to_user_id: 7, assigned_to_name: "Abena Darko (Business Accounts)", customer_id: 11, quotation_id: 120, lost_reason: null, notes: "Proposal submitted; awaiting protocol director sign-off.", created_at: iso(-120), updated_at: iso(-6) }],
+    [112, { id: 112, company_id: 1, branch_id: 5, contact_name: "Isaac Ofori", company_name: "Kumasi AgroLogistics", email: "iofori@agrologistics.demo", phone: "+233 24 300 7721", source: "website", stage: "new", estimated_value_minor: 1800000, vehicle_requirements: "2x Hilux 4x4 for regional audit", assigned_to_user_id: 7, assigned_to_name: "Abena Darko (Business Accounts)", customer_id: null, quotation_id: null, lost_reason: null, notes: "Requested call back tomorrow morning.", created_at: iso(-18), updated_at: iso(-18) }],
+  ]);
+
+  quotations = new Map([
+    [120, { id: 120, company_id: 1, branch_id: 2, customer_id: 11, created_by: 7, status: "approved", starts_at: iso(48), ends_at: iso(168), rental_days: 5, subtotal_minor: 2225000, discount_pct: 5, discount_minor: 111250, vat_rate_pct: 15, vat_minor: 317063, total_minor: 2430813, discount_status: "not_required", discount_decided_by: null, discount_decided_by_name: null, discount_decided_at: null, discount_decision_notes: null, customer_accepted_at: null, customer_acceptance_ref: null, notes: "VIP delegation airport transfer & conference fleet.", vehicles: [{ vehicle_id: 10, registration: "GW-4821-24", make: "Toyota", model: "Land Cruiser Prado", daily_rate_minor: 185000, line_subtotal_minor: 925000, reservation_id: null }, { vehicle_id: 12, registration: "GR-3310-25", make: "Mercedes-Benz", model: "E 300 Executive", daily_rate_minor: 260000, line_subtotal_minor: 1300000, reservation_id: null }], reservation_ids: [], created_at: iso(-36), updated_at: iso(-12) }],
+    [121, { id: 121, company_id: 1, branch_id: 2, customer_id: 10, created_by: 7, status: "pending_approval", starts_at: iso(72), ends_at: iso(312), rental_days: 10, subtotal_minor: 1850000, discount_pct: 18, discount_minor: 333000, vat_rate_pct: 15, vat_minor: 227550, total_minor: 1744550, discount_status: "pending", discount_decided_by: null, discount_decided_by_name: null, discount_decided_at: null, discount_decision_notes: null, customer_accepted_at: null, customer_acceptance_ref: null, notes: "Long-term corporate loyalty discount request (18%).", vehicles: [{ vehicle_id: 10, registration: "GW-4821-24", make: "Toyota", model: "Land Cruiser Prado", daily_rate_minor: 185000, line_subtotal_minor: 1850000, reservation_id: null }], reservation_ids: [], created_at: iso(-20), updated_at: iso(-20) }],
+  ]);
+
+  reservations = new Map([
+    [500, { ...demoBase, id: 500, customer_id: 10, vehicle_id: 10, created_by: 3, starts_at: iso(2), ends_at: iso(74), status: "confirmed" }],
+    [501, { ...demoBase, id: 501, customer_id: 11, vehicle_id: 11, created_by: 3, starts_at: iso(-72), ends_at: iso(48), status: "confirmed" }],
+    [502, { ...demoBase, id: 502, customer_id: 13, vehicle_id: 12, created_by: 3, starts_at: iso(-168), ends_at: iso(-96), status: "completed" }],
+  ]);
+
+  rentals = new Map([
+    [600, { ...demoBase, id: 600, reservation_id: 501, vehicle_id: 11, driver_user_id: 2, status: "active", handed_over_at: iso(-70), returned_at: null, handover_odometer: 63800, return_odometer: null, handover_notes: "Full tank, mining beacon & spare tyre verified.", return_notes: null, security_deposit_minor: 500000, deposit_status: "held" }],
+    [601, { ...demoBase, id: 601, reservation_id: 500, vehicle_id: 10, driver_user_id: 2, status: "draft", handed_over_at: null, returned_at: null, handover_odometer: null, return_odometer: null, handover_notes: null, return_notes: null, security_deposit_minor: 350000, deposit_status: "held" }],
+    [602, { ...demoBase, id: 602, reservation_id: 502, vehicle_id: 12, driver_user_id: 2, status: "returned", handed_over_at: iso(-167), returned_at: iso(-97), handover_odometer: 10720, return_odometer: 11200, handover_notes: "Clean VIP handover at Kotoka Terminal 3.", return_notes: "Returned clean with full tank.", security_deposit_minor: 1000000, deposit_status: "refunded" }],
+  ]);
+
+  inspections = new Map([
+    [130, { id: 130, company_id: 1, branch_id: 2, rental_id: 600, vehicle_id: 11, type: "handover", odometer: 63800, fuel_level_pct: 100, exterior_ok: true, interior_ok: true, tyres_ok: true, spare_tyre_ok: true, tools_ok: true, accessories_ok: true, documents_ok: true, damage_notes: "No pre-existing dents.", customer_acknowledged_by: "Grace Owusu", customer_acknowledged: true, inspected_by: 3, inspected_by_name: "Ama Osei (Operations Mgr)", created_at: iso(-70) }],
+  ]);
+
+  workOrders = new Map([
+    [140, { id: 140, company_id: 1, branch_id: 2, vehicle_id: 13, created_by: 9, assigned_to: 5, title: "120,000 km Major Service & Brake Overhaul", description: "Replace front & rear brake pads, engine oil, oil filter, and inspect suspension bushings.", status: "in_progress", priority: "high", due_at: day(3), started_at: iso(-14), completed_at: null, odometer_at_service: 118400, labor_cost_minor: 125000, parts_cost_minor: 185000, total_cost_minor: 310000, notes: "Parts issued from Accra store.", items: [{ id: 1, part_id: 200, sku: "FLT-TOY-001", name: "Toyota Genuine Oil Filter", quantity: 2, unit_cost_minor: 25000, line_total_minor: 50000 }, { id: 2, part_id: 201, sku: "BRK-PAD-004", name: "Heavy-Duty Ceramic Brake Pads", quantity: 1, unit_cost_minor: 135000, line_total_minor: 135000 }], created_at: iso(-24), updated_at: iso(-6) }],
+    [141, { id: 141, company_id: 1, branch_id: 2, vehicle_id: 10, created_by: 9, assigned_to: 5, title: "30,000 km Routine Oil & Filter Service", description: "Synthetic 5W-30 oil change and multi-point safety inspection.", status: "completed", priority: "normal", due_at: day(-10), started_at: iso(-260), completed_at: iso(-250), odometer_at_service: 27900, labor_cost_minor: 65000, parts_cost_minor: 55000, total_cost_minor: 120000, notes: "Passed road safety test.", items: [], created_at: iso(-270), updated_at: iso(-250) }],
+  ]);
+
+  incidents = new Map([
+    [150, { id: 150, company_id: 1, branch_id: 2, vehicle_id: 15, vehicle_registration: "GW-6090-23", rental_id: null, driver_name: "Yaw Boateng (Fleet Driver)", incident_type: "accident", severity: "moderate", occurred_at: day(-4), location: "Tema Motorway Km 11", description: "Rear-bumper impact in rain traffic; taillight assembly cracked.", insurance_claim_number: "CLM-ENT-2026-0842", estimated_cost_minor: 480000, work_order_id: null, status: "assessing", created_at: iso(-96) }],
+  ]);
+
+  maintenanceSchedules = new Map([
+    [160, { id: 160, company_id: 1, branch_id: 2, vehicle_id: 11, service_name: "10,000 km Engine Oil & Filter", interval_km: 10000, interval_days: 180, last_service_odometer: 53000, last_service_at: day(-140), next_due_at: day(40), is_active: true }],
+    [161, { id: 161, company_id: 1, branch_id: 2, vehicle_id: 10, service_name: "Tyre Rotation & Alignment", interval_km: 15000, interval_days: 180, last_service_odometer: 14000, last_service_at: day(-110), next_due_at: day(70), is_active: true }],
+  ]);
+
+  vehicleComponents = new Map([
+    [170, { id: 170, company_id: 1, branch_id: 2, vehicle_id: 10, component_type: "tyre", serial_number: "MCH-AT-2024-8841", brand_model: "Michelin LTX Trail 265/65R17", position: "FL", installed_at: day(-150), installed_odometer: 18200, warranty_expires_at: day(580), status: "active", replaced_at: null, notes: "Tread depth 7.5mm at last check." }],
+    [171, { id: 171, company_id: 1, branch_id: 2, vehicle_id: 11, component_type: "battery", serial_number: "VRT-HD-2025-1102", brand_model: "Varta Silver Dynamic 95Ah", position: "Main", installed_at: day(-90), installed_odometer: 55100, warranty_expires_at: day(640), status: "active", replaced_at: null, notes: "Heavy-duty mining spec." }],
+  ]);
+
+  fuelTransactions = new Map([
+    [180, { id: 180, company_id: 1, branch_id: 2, vehicle_id: 10, vehicle_registration: "GW-4821-24", driver_user_id: 2, driver_name: "Yaw Boateng (Fleet Driver)", rental_id: null, expense_id: 260, fuel_date: day(-12), station: "Shell Airport Bypass", litres: 68, amount_minor: 98600, odometer: 27950, payment_method: "fuel_card", km_since_last: null, litres_per_100km: null, cost_per_km_minor: null, is_abnormal: false, created_at: iso(-288) }],
+    [181, { id: 181, company_id: 1, branch_id: 2, vehicle_id: 10, vehicle_registration: "GW-4821-24", driver_user_id: 2, driver_name: "Yaw Boateng (Fleet Driver)", rental_id: null, expense_id: 261, fuel_date: day(-3), station: "GOIL Spintex Rd", litres: 62, amount_minor: 89900, odometer: 28450, payment_method: "fuel_card", km_since_last: 500, litres_per_100km: 12.4, cost_per_km_minor: 180, is_abnormal: false, created_at: iso(-72) }],
+    [182, { id: 182, company_id: 1, branch_id: 2, vehicle_id: 11, vehicle_registration: "GE-9104-23", driver_user_id: 2, driver_name: "Yaw Boateng (Fleet Driver)", rental_id: 600, expense_id: 262, fuel_date: day(-1), station: "TotalEnergies Takoradi", litres: 78, amount_minor: 113100, odometer: 64210, payment_method: "fuel_card", km_since_last: 190, litres_per_100km: 41.05, cost_per_km_minor: 595, is_abnormal: true, created_at: iso(-20) }],
+  ]);
+
+  parts = new Map([
+    [200, { id: 200, company_id: 1, branch_id: 2, sku: "FLT-TOY-001", name: "Toyota Genuine Oil Filter", category: "Filters", unit: "pcs", quantity_on_hand: 24, reorder_level: 10, unit_cost_minor: 25000, created_at: iso(-300), updated_at: iso(-12) }],
+    [201, { id: 201, company_id: 1, branch_id: 2, sku: "BRK-PAD-004", name: "Heavy-Duty Ceramic Brake Pads", category: "Brakes", unit: "set", quantity_on_hand: 3, reorder_level: 6, unit_cost_minor: 135000, created_at: iso(-300), updated_at: iso(-12) }],
+    [202, { id: 202, company_id: 1, branch_id: 2, sku: "TYR-AT-265", name: "Michelin LTX All-Terrain 265/65R17", category: "Tyres", unit: "pcs", quantity_on_hand: 8, reorder_level: 4, unit_cost_minor: 215000, created_at: iso(-300), updated_at: iso(-12) }],
+  ]);
+
+  suppliers = new Map([
+    [210, { id: 210, company_id: 1, name: "AutoParts Ghana Ltd", email: "orders@autopartsgh.demo", phone: "+233 30 222 8190", address: "Graphic Road Industrial Area, Accra", is_active: true, created_at: iso(-400), updated_at: iso(-400) }],
+    [211, { id: 211, company_id: 1, name: "Michelin West Africa Distributors", email: "fleet@michelinwa.demo", phone: "+233 30 276 4401", address: "Tema Harbour Commercial Zone", is_active: true, created_at: iso(-400), updated_at: iso(-400) }],
+  ]);
+
+  purchaseOrders = new Map([
+    [220, { id: 220, company_id: 1, branch_id: 2, supplier_id: 210, created_by: 9, approved_by: 4, po_number: "PO-00220", status: "received", expected_at: day(-5), received_at: iso(-120), subtotal_minor: 675000, total_minor: 675000, notes: "Quarterly brake pad & filter restock.", items: [{ id: 1, part_id: 201, sku: "BRK-PAD-004", description: "Heavy-Duty Ceramic Brake Pads", quantity: 5, unit_cost_minor: 135000, line_total_minor: 675000 }], created_at: iso(-200), updated_at: iso(-120) }],
+    [221, { id: 221, company_id: 1, branch_id: 2, supplier_id: 211, created_by: 9, approved_by: null, po_number: "PO-00221", status: "submitted", expected_at: day(7), received_at: null, subtotal_minor: 860000, total_minor: 860000, notes: "4x Michelin tyres for Prado & Hilux fleet.", items: [{ id: 1, part_id: 202, sku: "TYR-AT-265", description: "Michelin LTX All-Terrain 265/65R17", quantity: 4, unit_cost_minor: 215000, line_total_minor: 860000 }], created_at: iso(-30), updated_at: iso(-30) }],
+  ]);
+
+  purchaseRequisitions = new Map([
+    [230, { id: 230, company_id: 1, branch_id: 2, requisition_number: "REQ-00230", department: "Workshop Maintenance", requester_id: 9, requester_name: "Kwabena Owusu (Maintenance Mgr)", approver_id: null, approver_name: null, supplier_id: 210, supplier_name: "AutoParts Ghana Ltd", needed_by: day(5), justification: "Replenish low-stock brake pads and diagnostic scanner cables.", status: "pending", estimated_total_minor: 540000, items: [{ description: "Heavy-Duty Ceramic Brake Pads (set)", quantity: 4, estimated_unit_minor: 135000 }], purchase_order_id: null, created_at: iso(-18) }],
+    [231, { id: 231, company_id: 1, branch_id: 2, requisition_number: "REQ-00231", department: "Fleet Operations", requester_id: 3, requester_name: "Ama Osei (Operations Mgr)", approver_id: 4, approver_name: "Efua Appiah (Finance Mgr)", supplier_id: 211, supplier_name: "Michelin West Africa Distributors", needed_by: day(10), justification: "Spare tyre allocation for Kumasi branch vehicles.", status: "approved", estimated_total_minor: 430000, items: [{ description: "Michelin LTX All-Terrain 265/65R17", quantity: 2, estimated_unit_minor: 215000 }], purchase_order_id: null, created_at: iso(-40) }],
+  ]);
+
+  invoices = new Map([
+    [240, { id: 240, company_id: 1, branch_id: 2, customer_id: 10, rental_id: null, created_by: 4, invoice_number: "INV-00240", status: "issued", due_at: iso(-120), issued_at: iso(-600), voided_at: null, discount_pct: 0, discount_minor: 0, subtotal_minor: 1450000, vat_rate_pct: 15, vat_minor: 217500, total_minor: 1667500, notes: "Monthly 4x4 Mining Site Retainer — October", lines: [{ id: 1, description: "Toyota Hilux 4x4 Monthly Retainer (10 days)", quantity: 10, unit_price_minor: 145000, line_total_minor: 1450000 }], created_at: iso(-600), updated_at: iso(-120) }],
+    [241, { id: 241, company_id: 1, branch_id: 2, customer_id: 13, rental_id: 602, created_by: 4, invoice_number: "INV-00241", status: "issued", due_at: iso(168), issued_at: iso(-90), voided_at: null, discount_pct: 0, discount_minor: 0, subtotal_minor: 780000, vat_rate_pct: 15, vat_minor: 117000, total_minor: 897000, notes: "3-day Mercedes E 300 Executive airport charter", lines: [{ id: 1, description: "Rental #602 (GR-3310-25)", quantity: 3, unit_price_minor: 260000, line_total_minor: 780000 }], created_at: iso(-96), updated_at: iso(-90) }],
+    [242, { id: 242, company_id: 1, branch_id: 5, customer_id: 12, rental_id: null, created_by: 4, invoice_number: "INV-00242", status: "issued", due_at: iso(-2400), issued_at: iso(-2800), voided_at: null, discount_pct: 0, discount_minor: 0, subtotal_minor: 950000, vat_rate_pct: 15, vat_minor: 142500, total_minor: 1092500, notes: "Overdue 90+ days corporate balance — account on hold", lines: [{ id: 1, description: "Regional Audit Fleet Charter", quantity: 1, unit_price_minor: 950000, line_total_minor: 950000 }], created_at: iso(-2800), updated_at: iso(-2400) }],
+  ]);
+
+  payments = new Map([
+    [250, { id: 250, company_id: 1, branch_id: 2, invoice_id: 241, recorded_by: 4, amount_minor: 897000, method: "bank_transfer", reference: "STB-2026-88410", paid_at: iso(-80), notes: "Settled in full via Stanbic transfer.", created_at: iso(-80) }],
+    [251, { id: 251, company_id: 1, branch_id: 2, invoice_id: 240, recorded_by: 4, amount_minor: 1000000, method: "bank_transfer", reference: "GFM-PART-1102", paid_at: iso(-150), notes: "Partial corporate remittance.", created_at: iso(-150) }],
+  ]);
+
+  creditNotes = new Map([
+    [255, { id: 255, company_id: 1, branch_id: 2, invoice_id: 240, invoice_number: "INV-00240", customer_id: 10, customer_name: "GoldFields Mining Services Ltd", credit_note_number: "CN-00255", subtotal_minor: 100000, vat_minor: 15000, total_minor: 115000, reason: "Service-level downtime adjustment (1 half-day)", status: "posted", approval_request_id: null, posted_at: iso(-100), created_at: iso(-100) }],
+  ]);
+
+  expenses = new Map([
+    [260, { id: 260, company_id: 1, branch_id: 2, vehicle_id: 10, vehicle_registration: "GW-4821-24", recorded_by: 3, category: "fuel", description: "Fuel fill (68 L at Shell Airport Bypass)", amount_minor: 98600, incurred_at: day(-12), created_at: iso(-288) }],
+    [261, { id: 261, company_id: 1, branch_id: 2, vehicle_id: 10, vehicle_registration: "GW-4821-24", recorded_by: 3, category: "fuel", description: "Fuel fill (62 L at GOIL Spintex Rd)", amount_minor: 89900, incurred_at: day(-3), created_at: iso(-72) }],
+    [262, { id: 262, company_id: 1, branch_id: 2, vehicle_id: 11, vehicle_registration: "GE-9104-23", recorded_by: 3, category: "fuel", description: "Fuel fill (78 L at TotalEnergies Takoradi)", amount_minor: 113100, incurred_at: day(-1), created_at: iso(-20) }],
+    [263, { id: 263, company_id: 1, branch_id: 2, vehicle_id: 13, vehicle_registration: "GT-7742-22", recorded_by: 4, category: "maintenance", description: "External brake disc skimming", amount_minor: 85000, incurred_at: day(-2), created_at: iso(-48) }],
+  ]);
+
+  supplierInvoices = new Map([
+    [270, { id: 270, company_id: 1, branch_id: 2, supplier_id: 210, supplier_name: "AutoParts Ghana Ltd", purchase_order_id: 220, invoice_number: "APG-2026-4412", invoice_date: day(-5), due_at: day(25), subtotal_minor: 675000, vat_minor: 101250, total_minor: 776250, paid_minor: 400000, outstanding_minor: 376250, expense_account_code: null, match_status: "matched", variance_minor: 0, approval_request_id: null, status: "partially_paid", notes: "3-way matched against PO-00220.", created_at: iso(-110) }],
+    [271, { id: 271, company_id: 1, branch_id: 2, supplier_id: 211, supplier_name: "Michelin West Africa Distributors", purchase_order_id: null, invoice_number: "MWA-2026-1091", invoice_date: day(-10), due_at: day(20), subtotal_minor: 320000, vat_minor: 48000, total_minor: 368000, paid_minor: 0, outstanding_minor: 368000, expense_account_code: "5000", match_status: "non_po", variance_minor: 0, approval_request_id: null, status: "approved", notes: "Mobile tyre balancing call-out", created_at: iso(-220) }],
+  ]);
+
+  supplierPayments = new Map([
+    [275, { id: 275, company_id: 1, supplier_invoice_id: 270, amount_minor: 400000, method: "bank_transfer", paid_at: day(-2) }],
+  ]);
+
+  bankAccounts = new Map([
+    [280, { id: 280, company_id: 1, branch_id: 2, name: "Stanbic Operating Account (GHS)", bank_name: "Stanbic Bank Ghana", account_number_masked: "****4821", currency: "GHS", gl_account_code: "1000", opening_balance_minor: 25000000, ledger_balance_minor: 26497000, last_reconciled_at: iso(-120), is_active: true }],
+    [281, { id: 281, company_id: 1, branch_id: 2, name: "Ecobank Collections Account", bank_name: "Ecobank Ghana", account_number_masked: "****9910", currency: "GHS", gl_account_code: "1000", opening_balance_minor: 8500000, ledger_balance_minor: 8500000, last_reconciled_at: null, is_active: true }],
+  ]);
+
+  bankTransactions = new Map([
+    [285, { id: 285, company_id: 1, bank_account_id: 280, transaction_date: day(-3), description: "Customer Transfer — Kwame Nkrumah-Mensah (INV-00241)", reference: "STB-2026-88410", amount_minor: 897000, direction: "credit", status: "matched", matched_journal_entry_id: 300, reconciliation_id: null }],
+    [286, { id: 286, company_id: 1, bank_account_id: 280, transaction_date: day(-2), description: "Supplier Wire — AutoParts Ghana Ltd", reference: "WIRE-APG-4000", amount_minor: 400000, direction: "debit", status: "unmatched", matched_journal_entry_id: null, reconciliation_id: null }],
+    [287, { id: 287, company_id: 1, bank_account_id: 280, transaction_date: day(-1), description: "Monthly Bank Maintenance Charge", reference: "STB-FEE-NOV", amount_minor: 15000, direction: "debit", status: "unmatched", matched_journal_entry_id: null, reconciliation_id: null }],
+  ]);
+
+  fixedAssets = new Map([
+    [290, { id: 290, company_id: 1, branch_id: 2, vehicle_id: 10, vehicle_registration: "GW-4821-24", asset_code: "FA-VEH-010", name: "2024 Toyota Land Cruiser Prado (GW-4821-24)", category: "vehicle", acquisition_cost_minor: 85000000, residual_value_minor: 25000000, capitalisation_date: "2024-03-15", useful_life_months: 60, depreciation_method: "straight_line", accumulated_depreciation_minor: 17000000, net_book_value_minor: 68000000, status: "active", disposal_type: null, disposal_date: null, disposal_proceeds_minor: null, disposal_gain_loss_minor: null, disposal_approval_id: null, disposal_approval_status: null }],
+    [291, { id: 291, company_id: 1, branch_id: 2, vehicle_id: 11, vehicle_registration: "GE-9104-23", asset_code: "FA-VEH-011", name: "2023 Toyota Hilux 4x4 (GE-9104-23)", category: "vehicle", acquisition_cost_minor: 54000000, residual_value_minor: 15000000, capitalisation_date: "2023-06-10", useful_life_months: 60, depreciation_method: "straight_line", accumulated_depreciation_minor: 14400000, net_book_value_minor: 39600000, status: "active", disposal_type: null, disposal_date: null, disposal_proceeds_minor: null, disposal_gain_loss_minor: null, disposal_approval_id: null, disposal_approval_status: null }],
+  ]);
+
+  // Balanced GL entries so P&L, Balance Sheet, Cash Flow & Trial Balance render live figures
+  postJournalEntry({
+    companyId: 1, branchId: 2, createdBy: 4, sourceType: "opening_equity", sourceId: 1, reference: "OPEN-2026", memo: "Opening capital & fleet asset register",
+    lines: [
+      { account_code: "1000", debit_minor: 33500000, credit_minor: 0 },
+      { account_code: "1500", debit_minor: 139000000, credit_minor: 0 },
+      { account_code: "1590", debit_minor: 0, credit_minor: 31400000 },
+      { account_code: "3000", debit_minor: 0, credit_minor: 141100000 },
+    ],
+  });
+  postJournalEntry({
+    companyId: 1, branchId: 2, createdBy: 4, sourceType: "invoice", sourceId: 240, reference: "INV-00240", memo: "AR Invoices posted (GoldFields, Kwame, Ashanti)",
+    lines: [
+      { account_code: "1100", debit_minor: 3657000, credit_minor: 0 },
+      { account_code: "4000", debit_minor: 0, credit_minor: 3180000 },
+      { account_code: "2100", debit_minor: 0, credit_minor: 477000 },
+    ],
+  });
+  postJournalEntry({
+    companyId: 1, branchId: 2, createdBy: 4, sourceType: "payment", sourceId: 250, reference: "RCPT-2026", memo: "Customer receipts deposited to Stanbic Bank",
+    lines: [
+      { account_code: "1000", debit_minor: 1897000, credit_minor: 0 },
+      { account_code: "1100", debit_minor: 0, credit_minor: 1897000 },
+    ],
+  });
+  postJournalEntry({
+    companyId: 1, branchId: 2, createdBy: 4, sourceType: "expense", sourceId: 260, reference: "EXP-OPS", memo: "Fleet fuel & workshop operating expenses",
+    lines: [
+      { account_code: "5000", debit_minor: 386600, credit_minor: 0 },
+      { account_code: "1000", debit_minor: 0, credit_minor: 386600 },
+    ],
+  });
+  postJournalEntry({
+    companyId: 1, branchId: 2, createdBy: 4, sourceType: "depreciation", sourceId: 290, reference: "DEP-2026-11", memo: "Monthly fleet depreciation (Prado & Hilux)",
+    lines: [
+      { account_code: "5500", debit_minor: 1650000, credit_minor: 0 },
+      { account_code: "1590", debit_minor: 0, credit_minor: 1650000 },
+    ],
+  });
+
+  creditProfiles = new Map([
+    [10, { customer_id: 10, customer_name: "GoldFields Mining Services Ltd", customer_type: "corporate", credit_limit_minor: 5000000, payment_terms_days: 30, on_credit_hold: false, hold_reason: null, held_at: null, open_ar_minor: 552500, overdue_ar_minor: 552500, credit_utilization_pct: 11, available_credit_minor: 4447500 }],
+    [11, { customer_id: 11, customer_name: "Atlantic Energy Ghana Ltd", customer_type: "corporate", credit_limit_minor: 3500000, payment_terms_days: 30, on_credit_hold: false, hold_reason: null, held_at: null, open_ar_minor: 0, overdue_ar_minor: 0, credit_utilization_pct: 0, available_credit_minor: 3500000 }],
+    [12, { customer_id: 12, customer_name: "Ashanti Infrastructure Consult", customer_type: "corporate", credit_limit_minor: 2000000, payment_terms_days: 15, on_credit_hold: true, hold_reason: "Invoice INV-00242 overdue > 90 days; payment promise missed.", held_at: iso(-240), open_ar_minor: 1092500, overdue_ar_minor: 1092500, credit_utilization_pct: 55, available_credit_minor: 907500 }],
+  ]);
+
+  approvalRequests = new Map([
+    [320, { id: 320, company_id: 1, branch_id: 2, type: "discount", entity_type: "quotation", entity_id: 121, title: "Quotation #121 — 18% corporate loyalty discount", requester_id: 7, requester_name: "Abena Darko (Business Accounts)", approver_id: null, approver_name: null, previous_value: "10% max threshold", requested_value: "18% (GHS 3,330.00)", approved_value: null, reason: "Multi-quarter mining contract renewal", decision_notes: null, status: "pending", decided_at: null, created_at: iso(-20) }],
+    [321, { id: 321, company_id: 1, branch_id: 2, type: "purchase_order", entity_type: "purchase_order", entity_id: 221, title: "PO-00221 — 4x Michelin All-Terrain Tyres", requester_id: 9, requester_name: "Kwabena Owusu (Maintenance Mgr)", approver_id: null, approver_name: null, previous_value: "Threshold GHS 5,000.00", requested_value: "GHS 8,600.00", approved_value: null, reason: "Mandatory tyre replacement before rainy-season deployments", decision_notes: null, status: "pending", decided_at: null, created_at: iso(-16) }],
+  ]);
+
+  documents = new Map([
+    [700, { ...demoBase, id: 700, uploaded_by: 8, entity_type: "vehicle", entity_id: 10, original_name: "GW-4821-24-roadworthy-cert.pdf", mime_type: "application/pdf", size: 2048, expires_at: iso(18 * 24) }],
+    [701, { ...demoBase, id: 701, uploaded_by: 8, entity_type: "vehicle", entity_id: 13, original_name: "GT-7742-22-insurance-policy.pdf", mime_type: "application/pdf", size: 3072, expires_at: iso(-5 * 24) }],
+    [702, { ...demoBase, id: 702, uploaded_by: 8, entity_type: "customer", entity_id: 14, original_name: "abena-driver-licence.pdf", mime_type: "application/pdf", size: 1536, expires_at: iso(20 * 24) }],
+  ]);
+  for (const docId of [700, 701, 702]) {
+    documentBlobs.set(docId, Buffer.from("%PDF-1.4\n1 0 obj<<>>endobj\n%%EOF", "utf8"));
+  }
+
+  messages = new Map([
+    [
+      800,
+      {
+        id: 800,
+        company_id: 1,
+        branch_id: 2,
+        sender_user_id: 9,
+        sender_name: "Kwabena Owusu (Maintenance Mgr)",
+        channel: "dispatch",
+        body: "HiAce GT-7742-22 brake overhaul ETA: releasing from Bay 2 tomorrow 14:00.",
+        related_entity_type: "vehicle",
+        related_entity_id: 13,
+        read_by: [],
+        created_at: iso(-5),
+      },
+    ],
+  ]);
+
+  notifications = new Map([
+    [900, { id: 900, company_id: 1, branch_id: 2, required_permission: "rentals.view", severity: "info", title: "Active rental #600 on site", body: "GE-9104-23 (Toyota Hilux 4x4) is active with Atlantic Energy Ghana Ltd.", href: "/companies/1/rentals/600?branch=all", read_by: [], created_at: iso(-24) }],
+    [901, { id: 901, company_id: 1, branch_id: 2, required_permission: "documents.view", severity: "warning", title: "Expired insurance policy detected", body: "GT-7742-22 insurance expired 5 days ago. Renew before dispatch.", href: "/companies/1/operations?tab=compliance&branch=all", read_by: [], created_at: iso(-12) }],
+  ]);
+
+  auditEvents = new Map([
+    [950, { id: 950, company_id: 1, actor_name: "Ama Osei (Operations Mgr)", action: "rental.handed_over", entity_type: "rental", entity_id: 600, summary: "Handed over Rental #600 (GE-9104-23) at 63,800 km.", created_at: iso(-70) }],
+    [951, { id: 951, company_id: 1, actor_name: "Efua Appiah (Finance Mgr)", action: "credit_note.posted", entity_type: "credit_note", entity_id: 255, summary: "Posted CN-00255 against INV-00240 (GHS 1,150.00).", created_at: iso(-100) }],
+  ]);
+
+  nextId = 1000;
+}
+
+if (process.argv.includes("--seed=demo")) {
+  seedDemo();
+}
 
 function parseMultipart(buffer, contentType) {
   const match = contentType.match(/boundary=(?:"([^"]+)"|([^;\s]+))/i);
@@ -1046,6 +1348,11 @@ createServer(async (req, res) => {
     json(200, {});
     return;
   }
+  if (url.pathname === "/__test/seed-demo") {
+    seedDemo();
+    json(200, { seeded: "demo" });
+    return;
+  }
   if (url.pathname === "/__test/control") {
     Object.assign(control, input);
     if (input.emptyDirectory) {
@@ -1294,10 +1601,15 @@ createServer(async (req, res) => {
     const tf = twoFactorState.get(userId);
     const tfEnabled = Boolean(tf?.enabled);
     const require2faPolicy = Boolean(companySettings.get(1)?.require_2fa_for_privileged);
+    const demoMatchedUser = [...managedUsers.values()].find(
+      (u) => u.email.toLowerCase() === String(input.email ?? "").toLowerCase(),
+    );
+    const primaryCompanyName = companies.get(1)?.name ?? "Synthetic One";
     const user = {
-      id: userId,
+      id: demoMatchedUser?.id ?? userId,
       name:
-        role === "activedriver"
+        demoMatchedUser?.name ??
+        (role === "activedriver"
           ? "Fleet Driver"
           : role === "finance" || role === "financemanager"
             ? "Finance Manager"
@@ -1309,11 +1621,12 @@ createServer(async (req, res) => {
                   ? "Business Accounts Manager"
                   : role === "hradmin"
                     ? "HR Admin Manager"
-                    : "Synthetic operator",
+                    : "Synthetic operator"),
       email:
-        role === "activedriver"
+        demoMatchedUser?.email ??
+        (role === "activedriver"
           ? "driver-co1@example.test"
-          : `${role}@example.test`,
+          : `${role}@example.test`),
       roles: [userRole],
       is_platform_admin: role === "admin",
       must_change_password: role === "mustrotate",
@@ -1327,11 +1640,11 @@ createServer(async (req, res) => {
           : role === "driver"
             ? []
             : role === "activedriver"
-              ? [{ id: 1, name: "Synthetic One", branch_id: 2 }]
+              ? [{ id: 1, name: primaryCompanyName, branch_id: 2 }]
               : [
                   {
                     id: 1,
-                    name: "Synthetic One",
+                    name: primaryCompanyName,
                     branch_id: [
                       "unrestricted",
                       "companyadmin",
@@ -1341,6 +1654,9 @@ createServer(async (req, res) => {
                       "hradmin",
                       "businessaccounts",
                       "financemanager",
+                      "opsmanager",
+                      "maintmanager",
+                      "creditcontrol",
                     ].includes(role)
                       ? null
                       : 2,
@@ -3705,7 +4021,7 @@ createServer(async (req, res) => {
   }
 
   const stmtMatch = url.pathname.match(
-    /^\/api\/v1\/reports\/statements\/(pnl|balance-sheet|cash-flow)$/,
+    /^\/api\/v1\/reports\/statements\/(pnl|balance-sheet|cash-flow|vat-return)$/,
   );
   if (stmtMatch && req.method === "GET") {
     if (!hasFinanceView) {
@@ -3713,6 +4029,37 @@ createServer(async (req, res) => {
       return;
     }
     const companyId = Number(url.searchParams.get("company_id"));
+    if (stmtMatch[1] === "vat-return") {
+      const issuedAr = [...invoices.values()].filter(
+        (i) => i.company_id === companyId && i.status === "issued",
+      );
+      const postedCn = [...creditNotes.values()].filter(
+        (c) => c.company_id === companyId && c.status === "posted",
+      );
+      const apBills = [...supplierInvoices.values()].filter(
+        (b) => b.company_id === companyId && b.status !== "void",
+      );
+      const taxableSales = issuedAr.reduce((s, i) => s + Number(i.subtotal_minor ?? 0), 0);
+      const outputVat = issuedAr.reduce((s, i) => s + Number(i.vat_minor ?? 0), 0);
+      const cnVat = postedCn.reduce((s, c) => s + Number(c.vat_minor ?? 0), 0);
+      const netOutputVat = Math.max(0, outputVat - cnVat);
+      const taxablePurchases = apBills.reduce((s, b) => s + Number(b.subtotal_minor ?? 0), 0);
+      const inputVat = apBills.reduce((s, b) => s + Number(b.vat_minor ?? 0), 0);
+      json(200, {
+        data: {
+          from: url.searchParams.get("from"),
+          to: url.searchParams.get("to"),
+          output_vat_minor: outputVat,
+          credit_note_vat_minor: cnVat,
+          net_output_vat_minor: netOutputVat,
+          input_vat_minor: inputVat,
+          net_vat_payable_minor: netOutputVat - inputVat,
+          taxable_sales_minor: taxableSales,
+          taxable_purchases_minor: taxablePurchases,
+        },
+      });
+      return;
+    }
     const balances = new Map();
     for (const je of journalEntries.values()) {
       if (je.company_id !== companyId) continue;
@@ -3835,6 +4182,410 @@ createServer(async (req, res) => {
       },
     });
     return;
+  }
+
+  // --- M16.5 Complete SRS Gap Parity Handlers ---
+  const vehHistMatch = url.pathname.match(/^\/api\/v1\/vehicles\/(\d+)\/history$/);
+  if (vehHistMatch && req.method === "GET") {
+    const vid = Number(vehHistMatch[1]);
+    const veh = vehicles.get(vid);
+    if (!veh) {
+      fail(404);
+      return;
+    }
+    const vehRentals = [...rentals.values()]
+      .filter((r) => r.vehicle_id === vid)
+      .map((r) => {
+        const dec = decorateRental(r);
+        const linkedInv = [...invoices.values()].find((inv) => inv.rental_id === r.id);
+        return {
+          id: r.id,
+          customer_name: dec.customer_name ?? "Customer",
+          status: r.status,
+          started_at: r.handed_over_at ?? dec.starts_at ?? null,
+          returned_at: r.returned_at ?? null,
+          revenue_minor: linkedInv?.total_minor ?? null,
+        };
+      });
+    const vehFuel = [...fuelTransactions.values()]
+      .filter((f) => f.vehicle_id === vid)
+      .map((f) => ({
+        id: f.id,
+        filled_at: f.fuel_date,
+        litres: f.litres,
+        amount_minor: f.amount_minor,
+        odometer_km: f.odometer,
+        litres_per_100km: f.litres_per_100km,
+        is_abnormal: f.is_abnormal,
+      }));
+    const vehWo = [...workOrders.values()]
+      .filter((w) => w.vehicle_id === vid)
+      .map((w) => ({
+        id: w.id,
+        title: w.title,
+        status: w.status,
+        total_cost_minor: w.total_cost_minor ?? 0,
+        created_at: w.created_at ?? null,
+      }));
+    const vehInc = [...incidents.values()].filter((i) => i.vehicle_id === vid);
+    json(200, {
+      data: {
+        vehicle_id: vid,
+        rentals: vehRentals,
+        fuel: vehFuel,
+        work_orders: vehWo,
+        incidents: vehInc,
+        compliance: {
+          insurance_policy_number: veh.insurance_policy_number ?? null,
+          insurance_provider: veh.insurance_provider ?? null,
+          insurance_expires_at: veh.insurance_expires_at ?? null,
+          roadworthy_expires_at: veh.roadworthy_expires_at ?? null,
+          licence_expires_at: veh.licence_expires_at ?? null,
+        },
+      },
+    });
+    return;
+  }
+
+  const incWoMatch = url.pathname.match(/^\/api\/v1\/incidents\/(\d+)\/create-work-order$/);
+  if (incWoMatch && req.method === "POST") {
+    const inc = incidents.get(Number(incWoMatch[1]));
+    if (!inc) {
+      fail(404);
+      return;
+    }
+    const woId = nextId++;
+    const nowIso = new Date().toISOString();
+    const wo = {
+      id: woId,
+      company_id: inc.company_id,
+      branch_id: inc.branch_id,
+      vehicle_id: inc.vehicle_id,
+      created_by: user.id,
+      assigned_to: null,
+      title: `Incident #${inc.id} repair (${inc.incident_type})`,
+      description: inc.description,
+      status: "open",
+      priority: inc.severity === "major" || inc.severity === "total_loss" ? "high" : "normal",
+      due_at: new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10),
+      started_at: null,
+      completed_at: null,
+      odometer_at_service: vehicles.get(inc.vehicle_id)?.odometer ?? 0,
+      labor_cost_minor: inc.estimated_cost_minor ?? 0,
+      parts_cost_minor: 0,
+      total_cost_minor: inc.estimated_cost_minor ?? 0,
+      notes: inc.insurance_claim_number ? `Insurance claim ${inc.insurance_claim_number}` : null,
+      items: [],
+      created_at: nowIso,
+      updated_at: nowIso,
+    };
+    workOrders.set(woId, wo);
+    inc.work_order_id = woId;
+    inc.status = "repairing";
+    completedWrites++;
+    json(201, { data: { incident: inc, work_order: wo } });
+    return;
+  }
+
+  const incMatch = url.pathname.match(/^\/api\/v1\/incidents(?:\/(\d+))?$/);
+  if (incMatch) {
+    const incId = incMatch[1] ? Number(incMatch[1]) : null;
+    if (req.method === "GET" && !incId) {
+      const companyId = Number(url.searchParams.get("company_id"));
+      const typeFilter = url.searchParams.get("incident_type");
+      const stFilter = url.searchParams.get("status");
+      const rows = [...incidents.values()]
+        .filter(
+          (i) =>
+            i.company_id === companyId &&
+            (!typeFilter || i.incident_type === typeFilter) &&
+            (!stFilter || i.status === stFilter),
+        )
+        .sort((a, b) => b.id - a.id);
+      json(200, {
+        data: rows,
+        meta: { current_page: 1, last_page: 1, per_page: 25, total: rows.length },
+      });
+      return;
+    }
+    if (req.method === "POST" && !incId) {
+      const id = nextId++;
+      const vid = Number(input.vehicle_id);
+      const veh = vehicles.get(vid);
+      const rec = {
+        id,
+        company_id: Number(input.company_id ?? veh?.company_id ?? 1),
+        branch_id: Number(input.branch_id ?? veh?.branch_id ?? 2),
+        vehicle_id: vid,
+        vehicle_registration: veh?.registration ?? null,
+        rental_id: input.rental_id ? Number(input.rental_id) : null,
+        driver_name: input.driver_name ? String(input.driver_name) : null,
+        incident_type: String(input.incident_type ?? "accident"),
+        severity: String(input.severity ?? "minor"),
+        occurred_at: String(
+          input.occurred_at ?? input.incident_date ?? new Date().toISOString().slice(0, 10),
+        ),
+        location: input.location ? String(input.location) : null,
+        description: String(input.description ?? ""),
+        insurance_claim_number: input.insurance_claim_number
+          ? String(input.insurance_claim_number)
+          : null,
+        estimated_cost_minor:
+          input.estimated_cost_minor != null ? Number(input.estimated_cost_minor) : null,
+        work_order_id: null,
+        status: "reported",
+        created_at: new Date().toISOString(),
+      };
+      incidents.set(id, rec);
+      if (veh && (input.mark_vehicle_unsafe || input.mark_vehicle_status)) {
+        veh.status = input.mark_vehicle_status
+          ? String(input.mark_vehicle_status)
+          : rec.incident_type === "accident"
+            ? "accident"
+            : "awaiting_repair";
+      }
+      completedWrites++;
+      json(201, { data: rec });
+      return;
+    }
+    if (req.method === "PATCH" && incId) {
+      const rec = incidents.get(incId);
+      if (!rec) {
+        fail(404);
+        return;
+      }
+      Object.assign(rec, input, { id: incId });
+      completedWrites++;
+      json(200, { data: rec });
+      return;
+    }
+  }
+
+  const quoteAcceptMatch = url.pathname.match(/^\/api\/v1\/quotations\/(\d+)\/accept$/);
+  if (quoteAcceptMatch && req.method === "POST") {
+    const q = quotations.get(Number(quoteAcceptMatch[1]));
+    if (!q) {
+      fail(404);
+      return;
+    }
+    q.customer_accepted_at = new Date().toISOString();
+    q.customer_acceptance_ref = String(
+      input.customer_acceptance_ref ?? "Customer accepted",
+    );
+    q.updated_at = new Date().toISOString();
+    completedWrites++;
+    json(200, { data: q });
+    return;
+  }
+
+  const rentalAmendMatch = url.pathname.match(/^\/api\/v1\/rentals\/(\d+)\/amend$/);
+  if (rentalAmendMatch && req.method === "POST") {
+    const r = rentals.get(Number(rentalAmendMatch[1]));
+    if (!r) {
+      fail(404);
+      return;
+    }
+    if (input.new_ends_at) {
+      const resRec = reservations.get(r.reservation_id);
+      if (resRec) resRec.ends_at = String(input.new_ends_at);
+    }
+    if (input.security_deposit_minor !== undefined && input.security_deposit_minor !== null) {
+      r.security_deposit_minor = Number(input.security_deposit_minor);
+    }
+    if (input.deposit_status) {
+      r.deposit_status = String(input.deposit_status);
+    }
+    r.updated_at = new Date().toISOString();
+    completedWrites++;
+    json(200, { data: decorateRental(r) });
+    return;
+  }
+
+  const reqActionMatch = url.pathname.match(
+    /^\/api\/v1\/purchase-requisitions\/(\d+)\/(approve|reject|convert-to-po)$/,
+  );
+  if (reqActionMatch && req.method === "POST") {
+    const pr = purchaseRequisitions.get(Number(reqActionMatch[1]));
+    if (!pr) {
+      fail(404);
+      return;
+    }
+    const act = reqActionMatch[2];
+    if (act === "approve" || act === "reject") {
+      pr.status = act === "approve" ? "approved" : "rejected";
+      pr.decided_by_name = user.name;
+      pr.decided_at = new Date().toISOString();
+      completedWrites++;
+      json(200, { data: pr });
+      return;
+    }
+    // convert-to-po
+    if (pr.status !== "approved") {
+      fail(409);
+      return;
+    }
+    const poId = nextId++;
+    const nowIso = new Date().toISOString();
+    const firstSup =
+      (pr.supplier_id ? suppliers.get(pr.supplier_id) : null) ??
+      [...suppliers.values()].find((s) => s.company_id === pr.company_id) ??
+      { id: 1, name: "Default Supplier" };
+    const poItems = (pr.items ?? []).map((it, idx) => ({
+      id: idx + 1,
+      part_id: null,
+      sku: null,
+      description: it.description,
+      quantity: it.quantity,
+      unit_cost_minor: it.estimated_unit_minor,
+      line_total_minor: it.quantity * it.estimated_unit_minor,
+    }));
+    const total = poItems.reduce((s, it) => s + it.line_total_minor, 0);
+    const po = {
+      id: poId,
+      company_id: pr.company_id,
+      branch_id: pr.branch_id,
+      supplier_id: firstSup.id,
+      supplier_name: firstSup.name,
+      created_by: user.id,
+      approved_by: null,
+      po_number: `PO-${String(poId).padStart(5, "0")}`,
+      status: "draft",
+      expected_at: pr.needed_by,
+      received_at: null,
+      subtotal_minor: total,
+      total_minor: total,
+      notes: `Converted from ${pr.requisition_number}: ${pr.justification}`,
+      items: poItems,
+      created_at: nowIso,
+      updated_at: nowIso,
+    };
+    purchaseOrders.set(poId, po);
+    pr.status = "converted";
+    pr.purchase_order_id = poId;
+    completedWrites++;
+    json(201, { data: { requisition: pr, purchase_order: po } });
+    return;
+  }
+
+  if (url.pathname === "/api/v1/purchase-requisitions") {
+    if (req.method === "GET") {
+      const companyId = Number(url.searchParams.get("company_id"));
+      const stFilter = url.searchParams.get("status");
+      const rows = [...purchaseRequisitions.values()]
+        .filter((p) => p.company_id === companyId && (!stFilter || p.status === stFilter))
+        .sort((a, b) => b.id - a.id);
+      json(200, {
+        data: rows,
+        meta: { current_page: 1, last_page: 1, per_page: 25, total: rows.length },
+      });
+      return;
+    }
+    if (req.method === "POST") {
+      const id = nextId++;
+      const items = Array.isArray(input.items) ? input.items : [];
+      const estTotal = items.reduce(
+        (s, it) => s + Number(it.quantity ?? 1) * Number(it.estimated_unit_minor ?? 0),
+        0,
+      );
+      const supId = input.supplier_id ? Number(input.supplier_id) : null;
+      const sup = supId ? suppliers.get(supId) : null;
+      const rec = {
+        id,
+        company_id: Number(input.company_id ?? 1),
+        branch_id: Number(input.branch_id ?? 2),
+        requisition_number: `REQ-${String(id).padStart(5, "0")}`,
+        department: String(input.department ?? "Operations"),
+        requester_id: user.id,
+        requester_name: user.name,
+        approver_id: null,
+        approver_name: null,
+        supplier_id: supId,
+        supplier_name: sup?.name ?? null,
+        needed_by: String(input.needed_by ?? new Date().toISOString().slice(0, 10)),
+        justification: String(input.justification ?? ""),
+        status: "pending",
+        estimated_total_minor: estTotal,
+        items,
+        purchase_order_id: null,
+        created_at: new Date().toISOString(),
+      };
+      purchaseRequisitions.set(id, rec);
+      completedWrites++;
+      json(201, { data: rec });
+      return;
+    }
+  }
+
+  const supStmtMatch = url.pathname.match(/^\/api\/v1\/suppliers\/(\d+)\/statement$/);
+  if (supStmtMatch && req.method === "GET") {
+    const sid = Number(supStmtMatch[1]);
+    const sup = suppliers.get(sid);
+    if (!sup) {
+      fail(404);
+      return;
+    }
+    const bills = [...supplierInvoices.values()].filter((b) => b.supplier_id === sid);
+    const billIds = new Set(bills.map((b) => b.id));
+    const pays = [...supplierPayments.values()].filter((p) =>
+      billIds.has(p.supplier_invoice_id),
+    );
+    const entries = [
+      ...bills.map((b) => ({
+        date: b.invoice_date,
+        type: "supplier_invoice",
+        reference: b.invoice_number,
+        description: `Supplier Invoice (${b.match_status})`,
+        debit_minor: 0,
+        credit_minor: b.total_minor,
+      })),
+      ...pays.map((p) => ({
+        date: p.paid_at,
+        type: "supplier_payment",
+        reference: `PAY-${p.id}`,
+        description: `Supplier Payment (${p.method})`,
+        debit_minor: p.amount_minor,
+        credit_minor: 0,
+      })),
+    ].sort((a, b) => a.date.localeCompare(b.date));
+    let running = 0;
+    const rows = entries.map((e) => {
+      running += e.credit_minor - e.debit_minor;
+      return { ...e, balance_minor: running };
+    });
+    json(200, {
+      data: {
+        supplier_id: sid,
+        supplier_name: sup.name,
+        from: url.searchParams.get("from"),
+        to: url.searchParams.get("to"),
+        opening_balance_minor: 0,
+        closing_balance_minor: running,
+        rows,
+      },
+    });
+    return;
+  }
+
+  const thrMatch = url.pathname.match(/^\/api\/v1\/companies\/(\d+)\/approval-thresholds$/);
+  if (thrMatch) {
+    const cid = Number(thrMatch[1]);
+    if (req.method === "GET") {
+      json(200, { data: approvalThresholds.get(cid) ?? defaultApprovalThresholds() });
+      return;
+    }
+    if (req.method === "PATCH") {
+      if (!user.is_platform_admin && !user.permissions.includes("settings.manage")) {
+        fail(403);
+        return;
+      }
+      const next = Array.isArray(input.thresholds)
+        ? input.thresholds
+        : defaultApprovalThresholds();
+      approvalThresholds.set(cid, next);
+      completedWrites++;
+      json(200, { data: next });
+      return;
+    }
   }
 
   // --- M13 Inspections, Rate Cards, Preventive Schedules, Tyres/Batteries & Fuel ---
@@ -4618,6 +5369,57 @@ createServer(async (req, res) => {
         }
       : null;
 
+    const nowMs = Date.now();
+    const scopedDocs = [...documents.values()].filter(
+      (d) =>
+        d.company_id === companyId &&
+        (branchId === null || d.branch_id === branchId) &&
+        d.expires_at,
+    );
+    const expiredDocs = scopedDocs.filter((d) => Date.parse(d.expires_at) < nowMs).length;
+    const expiring30Docs = scopedDocs.filter((d) => {
+      const ms = Date.parse(d.expires_at);
+      return ms >= nowMs && ms <= nowMs + 30 * 86400000;
+    }).length;
+    const scopedCreditProfiles = [...creditProfiles.values()].filter((cp) => {
+      const c = customers.get(cp.customer_id);
+      return c && c.company_id === companyId;
+    });
+    const customersOnHold = scopedCreditProfiles.filter((cp) => cp.on_credit_hold).length;
+    const overdue90 = issued
+      .filter((i) => i.outstanding_minor > 0 && i.due_at && nowMs - Date.parse(i.due_at) > 90 * 86400000)
+      .reduce((s, i) => s + i.outstanding_minor, 0);
+    const totalAr = issued.reduce((s, i) => s + i.outstanding_minor, 0);
+    const pendingAprCount = [...approvalRequests.values()].filter(
+      (a) => a.company_id === companyId && a.status === "pending",
+    ).length;
+    const overdueReturns = scopedRentals.filter((r) => {
+      if (r.status !== "active") return false;
+      const resRec = reservations.get(r.reservation_id);
+      return resRec && Date.parse(resRec.ends_at) < nowMs;
+    }).length;
+    const vehicleProfitability = canSeeFinance
+      ? vehs.slice(0, 6).map((v) => {
+          const rev = issued
+            .filter((i) => {
+              const r = i.rental_id ? rentals.get(i.rental_id) : null;
+              return r && r.vehicle_id === v.id;
+            })
+            .reduce((s, i) => s + i.total_minor, 0);
+          const cost = scopedExpenses
+            .filter((e) => e.vehicle_id === v.id)
+            .reduce((s, e) => s + e.amount_minor, 0);
+          return {
+            vehicle_id: v.id,
+            registration: v.registration,
+            make_model: `${v.make} ${v.model}`,
+            revenue_minor: rev,
+            cost_minor: cost,
+            profit_minor: rev - cost,
+          };
+        })
+      : undefined;
+
     json(200, {
       data: {
         fleet: { total, available, rented, maintenance, damaged, utilization_pct },
@@ -4639,6 +5441,24 @@ createServer(async (req, res) => {
         },
         finance,
         driver_summary,
+        credit: {
+          total_receivables_minor: totalAr,
+          overdue_90_plus_minor: overdue90,
+          customers_on_hold: customersOnHold,
+        },
+        compliance: {
+          expired: expiredDocs,
+          expiring_30d: expiring30Docs,
+        },
+        operations_alerts: {
+          overdue_returns: overdueReturns,
+          awaiting_inspection: vehs.filter((v) => v.status === "awaiting_inspection").length,
+          accident_or_repair: vehs.filter(
+            (v) => v.status === "accident" || v.status === "awaiting_repair",
+          ).length,
+          pending_approvals: pendingAprCount,
+        },
+        ...(vehicleProfitability ? { vehicle_profitability: vehicleProfitability } : {}),
       },
     });
     return;
@@ -4690,7 +5510,7 @@ createServer(async (req, res) => {
           body: m.body,
           related_entity_type: m.related_entity_type,
           related_entity_id: m.related_entity_id,
-          is_read: m.read_by.includes(user.id),
+          is_read: Array.isArray(m.read_by) ? m.read_by.includes(user.id) : false,
           created_at: m.created_at,
         }));
       const unread_count = scoped.filter((m) => !m.is_read).length;
@@ -6777,6 +7597,13 @@ createServer(async (req, res) => {
         return_odometer: null,
         handover_notes: null,
         return_notes: null,
+        security_deposit_minor: input.security_deposit_minor
+          ? Number(input.security_deposit_minor)
+          : 0,
+        deposit_status:
+          input.security_deposit_minor && Number(input.security_deposit_minor) > 0
+            ? "held"
+            : "none",
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
       };
@@ -7408,6 +8235,26 @@ createServer(async (req, res) => {
     }
     input.functions = normalized;
   }
+  const sanitizedInput = { ...input };
+  if (
+    domain === "vehicles" &&
+    !user.is_platform_admin &&
+    !user.permissions.includes("invoices.manage") &&
+    !user.permissions.includes("expenses.manage")
+  ) {
+    for (const finKey of [
+      "acquisition_date",
+      "acquisition_cost_minor",
+      "financing_type",
+      "financing_provider",
+      "financing_monthly_minor",
+      "financing_end_date",
+      "current_book_value_minor",
+      "residual_value_minor",
+    ]) {
+      delete sanitizedInput[finKey];
+    }
+  }
   const record = {
     ...base,
     ...(domain === "customers"
@@ -7421,7 +8268,7 @@ createServer(async (req, res) => {
           functions: [],
         }),
     ...old,
-    ...input,
+    ...sanitizedInput,
     id: recordId,
     ...(domain === "vehicles" ? { odometer_unit: "km" } : {}),
     updated_at: new Date().toISOString(),

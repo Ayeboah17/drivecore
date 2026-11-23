@@ -420,6 +420,174 @@ export function LiveDashboardAnalytics() {
           </div>
         </article>
       </div>
+
+      {/* SRS §19 Executive Intelligence Band: Credit, Compliance, Operations Alerts, Vehicle Profitability */}
+      {data.credit ||
+      data.compliance ||
+      data.operations_alerts ||
+      (canFinance && data.vehicle_profitability?.length) ? (
+        <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-4">
+          {data.credit ? (
+            <article className="dc-shadow-card space-y-3 rounded-2xl border bg-surface p-card">
+              <div>
+                <p className="font-mono text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+                  Credit Control
+                </p>
+                <h3 className="text-section-heading">Credit Exposure</h3>
+              </div>
+              <dl className="space-y-1.5 text-xs">
+                <div className="flex justify-between">
+                  <dt className="text-muted-foreground">Accounts on hold</dt>
+                  <dd className="font-mono font-bold tabular-nums text-danger-foreground">
+                    {data.credit.customers_on_hold}
+                  </dd>
+                </div>
+                <div className="flex justify-between">
+                  <dt className="text-muted-foreground">Overdue AR (90+d)</dt>
+                  <dd className="font-mono font-bold tabular-nums">
+                    {canFinance
+                      ? formatMoneyMinor(
+                          data.credit.overdue_90_plus_minor,
+                          currency,
+                        )
+                      : "Restricted"}
+                  </dd>
+                </div>
+                <div className="flex justify-between">
+                  <dt className="text-muted-foreground">Total receivables</dt>
+                  <dd className="font-mono font-bold tabular-nums">
+                    {canFinance
+                      ? formatMoneyMinor(
+                          data.credit.total_receivables_minor,
+                          currency,
+                        )
+                      : "Restricted"}
+                  </dd>
+                </div>
+              </dl>
+              <Link
+                href={`/companies/${scope.companyId}/finance?tab=credit-control&branch=${encodeURIComponent(scope.branch)}`}
+                className="inline-block text-[11px] font-semibold text-link hover:underline"
+              >
+                Open credit control →
+              </Link>
+            </article>
+          ) : null}
+
+          {data.compliance ? (
+            <article className="dc-shadow-card space-y-3 rounded-2xl border bg-surface p-card">
+              <div>
+                <p className="font-mono text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+                  Governance &amp; Safety
+                </p>
+                <h3 className="text-section-heading">Compliance Expiries</h3>
+              </div>
+              <dl className="space-y-1.5 text-xs">
+                <div className="flex justify-between">
+                  <dt className="text-muted-foreground">Expired documents</dt>
+                  <dd className="font-mono font-bold tabular-nums text-danger-foreground">
+                    {data.compliance.expired}
+                  </dd>
+                </div>
+                <div className="flex justify-between">
+                  <dt className="text-muted-foreground">Expiring within 30d</dt>
+                  <dd className="font-mono font-bold tabular-nums text-warning-foreground">
+                    {data.compliance.expiring_30d}
+                  </dd>
+                </div>
+              </dl>
+              <Link
+                href={`/companies/${scope.companyId}/operations?tab=compliance&branch=${encodeURIComponent(scope.branch)}`}
+                className="inline-block text-[11px] font-semibold text-link hover:underline"
+              >
+                Open compliance hub →
+              </Link>
+            </article>
+          ) : null}
+
+          {data.operations_alerts ? (
+            <article className="dc-shadow-card space-y-3 rounded-2xl border bg-surface p-card">
+              <div>
+                <p className="font-mono text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+                  Workshop &amp; Queue
+                </p>
+                <h3 className="text-section-heading">Operations Alerts</h3>
+              </div>
+              <dl className="space-y-1.5 text-xs">
+                <div className="flex justify-between">
+                  <dt className="text-muted-foreground">Pending approvals</dt>
+                  <dd className="font-mono font-bold tabular-nums">
+                    {data.operations_alerts.pending_approvals}
+                  </dd>
+                </div>
+                <div className="flex justify-between">
+                  <dt className="text-muted-foreground">Overdue returns</dt>
+                  <dd className="font-mono font-bold tabular-nums text-warning-foreground">
+                    {data.operations_alerts.overdue_returns}
+                  </dd>
+                </div>
+                <div className="flex justify-between">
+                  <dt className="text-muted-foreground">Awaiting inspection</dt>
+                  <dd className="font-mono font-bold tabular-nums">
+                    {data.operations_alerts.awaiting_inspection}
+                  </dd>
+                </div>
+                <div className="flex justify-between">
+                  <dt className="text-muted-foreground">Accident / repair</dt>
+                  <dd className="font-mono font-bold tabular-nums text-danger-foreground">
+                    {data.operations_alerts.accident_or_repair}
+                  </dd>
+                </div>
+              </dl>
+              <Link
+                href={`/companies/${scope.companyId}/operations?tab=approvals&branch=${encodeURIComponent(scope.branch)}`}
+                className="inline-block text-[11px] font-semibold text-link hover:underline"
+              >
+                Review approval queue →
+              </Link>
+            </article>
+          ) : null}
+
+          {canFinance && data.vehicle_profitability?.length ? (
+            <article className="dc-shadow-card space-y-3 rounded-2xl border bg-surface p-card">
+              <div>
+                <p className="font-mono text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+                  Asset Economics
+                </p>
+                <h3 className="text-section-heading">Vehicle Profitability</h3>
+              </div>
+              <ul className="space-y-1.5 text-xs">
+                {data.vehicle_profitability.slice(0, 4).map((vp) => (
+                  <li
+                    key={vp.vehicle_id}
+                    className="flex items-center justify-between gap-2"
+                  >
+                    <span className="truncate font-mono font-semibold">
+                      {vp.registration}
+                    </span>
+                    <span
+                      className={`font-mono font-bold tabular-nums ${
+                        vp.profit_minor >= 0
+                          ? "text-success-foreground"
+                          : "text-danger-foreground"
+                      }`}
+                    >
+                      {vp.profit_minor < 0 ? "-" : "+"}
+                      {formatMoneyMinor(Math.abs(vp.profit_minor), currency)}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+              <Link
+                href={`/companies/${scope.companyId}/reports?branch=${encodeURIComponent(scope.branch)}`}
+                className="inline-block text-[11px] font-semibold text-link hover:underline"
+              >
+                Full profitability report →
+              </Link>
+            </article>
+          ) : null}
+        </div>
+      ) : null}
     </section>
   );
 }

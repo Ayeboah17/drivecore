@@ -5,6 +5,7 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  AlertTriangle,
   Ban,
   CalendarClock,
   CheckCircle2,
@@ -21,6 +22,7 @@ import { useLiveContext } from "@/features/live/context";
 import { EntityDocumentsPanel } from "@/features/documents/documents-panel";
 import { PreventiveSchedulesPanel } from "@/features/operations-srs/preventive-schedules-panel";
 import { FuelLogPanel } from "@/features/operations-srs/fuel-log-panel";
+import { IncidentsPanel } from "@/features/srs-parity/incidents-panel";
 import { listRecords } from "@/features/records/service";
 import { listParts } from "@/features/inventory/service";
 import {
@@ -162,12 +164,14 @@ export function LiveMaintenancePage() {
   const currency = scope.company?.currency || "ZMW";
 
   const rawTab = searchParams.get("tab");
-  const activeTab: "work_orders" | "schedules" | "fuel" =
-    rawTab === "schedules"
-      ? "schedules"
-      : rawTab === "fuel"
-        ? "fuel"
-        : "work_orders";
+  const activeTab: "work_orders" | "incidents" | "schedules" | "fuel" =
+    rawTab === "incidents"
+      ? "incidents"
+      : rawTab === "schedules"
+        ? "schedules"
+        : rawTab === "fuel"
+          ? "fuel"
+          : "work_orders";
 
   const rawQ = searchParams.get("q") ?? "";
   const status = searchParams.get("status") ?? "";
@@ -286,6 +290,7 @@ export function LiveMaintenancePage() {
         {(
           [
             ["work_orders", "Work orders"],
+            ["incidents", "Incidents"],
             ["schedules", "Preventive schedules"],
             ["fuel", "Fuel log"],
           ] as const
@@ -306,6 +311,8 @@ export function LiveMaintenancePage() {
           >
             {key === "work_orders" ? (
               <Wrench className="size-3.5" aria-hidden="true" />
+            ) : key === "incidents" ? (
+              <AlertTriangle className="size-3.5" aria-hidden="true" />
             ) : key === "schedules" ? (
               <CalendarClock className="size-3.5" aria-hidden="true" />
             ) : (
@@ -332,7 +339,12 @@ export function LiveMaintenancePage() {
         </div>
       ) : null}
 
-      {activeTab === "schedules" ? (
+      {activeTab === "incidents" ? (
+        <IncidentsPanel
+          canManage={canManage || (!!user && can(user, "vehicles.manage"))}
+          onWorkOrderCreated={(msg) => setNotice(msg)}
+        />
+      ) : activeTab === "schedules" ? (
         <PreventiveSchedulesPanel
           canManage={canManage}
           onWorkOrderOpened={(msg) => {

@@ -8,7 +8,7 @@
 
 ---
 
-## Master Quick-Reference Index (M6–M16)
+## Master Quick-Reference Index (M6–M16.5)
 
 ### A. Endpoint Index
 
@@ -85,6 +85,12 @@
 | M16 | `GET/POST/PATCH` | `/api/v1/leads` & `POST /api/v1/leads/{id}/convert` | `leads.view`/`manage` (or `quotations.view`/`manage`) | CRM Lead-to-Quote pipeline (`new\|contacted\|qualified\|proposal_sent\|won\|lost`); `convert` auto-creates or links Customer & transitions to Quotation |
 | M16 | `POST` | `/api/v1/auth/two-factor/{setup\|confirm\|disable\|recovery-codes\|challenge}` | Authenticated (public rate-limited for `challenge`) | TOTP 2FA enrollment (encrypted secret + `otpauth_uri`), 6-digit confirmation + 8 single-use hashed recovery codes, 2-step login challenge |
 | M16 | `POST` | `/api/v1/users/{id}/reset-two-factor` | `System Administrator` / platform admin only | Lockout recovery clearing target user's TOTP secret & recovery codes (`409` on self-reset; `403` for HR/Admin Manager) |
+| M16.5 | `GET` | `/api/v1/vehicles/{id}/history` | `vehicles.view` (monetary fields require `invoices.view`) | Digital Vehicle File consolidated history (`rentals`, `fuel`, `work_orders`, `incidents`, `compliance`) + extended SRS §4 vehicle master & 9 statuses |
+| M16.5 | `GET/POST/PATCH` | `/api/v1/incidents` & `/{id}/create-work-order` | `work_orders.view`/`manage` or `vehicles.manage` | Accident/breakdown/damage incident log with insurance claim #, optional vehicle unsafe transition, 1-click work order creation |
+| M16.5 | `POST` | `/api/v1/quotations/{id}/accept` & `/rentals/{id}/amend` | `quotations.manage` / `rentals.manage` | Quotation customer acceptance + active rental amendment/early-return & security deposit settlement + canvas signature payload on handover/return |
+| M16.5 | `GET/POST` | `/api/v1/purchase-requisitions` & `/{id}/{approve\|reject\|convert-to-po}` | `purchase_orders.view`/`manage` (`approve` with segregation of duties) | SRS §16 Purchase Requisitions → Approval → 1-click draft PO conversion |
+| M16.5 | `GET` | `/api/v1/suppliers/{id}/statement` & `/reports/statements/vat-return` | `invoices.view` / `gl.view` | Chronological Supplier Account Statement & Output/Input VAT Return summary |
+| M16.5 | `GET/PATCH` | `/api/v1/companies/{id}/approval-thresholds` | `companies.view` / `settings.manage` (`System Administrator`) | Configurable 7-type SRS §20 approval threshold & approver SRS role matrix |
 
 ### B. Spatie Role & Permission Matrix (M6–M10 Additions)
 
@@ -1399,6 +1405,121 @@ Schema::table('company_settings', function (Blueprint $table): void {
 2. `POST/PATCH /api/v1/leads` validates stage transitions (`lost` requires `lost_reason`); `POST /api/v1/leads/{id}/convert` creates or links existing Customer by email and moves lead to `proposal_sent`.
 3. TOTP 2FA setup → confirm returns 8 recovery codes → next login requires challenge → TOTP code or single-use recovery code succeeds (reusing a recovery code fails `422`).
 4. Toggling `require_2fa_for_privileged = true` sets `two_factor_enrollment_required = true` for unenrolled privileged users and blocks disabling 2FA (`409`); `System Administrator` resets another user's 2FA (`200`) and self-reset returns `409`.
+
+---
+
+## Milestone 16.5 — Complete SRS Gap Parity Sweep Across Every Module (PR #20)
+
+### 16.5.1 Extended Master Schemas & Invariants
+- **Digital Vehicle File (SRS §4):** Extend `vehicles` with `vin`, `category`, `fuel_type`, `transmission`, `current_location`, `acquisition_date`, `acquisition_cost_minor`, `financing_type`, `financing_provider`, `financing_monthly_minor`, `financing_end_date`, `current_book_value_minor`, `residual_value_minor`, `insurance_policy_number`, `insurance_provider`, `insurance_expires_at`, `roadworthy_expires_at`, `licence_expires_at`, and full 9 SRS statuses (`available`, `reserved`, `rented`, `maintenance`, `damaged`, `accident`, `awaiting_inspection`, `awaiting_repair`, `sold`, `decommissioned`). Financial acquisition/financing/book/residual fields MUST be omitted/nulled when caller lacks `invoices.view`, and ignored/rejected on `PATCH` without finance edit permission. When a linked `FixedAsset` exists, its live `net_book_value_minor` is authoritative for `current_book_value_minor`.
+- **Customer KYC & Corporate Profile (SRS §5):** Extend `customers` writable fields with `id_number`, `driver_licence_number`, `driver_licence_expires_at`, `company_registration`, `tin`, `contact_person_name`, `contact_person_phone`, `billing_address` (credit fields writable only with `invoices.manage`).
+- **Digital Signatures, Deposits, Amendments & Acceptance (SRS §6, §7):** `vehicle_inspections` stores optional `signature_data_url` (validated PNG base64 ≤ 150 KB); `quotations` supports `POST /api/v1/quotations/{id}/accept` (`customer_accepted_at`, `customer_acceptance_ref`); `rentals` stores `security_deposit_minor` & `deposit_status` (`none | held | refunded | retained`) and supports `POST /api/v1/rentals/{id}/amend` (`early_return | rate_change | terms_variation`).
+- **Incidents, Requisitions, Supplier Statements, VAT Return & Approval Thresholds:**
+  - `vehicle_incidents` (`accident | breakdown | damage | theft_vandalism`) optionally transitions vehicle to `accident` / `awaiting_repair` (blocking reservations/handovers `409`) and supports `POST /api/v1/incidents/{id}/create-work-order`.
+  - `purchase_requisitions` enforces segregation of duties (`requester_id !== approver_id` → `403`) and `POST /api/v1/purchase-requisitions/{id}/convert-to-po` creates a linked draft PO once (`409` if duplicate/unapproved).
+  - `GET /api/v1/suppliers/{id}/statement` computes chronological AP invoices & supplier payments; `GET /api/v1/reports/statements/vat-return` computes Output VAT (customer invoices − credit notes) minus Input VAT (supplier invoices) = Net VAT.
+  - `GET/PATCH /api/v1/companies/{id}/approval-thresholds` manages configurable thresholds & required SRS §3 approver roles across all 7 SRS §20 approval types.
+  - `GET /api/v1/dashboard/summary` optionally includes `credit`, `compliance`, `operations_alerts`, and finance-gated `vehicle_profitability` summaries.
+
+### 16.5.2 Database Migrations
+```php
+Schema::table('vehicles', function (Blueprint $table): void {
+    $table->string('vin', 32)->nullable();
+    $table->string('category', 32)->nullable(); // sedan | suv | pickup_4x4 | van_minibus | hatchback | luxury | commercial | other
+    $table->string('fuel_type', 24)->nullable(); // petrol | diesel | hybrid | electric | lpg
+    $table->string('transmission', 24)->nullable(); // automatic | manual | cvt
+    $table->string('current_location', 120)->nullable();
+    $table->date('acquisition_date')->nullable();
+    $table->unsignedBigInteger('acquisition_cost_minor')->nullable();
+    $table->string('financing_type', 24)->nullable(); // cash_purchase | loan | finance_lease | operating_lease
+    $table->string('financing_provider', 120)->nullable();
+    $table->unsignedBigInteger('financing_monthly_minor')->nullable();
+    $table->date('financing_end_date')->nullable();
+    $table->unsignedBigInteger('current_book_value_minor')->nullable();
+    $table->unsignedBigInteger('residual_value_minor')->nullable();
+    $table->string('insurance_policy_number', 64)->nullable();
+    $table->string('insurance_provider', 120)->nullable();
+    $table->date('insurance_expires_at')->nullable();
+    $table->date('roadworthy_expires_at')->nullable();
+    $table->date('licence_expires_at')->nullable();
+});
+
+Schema::table('customers', function (Blueprint $table): void {
+    $table->date('driver_licence_expires_at')->nullable();
+    $table->string('contact_person_name', 120)->nullable();
+    $table->string('contact_person_phone', 40)->nullable();
+    $table->string('billing_address', 255)->nullable();
+});
+
+Schema::table('quotations', function (Blueprint $table): void {
+    $table->timestampTz('customer_accepted_at')->nullable();
+    $table->string('customer_acceptance_ref', 80)->nullable();
+});
+
+Schema::table('rentals', function (Blueprint $table): void {
+    $table->unsignedBigInteger('security_deposit_minor')->default(0);
+    $table->string('deposit_status', 16)->default('none'); // none | held | refunded | retained
+});
+
+Schema::table('vehicle_inspections', function (Blueprint $table): void {
+    $table->mediumText('signature_data_url')->nullable();
+});
+
+Schema::create('vehicle_incidents', function (Blueprint $table): void {
+    $table->id();
+    $table->foreignId('company_id')->constrained()->cascadeOnDelete();
+    $table->foreignId('branch_id')->constrained()->cascadeOnDelete();
+    $table->foreignId('vehicle_id')->constrained()->cascadeOnDelete();
+    $table->foreignId('rental_id')->nullable()->constrained()->nullOnDelete();
+    $table->string('incident_type', 24); // accident | breakdown | damage | theft_vandalism
+    $table->string('severity', 16); // minor | moderate | major | total_loss
+    $table->date('occurred_at');
+    $table->string('location', 160)->nullable();
+    $table->string('driver_name', 120)->nullable();
+    $table->string('insurance_claim_number', 64)->nullable();
+    $table->unsignedBigInteger('estimated_cost_minor')->nullable();
+    $table->text('description');
+    $table->string('status', 20)->default('reported'); // reported | assessing | repairing | closed
+    $table->foreignId('work_order_id')->nullable()->constrained()->nullOnDelete();
+    $table->timestamps();
+});
+
+Schema::create('purchase_requisitions', function (Blueprint $table): void {
+    $table->id();
+    $table->foreignId('company_id')->constrained()->cascadeOnDelete();
+    $table->foreignId('branch_id')->constrained()->cascadeOnDelete();
+    $table->foreignId('requester_id')->constrained('users')->cascadeOnDelete();
+    $table->foreignId('approver_id')->nullable()->constrained('users')->nullOnDelete();
+    $table->foreignId('supplier_id')->nullable()->constrained()->nullOnDelete();
+    $table->string('requisition_number', 40);
+    $table->string('department', 60);
+    $table->date('needed_by');
+    $table->text('justification');
+    $table->json('items'); // [{ description, quantity, estimated_unit_minor }]
+    $table->unsignedBigInteger('estimated_total_minor');
+    $table->string('status', 20)->default('pending'); // pending | approved | rejected | converted
+    $table->foreignId('purchase_order_id')->nullable()->constrained()->nullOnDelete();
+    $table->timestamps();
+});
+
+Schema::create('approval_thresholds', function (Blueprint $table): void {
+    $table->id();
+    $table->foreignId('company_id')->constrained()->cascadeOnDelete();
+    $table->string('type', 32); // all 7 SRS §20 approval types
+    $table->unsignedBigInteger('threshold_minor')->nullable();
+    $table->decimal('threshold_pct', 5, 2)->nullable();
+    $table->string('approver_role', 40); // exact SRS §3 role slug
+    $table->boolean('is_active')->default(true);
+    $table->timestamps();
+    $table->unique(['company_id', 'type']);
+});
+```
+
+### 16.5.3 Required Feature Tests (`tests/Feature/MilestoneSixteenFiveTest.php`)
+1. Vehicle Digital File persists VIN/category/fuel/transmission/location/compliance dates and hides/protects financial acquisition/financing/book values from `operations` (`403`/omitted); `GET /vehicles/{id}/history` returns scoped rentals, fuel, work orders, incidents, and compliance.
+2. Customer KYC & corporate profile fields persist cleanly; Quotation `accept` & Rental `amend` / deposit settlement / canvas signature persist accurately.
+3. Incident logging marks vehicle `accident` (blocking bookings `409`) and `create-work-order` links a draft work order cleanly.
+4. Purchase Requisition enforces segregation of duties (`403` self-approve), converts once to draft PO (`409` duplicate); Supplier Statement & VAT Return calculate exact integer minor-unit totals (`403` without finance permission); Approval Thresholds matrix persists all 7 SRS types (`settings.manage` only).
 
 ## Milestone 17 — Printing & Barcode Scanning (PR #20 — TBD)
 *(Will be appended when Milestone 17 is implemented.)*

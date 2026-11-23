@@ -887,3 +887,50 @@ test("M16 exact SRS roles, CRM leads, and privileged TOTP 2FA routes enforce all
     expect(res.status).toBe(200);
   }
 });
+
+test("M16.5 SRS parity routes (vehicle history, incidents, requisitions, supplier statement, VAT return, thresholds) enforce allowlists", async () => {
+  for (const invalid of [
+    "api/v1/incidents",
+    "api/v1/incidents?company_id=1&severity=bogus",
+    "api/v1/purchase-requisitions?company_id=1&status=bogus",
+    "api/v1/suppliers/5/statement?from=bad-date",
+    "api/v1/reports/statements/vat-return?company_id=1&to=not-a-date",
+  ]) {
+    const [path] = invalid.split("?");
+    const res = await proxy(make(invalid), path, config, async () => {
+      throw new Error("Must not reach upstream");
+    });
+    expect(res.status).toBe(400);
+  }
+
+  for (const valid of [
+    "api/v1/vehicles/10/history",
+    "api/v1/incidents?company_id=1&incident_type=accident&severity=major",
+    "api/v1/purchase-requisitions?company_id=1&status=approved",
+    "api/v1/suppliers/5/statement?from=2026-01-01&to=2026-11-23",
+    "api/v1/reports/statements/vat-return?company_id=1&from=2026-01-01&to=2026-11-23",
+    "api/v1/companies/1/approval-thresholds",
+  ]) {
+    const [path] = valid.split("?");
+    const res = await proxy(make(valid), path, config, async () =>
+      Response.json({ data: {} }),
+    );
+    expect(res.status).toBe(200);
+  }
+
+  for (const [method, path] of [
+    ["POST", "api/v1/incidents"],
+    ["POST", "api/v1/incidents/5/create-work-order"],
+    ["POST", "api/v1/quotations/5/accept"],
+    ["POST", "api/v1/rentals/5/amend"],
+    ["POST", "api/v1/purchase-requisitions"],
+    ["POST", "api/v1/purchase-requisitions/5/approve"],
+    ["POST", "api/v1/purchase-requisitions/5/convert-to-po"],
+    ["PATCH", "api/v1/companies/1/approval-thresholds"],
+  ] as const) {
+    const res = await proxy(make(path, method), path, config, async () =>
+      Response.json({ data: {} }),
+    );
+    expect(res.status).toBe(200);
+  }
+});

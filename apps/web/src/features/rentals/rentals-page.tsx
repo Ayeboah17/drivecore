@@ -30,10 +30,23 @@ import {
   can,
   canAccessLeads,
   canAccessRentals,
+  formatMoneyMinor,
   isDriverRole,
+  parseMajorToMinor,
   type Rental,
   type Reservation,
 } from "@/lib/api/contracts";
+import { amendRental } from "@/features/srs-parity/service";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { DriveCoreDateTimeField } from "@/components/ui/drivecore-calendar";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { ApiError, errorText } from "@/lib/api/client";
 import {
   DataSearchForm,
@@ -1272,6 +1285,18 @@ export function RentalDetailPage() {
     "handover" | "return" | null
   >(null);
   const [extendOpen, setExtendOpen] = useState(false);
+  const [amendOpen, setAmendOpen] = useState(false);
+  const [amendType, setAmendType] = useState<
+    "early_return" | "rate_change" | "terms_variation"
+  >("early_return");
+  const [amendEndsAt, setAmendEndsAt] = useState("");
+  const [amendDeposit, setAmendDeposit] = useState("");
+  const [amendDepositStatus, setAmendDepositStatus] = useState<
+    "none" | "held" | "refunded" | "retained"
+  >("held");
+  const [amendReason, setAmendReason] = useState("");
+  const [amendBusy, setAmendBusy] = useState(false);
+  const [amendError, setAmendError] = useState<string | null>(null);
   const [assignOpen, setAssignOpen] = useState(false);
   const [pdfOpen, setPdfOpen] = useState(false);
   const [notice, setNotice] = useState("");
@@ -1512,15 +1537,36 @@ export function RentalDetailPage() {
             </Button>
           ) : null}
           {canManage && rental.status === "active" ? (
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => setExtendOpen(true)}
-              className="gap-1.5"
-            >
-              <Clock className="size-4" aria-hidden="true" />
-              Extend rental
-            </Button>
+            <>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setExtendOpen(true)}
+                className="gap-1.5"
+              >
+                <Clock className="size-4" aria-hidden="true" />
+                Extend rental
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => {
+                  setAmendType("early_return");
+                  setAmendEndsAt("");
+                  setAmendDeposit(
+                    rental.security_deposit_minor
+                      ? (rental.security_deposit_minor / 100).toFixed(2)
+                      : "",
+                  );
+                  setAmendDepositStatus(rental.deposit_status ?? "none");
+                  setAmendReason("");
+                  setAmendError(null);
+                  setAmendOpen(true);
+                }}
+              >
+                Amend / Early return
+              </Button>
+            </>
           ) : null}
           {canHandoverOrReturn && rental.status === "active" ? (
             <Button
@@ -1637,6 +1683,16 @@ export function RentalDetailPage() {
                 {fmtDate(rentalWindow.ends_at)}
               </dd>
             </div>
+            <div>
+              <dt className="text-label text-muted-foreground">
+                Security deposit
+              </dt>
+              <dd className="mt-1 font-mono text-xs tabular-nums">
+                {rental.security_deposit_minor
+                  ? `${formatMoneyMinor(rental.security_deposit_minor, scope.company?.currency || "ZMW")} (${rental.deposit_status ?? "held"})`
+                  : "None held"}
+              </dd>
+            </div>
           </dl>
         </section>
       </div>
@@ -1695,6 +1751,151 @@ export function RentalDetailPage() {
         doc={pdfOpen ? rentalPdfDoc : null}
         onClose={() => setPdfOpen(false)}
       />
+
+      <Dialog
+        open={amendOpen}
+        onOpenChange={(open) => {
+          if (!open && !amendBusy) setAmendOpen(false);
+        }}
+      >
+        <DialogContent className="rounded-2xl p-card sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Amend contract / Early return</DialogTitle>
+            <DialogDescription>
+              Record a contract variation, early return schedule, or security
+              deposit status update for Rental #{rental.id}.
+            </DialogDescription>
+          </DialogHeader>
+          <form
+            className="space-y-4"
+            onSubmit={async (e) => {
+              e.preventDefault();
+              if (amendBusy) return;
+              if (!amendReason.trim()) {
+                setAmendError("Provide a reason for this amendment.");
+                return;
+              }
+              const parsedDep = amendDeposit.trim()
+                ? parseMajorToMinor(amendDeposit)
+                : null;
+              if (amendDeposit.trim() && (parsedDep === null || parsedDep < 0)) {
+                setAmendError("Enter a valid deposit amount.");
+                return;
+              }
+              setAmendBusy(true);
+              setAmendError(null);
+              try {
+                await amendRental(rental.id, {
+                  amendment_type: amendType,
+                  new_ends_at: amendEndsAt
+                    ? new Date(amendEndsAt).toISOString()
+                    : null,
+                  security_deposit_minor: parsedDep,
+                  deposit_status: amendDepositStatus,
+                  reason: amendReason.trim(),
+                });
+                setAmendOpen(false);
+                setNotice(`Contract amendment recorded for Rental #${rental.id}.`);
+                await refreshAll();
+              } catch (err) {
+                setAmendError(errorText(err));
+              } finally {
+                setAmendBusy(false);
+              }
+            }}
+          >
+            <div className="space-y-1.5">
+              <label className="text-xs font-semibold">Amendment type</label>
+              <DriveCoreSelect
+                ariaLabel="Amendment type"
+                value={amendType}
+                onValueChange={(v) =>
+                  setAmendType(
+                    v as "early_return" | "rate_change" | "terms_variation",
+                  )
+                }
+                options={[
+                  { value: "early_return", label: "Early return" },
+                  { value: "rate_change", label: "Rate adjustment" },
+                  { value: "terms_variation", label: "Terms / deposit update" },
+                ]}
+              />
+            </div>
+            {amendType === "early_return" ? (
+              <div className="space-y-1.5">
+                <DriveCoreDateTimeField
+                  label="Revised return date & time (optional)"
+                  value={amendEndsAt}
+                  onChange={setAmendEndsAt}
+                />
+              </div>
+            ) : null}
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="space-y-1">
+                <label htmlFor="amend-deposit" className="text-xs font-semibold">
+                  Security deposit ({scope.company?.currency || "ZMW"})
+                </label>
+                <Input
+                  id="amend-deposit"
+                  inputMode="decimal"
+                  placeholder="0.00"
+                  value={amendDeposit}
+                  onChange={(e) => setAmendDeposit(e.target.value)}
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs font-semibold">Deposit status</label>
+                <DriveCoreSelect
+                  ariaLabel="Deposit status"
+                  value={amendDepositStatus}
+                  onValueChange={(v) =>
+                    setAmendDepositStatus(
+                      v as "none" | "held" | "refunded" | "retained",
+                    )
+                  }
+                  options={[
+                    { value: "none", label: "None" },
+                    { value: "held", label: "Held" },
+                    { value: "refunded", label: "Refunded" },
+                    { value: "retained", label: "Retained" },
+                  ]}
+                />
+              </div>
+            </div>
+            <div className="space-y-1">
+              <label htmlFor="amend-reason" className="text-xs font-semibold">
+                Reason / variation notes
+              </label>
+              <Textarea
+                id="amend-reason"
+                rows={3}
+                placeholder="Customer completed project early; prorate invoice and refund deposit"
+                value={amendReason}
+                onChange={(e) => setAmendReason(e.target.value)}
+                required
+              />
+            </div>
+            {amendError ? (
+              <p role="alert" className="text-xs text-danger-foreground">
+                {amendError}
+              </p>
+            ) : null}
+            <div className="flex justify-end gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                disabled={amendBusy}
+                onClick={() => setAmendOpen(false)}
+              >
+                Cancel
+              </Button>
+              <Button type="submit" disabled={amendBusy}>
+                {amendBusy ? "Saving…" : "Save amendment"}
+              </Button>
+            </div>
+          </form>
+        </DialogContent>
+      </Dialog>
     </ViewFadeIn>
   );
 }

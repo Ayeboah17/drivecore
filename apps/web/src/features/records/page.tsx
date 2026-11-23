@@ -17,6 +17,7 @@ import { EntityDocumentsPanel } from "@/features/documents/documents-panel";
 import { Vehicle360Panel } from "@/features/maintenance/maintenance-page";
 import { VehicleAssetCard } from "@/features/accounting/fixed-assets-panel";
 import { Customer360Panel } from "@/features/stats/customer-360-panel";
+import { VehicleDigitalFileTabs } from "@/features/srs-parity/vehicle-digital-file";
 
 export function RecordPage({ domain }: { domain: Domain }) {
   const { record: route = [] } = useParams<{ record?: string[] }>();
@@ -211,6 +212,7 @@ export function RecordPage({ domain }: { domain: Domain }) {
             record={value}
             company={scope.company?.name ?? `Company #${value.company_id}`}
             currency={scope.company?.currency}
+            canFinance={can(user!, "invoices.view")}
             branch={
               scope.directory?.branches.find(
                 (branch) =>
@@ -226,6 +228,7 @@ export function RecordPage({ domain }: { domain: Domain }) {
             <>
               <Vehicle360Panel vehicle={value} />
               <VehicleAssetCard vehicle={value} />
+              <VehicleDigitalFileTabs vehicle={value} />
             </>
           ) : null}
           {can(user!, "documents.view") ? (

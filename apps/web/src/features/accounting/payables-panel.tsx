@@ -6,6 +6,7 @@ import {
   AlertTriangle,
   CheckCircle2,
   CreditCard,
+  FileSpreadsheet,
   Plus,
   Receipt,
   ShieldAlert,
@@ -14,6 +15,7 @@ import { useSession } from "@/features/auth/session-provider";
 import { useLiveContext } from "@/features/live/context";
 import { listPurchaseOrders, listSuppliers } from "@/features/procurement/service";
 import { createApprovalRequest } from "@/features/governance/service";
+import { SupplierStatementDialog } from "@/features/srs-parity/supplier-statement-dialog";
 import {
   createSupplierInvoice,
   getApAgeing,
@@ -383,6 +385,10 @@ export function PayablesPanel() {
   const [bucket, setBucket] = useState<ArAgeingBucketKey | "">("");
   const [createOpen, setCreateOpen] = useState(false);
   const [paying, setPaying] = useState<SupplierInvoice | null>(null);
+  const [statementTarget, setStatementTarget] = useState<{
+    id: number;
+    name: string;
+  } | null>(null);
   const [payAmount, setPayAmount] = useState("");
   const [payMethod, setPayMethod] = useState<
     "bank_transfer" | "cash" | "card" | "mobile_money"
@@ -696,6 +702,22 @@ export function PayablesPanel() {
                             Record payment
                           </Button>
                         ) : null}
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          onClick={() =>
+                            setStatementTarget({
+                              id: inv.supplier_id,
+                              name:
+                                inv.supplier_name ||
+                                `Supplier #${inv.supplier_id}`,
+                            })
+                          }
+                        >
+                          <FileSpreadsheet className="size-3.5" aria-hidden="true" />
+                          Statement
+                        </Button>
                       </div>
                     </DataTableCell>
                   </DataTableRow>
@@ -705,6 +727,15 @@ export function PayablesPanel() {
           </DataTable>
         </DataTableFrame>
       )}
+
+      <SupplierStatementDialog
+        supplierId={statementTarget?.id ?? null}
+        supplierName={statementTarget?.name ?? ""}
+        open={!!statementTarget}
+        onOpenChange={(open) => {
+          if (!open) setStatementTarget(null);
+        }}
+      />
 
       <CreateSupplierInvoiceDialog
         open={createOpen}

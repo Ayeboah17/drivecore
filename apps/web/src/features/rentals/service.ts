@@ -223,6 +223,7 @@ export async function createRental(
   body: {
     reservation_id: number;
     driver_user_id?: number | null;
+    security_deposit_minor?: number;
   },
   signal: AbortSignal,
 ): Promise<Rental> {
@@ -259,6 +260,7 @@ export async function transitionRental(
       damage_notes?: string | null;
       customer_acknowledged_by?: string | null;
       customer_acknowledged?: boolean;
+      signature_data_url?: string | null;
     };
   },
   signal: AbortSignal,

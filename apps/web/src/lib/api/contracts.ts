@@ -236,20 +236,95 @@ export const vehicleStatsRollupSchema = z.object({
 });
 export type VehicleStatsRollup = z.infer<typeof vehicleStatsRollupSchema>;
 
+export const vehicleCategories = [
+  "sedan",
+  "suv",
+  "pickup_4x4",
+  "van_minibus",
+  "hatchback",
+  "luxury",
+  "commercial",
+  "other",
+] as const;
+export type VehicleCategory = (typeof vehicleCategories)[number];
+export const vehicleCategoryLabels: Record<VehicleCategory, string> = {
+  sedan: "Sedan",
+  suv: "SUV",
+  pickup_4x4: "Pickup / 4x4",
+  van_minibus: "Van / Minibus",
+  hatchback: "Hatchback",
+  luxury: "Executive / Luxury",
+  commercial: "Commercial",
+  other: "Other",
+};
+
+export const vehicleFuelTypes = [
+  "petrol",
+  "diesel",
+  "hybrid",
+  "electric",
+  "lpg",
+] as const;
+export type VehicleFuelType = (typeof vehicleFuelTypes)[number];
+export const vehicleFuelTypeLabels: Record<VehicleFuelType, string> = {
+  petrol: "Petrol",
+  diesel: "Diesel",
+  hybrid: "Hybrid",
+  electric: "Electric",
+  lpg: "LPG",
+};
+
+export const vehicleTransmissions = ["automatic", "manual", "cvt"] as const;
+export type VehicleTransmission = (typeof vehicleTransmissions)[number];
+export const vehicleTransmissionLabels: Record<VehicleTransmission, string> = {
+  automatic: "Automatic",
+  manual: "Manual",
+  cvt: "CVT",
+};
+
+export const vehicleFinancingTypes = [
+  "cash_purchase",
+  "loan",
+  "finance_lease",
+  "operating_lease",
+] as const;
+export type VehicleFinancingType = (typeof vehicleFinancingTypes)[number];
+export const vehicleFinancingLabels: Record<VehicleFinancingType, string> = {
+  cash_purchase: "Cash purchase",
+  loan: "Bank loan",
+  finance_lease: "Finance lease",
+  operating_lease: "Operating lease",
+};
+
 export const customerSchema = z.object({
   ...ownership,
   name: z.string(),
   type: z.enum(["individual", "corporate"]),
   email: z.string().nullable(),
   phone: z.string().nullable(),
+  id_number: z.string().nullable().optional(),
+  driver_licence_number: z.string().nullable().optional(),
+  driver_licence_expires_at: z.string().nullable().optional(),
+  company_registration: z.string().nullable().optional(),
+  tin: z.string().nullable().optional(),
+  contact_person_name: z.string().nullable().optional(),
+  contact_person_phone: z.string().nullable().optional(),
+  billing_address: z.string().nullable().optional(),
+  credit_limit_minor: nonNegInt.nullable().optional(),
+  payment_terms_days: nonNegInt.nullable().optional(),
   stats: customerStatsRollupSchema.optional(),
 });
 export const vehicleSchema = z.object({
   ...ownership,
   registration: z.string(),
+  vin: z.string().nullable().optional(),
   make: z.string(),
   model: z.string(),
   year: z.number().int().nullable(),
+  category: z.enum(vehicleCategories).nullable().optional(),
+  fuel_type: z.enum(vehicleFuelTypes).nullable().optional(),
+  transmission: z.enum(vehicleTransmissions).nullable().optional(),
+  current_location: z.string().nullable().optional(),
   odometer: z.number().int().nonnegative(),
   odometer_unit: z.literal("km").optional().default("km"),
   daily_rate_minor: z.number().int().nonnegative().optional().default(0),
@@ -260,12 +335,29 @@ export const vehicleSchema = z.object({
     .default([]),
   status: z.enum([
     "available",
+    "reserved",
+    "rented",
     "maintenance",
     "damaged",
-    "rented",
+    "accident",
+    "awaiting_inspection",
+    "awaiting_repair",
     "sold",
     "decommissioned",
   ]),
+  acquisition_date: z.string().nullable().optional(),
+  acquisition_cost_minor: nonNegInt.nullable().optional(),
+  financing_type: z.enum(vehicleFinancingTypes).nullable().optional(),
+  financing_provider: z.string().nullable().optional(),
+  financing_monthly_minor: nonNegInt.nullable().optional(),
+  financing_end_date: z.string().nullable().optional(),
+  current_book_value_minor: nonNegInt.nullable().optional(),
+  residual_value_minor: nonNegInt.nullable().optional(),
+  insurance_policy_number: z.string().nullable().optional(),
+  insurance_provider: z.string().nullable().optional(),
+  insurance_expires_at: z.string().nullable().optional(),
+  roadworthy_expires_at: z.string().nullable().optional(),
+  licence_expires_at: z.string().nullable().optional(),
   stats: vehicleStatsRollupSchema.optional(),
 });
 export const documentEntityTypes = [
@@ -362,6 +454,8 @@ export const quotationSchema = z.object({
   discount_decided_by: numericId.nullable().optional().default(null),
   discount_decided_by_name: z.string().nullable().optional().default(null),
   discount_decided_at: z.string().nullable().optional().default(null),
+  customer_accepted_at: z.string().nullable().optional().default(null),
+  customer_acceptance_ref: z.string().nullable().optional().default(null),
   discount_decision_notes: z.string().nullable().optional().default(null),
   subtotal_minor: nonNegInt,
   discount_minor: nonNegInt,
@@ -412,6 +506,11 @@ export const rentalSchema = z.object({
   starts_at: z.string().nullable().optional(),
   ends_at: z.string().nullable().optional(),
   invoice_id: numericId.nullable().optional().default(null),
+  security_deposit_minor: nonNegInt.optional().default(0),
+  deposit_status: z
+    .enum(["none", "held", "refunded", "retained"])
+    .optional()
+    .default("none"),
 });
 
 export const paymentMethods = [
@@ -658,6 +757,9 @@ export const supplierSchema = z.object({
   email: z.string().nullable().optional().default(null),
   phone: z.string().nullable().optional().default(null),
   is_active: z.boolean().default(true),
+  po_count: nonNegInt.optional(),
+  total_spend_minor: nonNegInt.nullable().optional(),
+  open_ap_minor: nonNegInt.nullable().optional(),
   created_at: z.string(),
   updated_at: z.string(),
 });
@@ -760,6 +862,42 @@ export const dashboardSummarySchema = z.object({
     low_stock_parts: nonNegInt,
     overdue_invoices: nonNegInt,
   }),
+  credit: z
+    .object({
+      total_receivables_minor: nonNegInt,
+      overdue_90_plus_minor: nonNegInt,
+      customers_on_hold: nonNegInt,
+    })
+    .nullable()
+    .optional(),
+  compliance: z
+    .object({
+      expired: nonNegInt,
+      expiring_30d: nonNegInt,
+    })
+    .nullable()
+    .optional(),
+  operations_alerts: z
+    .object({
+      overdue_returns: nonNegInt,
+      awaiting_inspection: nonNegInt,
+      accident_or_repair: nonNegInt,
+      pending_approvals: nonNegInt,
+    })
+    .nullable()
+    .optional(),
+  vehicle_profitability: z
+    .array(
+      z.object({
+        vehicle_id: numericId,
+        registration: z.string(),
+        make_model: z.string(),
+        revenue_minor: z.number().int(),
+        cost_minor: z.number().int(),
+        profit_minor: z.number().int(),
+      }),
+    )
+    .optional(),
   finance: z
     .object({
       revenue_minor: z.coerce.number().int(),
@@ -1826,6 +1964,176 @@ export function canManageLeads(user: User): boolean {
     user.permissions.includes("quotations.manage")
   );
 }
+
+// ---------- Milestone 16.5: Complete SRS Parity Schemas ----------
+
+export const incidentTypes = [
+  "accident",
+  "breakdown",
+  "damage",
+  "theft_vandalism",
+] as const;
+export type IncidentType = (typeof incidentTypes)[number];
+
+export const incidentSeverities = [
+  "minor",
+  "moderate",
+  "major",
+  "total_loss",
+] as const;
+export type IncidentSeverity = (typeof incidentSeverities)[number];
+
+export const incidentStatuses = [
+  "reported",
+  "assessing",
+  "repairing",
+  "closed",
+] as const;
+export type IncidentStatus = (typeof incidentStatuses)[number];
+
+export const vehicleIncidentSchema = z.object({
+  id: numericId,
+  company_id: numericId,
+  branch_id: numericId,
+  vehicle_id: numericId,
+  vehicle_registration: z.string().nullable().optional().default(null),
+  rental_id: numericId.nullable().optional().default(null),
+  incident_type: z.enum(incidentTypes),
+  severity: z.enum(incidentSeverities),
+  occurred_at: z.string(),
+  location: z.string().nullable().optional().default(null),
+  driver_name: z.string().nullable().optional().default(null),
+  insurance_claim_number: z.string().nullable().optional().default(null),
+  estimated_cost_minor: nonNegInt.nullable().optional().default(null),
+  description: z.string(),
+  status: z.enum(incidentStatuses),
+  work_order_id: numericId.nullable().optional().default(null),
+  created_at: z.string().nullable().optional().default(null),
+});
+export type VehicleIncident = z.infer<typeof vehicleIncidentSchema>;
+
+export const vehicleHistorySchema = z.object({
+  vehicle_id: numericId,
+  rentals: z.array(
+    z.object({
+      id: numericId,
+      customer_name: z.string().nullable().optional().default(null),
+      status: z.string(),
+      started_at: z.string().nullable().optional().default(null),
+      returned_at: z.string().nullable().optional().default(null),
+      revenue_minor: nonNegInt.nullable().optional().default(null),
+    }),
+  ),
+  fuel: z.array(
+    z.object({
+      id: numericId,
+      filled_at: z.string(),
+      litres: nonNegNumber,
+      amount_minor: nonNegInt.nullable().optional().default(null),
+      odometer_km: nonNegInt,
+      litres_per_100km: nonNegNumber.nullable().optional().default(null),
+      is_abnormal: z.boolean().optional().default(false),
+    }),
+  ),
+  work_orders: z.array(
+    z.object({
+      id: numericId,
+      title: z.string(),
+      status: z.string(),
+      total_cost_minor: nonNegInt.nullable().optional().default(null),
+      created_at: z.string().nullable().optional().default(null),
+    }),
+  ),
+  incidents: z.array(vehicleIncidentSchema),
+  compliance: z.object({
+    insurance_policy_number: z.string().nullable().optional().default(null),
+    insurance_provider: z.string().nullable().optional().default(null),
+    insurance_expires_at: z.string().nullable().optional().default(null),
+    roadworthy_expires_at: z.string().nullable().optional().default(null),
+    licence_expires_at: z.string().nullable().optional().default(null),
+  }),
+});
+export type VehicleHistory = z.infer<typeof vehicleHistorySchema>;
+
+export const purchaseRequisitionStatuses = [
+  "pending",
+  "approved",
+  "rejected",
+  "converted",
+] as const;
+export type PurchaseRequisitionStatus =
+  (typeof purchaseRequisitionStatuses)[number];
+
+export const purchaseRequisitionSchema = z.object({
+  id: numericId,
+  company_id: numericId,
+  branch_id: numericId,
+  requester_id: numericId,
+  requester_name: z.string().nullable().optional().default(null),
+  approver_id: numericId.nullable().optional().default(null),
+  approver_name: z.string().nullable().optional().default(null),
+  supplier_id: numericId.nullable().optional().default(null),
+  supplier_name: z.string().nullable().optional().default(null),
+  requisition_number: z.string(),
+  department: z.string(),
+  needed_by: z.string(),
+  justification: z.string(),
+  items: z.array(
+    z.object({
+      description: z.string(),
+      quantity: numericId,
+      estimated_unit_minor: nonNegInt,
+    }),
+  ),
+  estimated_total_minor: nonNegInt,
+  status: z.enum(purchaseRequisitionStatuses),
+  purchase_order_id: numericId.nullable().optional().default(null),
+  created_at: z.string().nullable().optional().default(null),
+});
+export type PurchaseRequisition = z.infer<typeof purchaseRequisitionSchema>;
+
+export const supplierStatementSchema = z.object({
+  supplier_id: numericId,
+  supplier_name: z.string(),
+  from: z.string().nullable().optional().default(null),
+  to: z.string().nullable().optional().default(null),
+  opening_balance_minor: z.number().int(),
+  closing_balance_minor: z.number().int(),
+  rows: z.array(
+    z.object({
+      date: z.string(),
+      type: z.enum(["supplier_invoice", "supplier_payment"]),
+      reference: z.string(),
+      description: z.string(),
+      debit_minor: nonNegInt,
+      credit_minor: nonNegInt,
+      balance_minor: z.number().int(),
+    }),
+  ),
+});
+export type SupplierStatement = z.infer<typeof supplierStatementSchema>;
+
+export const vatReturnSchema = z.object({
+  from: z.string().nullable().optional().default(null),
+  to: z.string().nullable().optional().default(null),
+  output_vat_minor: nonNegInt,
+  credit_note_vat_minor: nonNegInt,
+  net_output_vat_minor: z.number().int(),
+  input_vat_minor: nonNegInt,
+  net_vat_payable_minor: z.number().int(),
+  taxable_sales_minor: nonNegInt,
+  taxable_purchases_minor: nonNegInt,
+});
+export type VatReturn = z.infer<typeof vatReturnSchema>;
+
+export const approvalThresholdSchema = z.object({
+  type: z.enum(approvalTypes),
+  threshold_minor: nonNegInt.nullable().optional().default(null),
+  threshold_pct: nonNegNumber.nullable().optional().default(null),
+  approver_role: z.string(),
+  is_active: z.boolean().default(true),
+});
+export type ApprovalThreshold = z.infer<typeof approvalThresholdSchema>;
 
 export function checkPasswordStrength(password: string) {
   const minLength = password.length >= 10;

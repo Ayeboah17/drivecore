@@ -80,9 +80,13 @@ const VEHICLE_STATUS_META: Record<
   { label: string; tone: StatusDotTone }
 > = {
   available: { label: "Available", tone: "success" },
+  reserved: { label: "Reserved", tone: "info" },
   rented: { label: "Rented", tone: "info" },
   maintenance: { label: "Maintenance", tone: "warning" },
   damaged: { label: "Damaged", tone: "danger" },
+  accident: { label: "Accident", tone: "danger" },
+  awaiting_inspection: { label: "Awaiting inspection", tone: "warning" },
+  awaiting_repair: { label: "Awaiting repair", tone: "warning" },
   sold: { label: "Sold", tone: "neutral" },
   decommissioned: { label: "Decommissioned", tone: "danger" },
 };
@@ -96,9 +100,15 @@ const CUSTOMER_TYPES = [
 const VEHICLE_STATUSES = [
   { value: "", label: "All vehicle statuses" },
   { value: "available", label: "Available" },
+  { value: "reserved", label: "Reserved" },
   { value: "rented", label: "Rented" },
   { value: "maintenance", label: "Maintenance" },
   { value: "damaged", label: "Damaged" },
+  { value: "accident", label: "Accident" },
+  { value: "awaiting_inspection", label: "Awaiting inspection" },
+  { value: "awaiting_repair", label: "Awaiting repair" },
+  { value: "sold", label: "Sold" },
+  { value: "decommissioned", label: "Decommissioned" },
 ] as const;
 
 export function RecordDirectory({
@@ -120,7 +130,18 @@ export function RecordDirectory({
   const rawFilter = searchParams.get(filterParamKey) ?? "";
   const allowedFilters = isCustomers
     ? ["individual", "corporate"]
-    : ["available", "rented", "maintenance", "damaged"];
+    : [
+        "available",
+        "reserved",
+        "rented",
+        "maintenance",
+        "damaged",
+        "accident",
+        "awaiting_inspection",
+        "awaiting_repair",
+        "sold",
+        "decommissioned",
+      ];
   const filter = allowedFilters.includes(rawFilter) ? rawFilter : "";
   const from = searchParams.get("from") ?? "";
   const to = searchParams.get("to") ?? "";
