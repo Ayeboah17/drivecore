@@ -2140,6 +2140,109 @@ export const approvalThresholdSchema = z.object({
 });
 export type ApprovalThreshold = z.infer<typeof approvalThresholdSchema>;
 
+// ---------- M16.5.5 Internal Virtual Meetings ----------
+
+export const meetingProviders = [
+  "jitsi_embedded",
+  "zoom",
+  "teams",
+  "google_meet",
+] as const;
+export type MeetingProvider = (typeof meetingProviders)[number];
+
+export const meetingProviderLabels: Record<MeetingProvider, string> = {
+  jitsi_embedded: "DriveCore Video (In-App)",
+  zoom: "Zoom",
+  teams: "Microsoft Teams",
+  google_meet: "Google Meet",
+};
+
+export const meetingStatuses = [
+  "scheduled",
+  "live",
+  "ended",
+  "cancelled",
+] as const;
+export type MeetingStatus = (typeof meetingStatuses)[number];
+
+export const meetingRsvpStatuses = [
+  "pending",
+  "accepted",
+  "tentative",
+  "declined",
+] as const;
+export type MeetingRsvpStatus = (typeof meetingRsvpStatuses)[number];
+
+export const meetingRelatedEntityTypes = [
+  "rental",
+  "work_order",
+  "incident",
+  "customer",
+  "vehicle",
+  "quotation",
+  "invoice",
+] as const;
+export type MeetingRelatedEntityType =
+  (typeof meetingRelatedEntityTypes)[number];
+
+export const meetingParticipantSchema = z.object({
+  user_id: numericId,
+  name: z.string(),
+  email: z.string(),
+  rsvp_status: z.enum(meetingRsvpStatuses),
+  responded_at: z.string().nullable().optional().default(null),
+});
+export type MeetingParticipant = z.infer<typeof meetingParticipantSchema>;
+
+export const meetingSchema = z.object({
+  id: numericId,
+  company_id: numericId,
+  branch_id: numericId.nullable().optional().default(null),
+  organizer_user_id: numericId,
+  organizer_name: z.string(),
+  title: z.string(),
+  agenda: z.string().nullable().optional().default(null),
+  provider: z.enum(meetingProviders),
+  room_slug: z.string().nullable().optional().default(null),
+  join_url: z.string(),
+  starts_at: z.string(),
+  ends_at: z.string(),
+  status: z.enum(meetingStatuses),
+  channel: z.enum(messageChannels).nullable().optional().default(null),
+  related_entity_type: z
+    .enum(meetingRelatedEntityTypes)
+    .nullable()
+    .optional()
+    .default(null),
+  related_entity_id: numericId.nullable().optional().default(null),
+  minutes: z.string().nullable().optional().default(null),
+  participants: z.array(meetingParticipantSchema).optional().default([]),
+  created_at: z.string(),
+  updated_at: z.string().nullable().optional().default(null),
+});
+export type LiveMeeting = z.infer<typeof meetingSchema>;
+
+export function canAccessMeetings(user: User): boolean {
+  return (
+    user.is_platform_admin ||
+    user.permissions.includes("meetings.view") ||
+    user.permissions.includes("meetings.manage") ||
+    user.permissions.includes("messages.view") ||
+    isDriverRole(user)
+  );
+}
+
+export function canManageMeetings(user: User): boolean {
+  if (isDriverRole(user) && !user.permissions.includes("meetings.manage")) {
+    return false;
+  }
+  return (
+    user.is_platform_admin ||
+    user.permissions.includes("meetings.manage") ||
+    user.permissions.includes("messages.send")
+  );
+}
+
 export function checkPasswordStrength(password: string) {
   const minLength = password.length >= 10;
   const hasLetter = /[A-Za-z]/.test(password);

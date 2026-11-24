@@ -8,7 +8,7 @@
 
 ---
 
-## Master Quick-Reference Index (M6–M16.5)
+## Master Quick-Reference Index (M6–M16.5.5)
 
 ### A. Endpoint Index
 
@@ -1521,8 +1521,75 @@ Schema::create('approval_thresholds', function (Blueprint $table): void {
 3. Incident logging marks vehicle `accident` (blocking bookings `409`) and `create-work-order` links a draft work order cleanly.
 4. Purchase Requisition enforces segregation of duties (`403` self-approve), converts once to draft PO (`409` duplicate); Supplier Statement & VAT Return calculate exact integer minor-unit totals (`403` without finance permission); Approval Thresholds matrix persists all 7 SRS types (`settings.manage` only).
 
-## Milestone 17 — Printing & Barcode Scanning (PR #20 — TBD)
+---
+
+## Milestone 16.5.5 — Internal Virtual Meetings & Messaging Center Upgrade (PR #21)
+
+Adds company- and branch-scoped internal virtual meetings inside the Messaging & Chat Center (`LiveChatDrawer` → `Meetings` tab + wide embedded Jitsi `MeetingRoomModal`). Supports hybrid hosting: instant embedded **Jitsi Meet** rooms (`meet.jit.si` or self-hosted `DRIVECORE_JITSI_DOMAIN`) or external **Zoom / Microsoft Teams / Google Meet** `https://` links, plus RSVPs, in-app notifications, optional Chat channel join cards, and post-meeting minutes.
+
+### 16.5.5.1 Role Permission Additions (`meetings.view`, `meetings.manage`)
+- **All 10 SRS §3 roles** (`ceo`, `general-manager`, `business-accounts-manager`, `operations-manager`, `maintenance-manager`, `finance-manager`, `credit-control-manager`, `hr-admin-manager`, `mechanic-technician`, `system-administrator`) and legacy operational/admin roles (`company-admin`, `operations`, `finance`) receive **both** `meetings.view` and `meetings.manage`.
+- `viewer` receives `meetings.view` only (can view/RSVP/join, cannot create or edit).
+- `driver` receives **neither** permission globally, but is allowed to view, RSVP, and join meetings where the driver's `user_id` is explicitly in `meeting_participants` (invite-only self-scope).
+
+### 16.5.5.2 API Endpoints & Contracts
+
+| Method | Endpoint | Permission / Access | Request / Query / Behaviour |
+| :--- | :--- | :--- | :--- |
+| `GET` | `/api/v1/meetings` | `meetings.view` or invited `driver` | Required `company_id`; optional `branch_id`, `status` (`scheduled\|live\|ended\|cancelled`), `scope` (`upcoming\|past\|all`), `page`. Non-privileged `driver` sees only invited meetings. Returns paginated `Meeting[]` with `participants[]` and `my_rsvp`. |
+| `POST` | `/api/v1/meetings` | `meetings.manage` | Creates a `scheduled` or instant `live` (`start_now: true`) meeting. Body: `company_id`, `branch_id?`, `title` (max 160), `agenda?` (max 2000), `provider` (`jitsi_embedded\|zoom\|teams\|google_meet`), `external_join_url?` (required `https://` when provider ≠ `jitsi_embedded`), `starts_at` (ISO 8601), `duration_minutes` (5–480), `start_now?` (boolean), `participant_user_ids?` (`int[]`, scoped to company), `related_entity_type?` (`rental\|work_order\|incident\|customer\|vehicle\|quotation\|invoice`), `related_entity_id?`, `post_to_channel?` (boolean), `channel?` (`dispatch\|drivers\|customers\|support`). For `jitsi_embedded`, server generates unguessable `room_slug` (`drivecore-{companyId}-{randomHex}`) and `join_url`. Sends in-app notifications to invited participants; if `post_to_channel=true`, posts a message with `related_entity_type: "meeting"` & `related_entity_id: meeting.id`. |
+| `GET` | `/api/v1/meetings/{id}` | `meetings.view` or invited `driver` | Returns full `Meeting` record (404 outside company/branch scope or uninvited driver). |
+| `PATCH` | `/api/v1/meetings/{id}` | Organizer or `system-administrator` / `company-admin` / platform admin | Updates `title`, `agenda`, `starts_at`, `duration_minutes`, `provider`, `external_join_url`, `participant_user_ids`, or `minutes` (max 5000). Notifies participants when rescheduled. |
+| `POST` | `/api/v1/meetings/{id}/rsvp` | `meetings.view` or invited `driver` | Body: `{ rsvp_status: "accepted" \| "tentative" \| "declined" }`. Upserts caller's RSVP row. |
+| `POST` | `/api/v1/meetings/{id}/start` | Organizer or `system-administrator` / `company-admin` / platform admin | Marks `scheduled` → `live`, sets `started_at = now()` (`409` if `ended`/`cancelled`). |
+| `POST` | `/api/v1/meetings/{id}/end` | Organizer or `system-administrator` / `company-admin` / platform admin | Marks `live`/`scheduled` → `ended`, sets `ended_at = now()`, optional `{ minutes }` saved on record. |
+| `POST` | `/api/v1/meetings/{id}/cancel` | Organizer or `system-administrator` / `company-admin` / platform admin | Marks `scheduled`/`live` → `cancelled` (`409` if already `ended`/`cancelled`), notifies invited participants. |
+
+### 16.5.5.3 Database Schema (Laravel Migration Blueprint)
+
+```php
+Schema::create('meetings', function (Blueprint $table): void {
+    $table->id();
+    $table->foreignId('company_id')->constrained()->cascadeOnDelete();
+    $table->foreignId('branch_id')->nullable()->constrained()->nullOnDelete();
+    $table->foreignId('organizer_user_id')->constrained('users')->cascadeOnDelete();
+    $table->string('title', 160);
+    $table->text('agenda')->nullable();
+    $table->string('provider', 24)->default('jitsi_embedded'); // jitsi_embedded | zoom | teams | google_meet
+    $table->string('room_slug', 96)->nullable();
+    $table->string('join_url', 512);
+    $table->timestampTz('starts_at');
+    $table->unsignedSmallInteger('duration_minutes')->default(30);
+    $table->string('status', 20)->default('scheduled'); // scheduled | live | ended | cancelled
+    $table->timestampTz('started_at')->nullable();
+    $table->timestampTz('ended_at')->nullable();
+    $table->text('minutes')->nullable();
+    $table->string('related_entity_type', 32)->nullable();
+    $table->unsignedBigInteger('related_entity_id')->nullable();
+    $table->string('channel', 24)->nullable();
+    $table->timestamps();
+    $table->index(['company_id', 'branch_id', 'starts_at']);
+});
+
+Schema::create('meeting_participants', function (Blueprint $table): void {
+    $table->id();
+    $table->foreignId('meeting_id')->constrained()->cascadeOnDelete();
+    $table->foreignId('user_id')->constrained()->cascadeOnDelete();
+    $table->string('rsvp_status', 16)->default('pending'); // pending | accepted | tentative | declined
+    $table->timestampTz('responded_at')->nullable();
+    $table->timestamps();
+    $table->unique(['meeting_id', 'user_id']);
+});
+```
+
+### 16.5.5.4 Required Feature Tests (`tests/Feature/MilestoneSixteenFiveFiveTest.php`)
+1. `POST /api/v1/meetings` creates instant `live` Jitsi meeting with server-generated `room_slug`, invites scoped users, dispatches notifications, and posts chat join card when `post_to_channel=true`.
+2. External `zoom`/`teams`/`google_meet` meetings require a valid `https://` `external_join_url` (`422` for `javascript:` or `http://`).
+3. Only organizer or `system-administrator`/`company-admin`/platform admin may `PATCH`, `start`, `end`, or `cancel` (`403` for other staff).
+4. `driver` only sees and RSVPs to meetings where explicitly invited (`404` on uninvited meetings, `403` on `POST /api/v1/meetings`).
+
+## Milestone 17 — Printing & Barcode Scanning (PR #22 — TBD)
 *(Will be appended when Milestone 17 is implemented.)*
 
-## Milestone 18 — Car Tracker / GPS Telematics API Integration (PR #21 — Final / TBD)
+## Milestone 18 — Car Tracker / GPS Telematics API Integration (PR #23 — Final / TBD)
 *(Will be appended once GPS tracker vendor API details are available.)*

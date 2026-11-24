@@ -30,9 +30,10 @@
   --radius-card: var(--card-radius);
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-inter), Arial, sans-serif;
-  --font-mono: var(--font-jetbrains-mono), ui-monospace, SFMono-Regular, Consolas, monospace;
-  --font-heading: var(--font-inter), Arial, sans-serif;
+  --font-sans: var(--font-inter), system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
+  --font-mono: var(--font-inter), system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
+  --font-code: var(--font-jetbrains-mono), ui-monospace, SFMono-Regular, Consolas, monospace;
+  --font-heading: var(--font-inter), system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
   --text-page-title: 1.5rem;
   --text-page-title--line-height: 2rem;
   --text-page-title--font-weight: 600;
@@ -206,12 +207,27 @@
   ::selection {
     @apply bg-accent text-accent-foreground;
   }
-  body {
-    @apply bg-background text-foreground text-body;
-  }
   html {
     @apply font-sans;
   }
+  body {
+    @apply bg-background text-foreground text-body font-sans;
+  }
+  button,
+  input,
+  select,
+  textarea {
+    font-family: inherit;
+  }
+  code,
+  pre,
+  kbd {
+    font-family: var(--font-code);
+  }
+}
+
+.font-mono {
+  font-variant-numeric: tabular-nums;
 }
 
 :root {

@@ -934,3 +934,44 @@ test("M16.5 SRS parity routes (vehicle history, incidents, requisitions, supplie
     expect(res.status).toBe(200);
   }
 });
+
+test("M16.5.5 internal virtual meetings routes enforce allowlists", async () => {
+  for (const invalid of [
+    "api/v1/meetings",
+    "api/v1/meetings?company_id=1&status=bogus",
+    "api/v1/meetings?company_id=1&scope=bogus",
+    "api/v1/meetings/5?company_id=1",
+  ]) {
+    const [path] = invalid.split("?");
+    const res = await proxy(make(invalid), path, config, async () => {
+      throw new Error("Must not reach upstream");
+    });
+    expect(res.status).toBe(400);
+  }
+
+  for (const valid of [
+    "api/v1/meetings?company_id=1",
+    "api/v1/meetings?company_id=1&branch_id=2&status=live&scope=upcoming&page=1",
+    "api/v1/meetings/5",
+  ]) {
+    const [path] = valid.split("?");
+    const res = await proxy(make(valid), path, config, async () =>
+      Response.json({ data: {} }),
+    );
+    expect(res.status).toBe(200);
+  }
+
+  for (const [method, path] of [
+    ["POST", "api/v1/meetings"],
+    ["PATCH", "api/v1/meetings/5"],
+    ["POST", "api/v1/meetings/5/rsvp"],
+    ["POST", "api/v1/meetings/5/start"],
+    ["POST", "api/v1/meetings/5/end"],
+    ["POST", "api/v1/meetings/5/cancel"],
+  ] as const) {
+    const res = await proxy(make(path, method), path, config, async () =>
+      Response.json({ data: {} }),
+    );
+    expect(res.status).toBe(200);
+  }
+});

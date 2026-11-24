@@ -48,6 +48,7 @@ let suppliers = new Map();
 let purchaseOrders = new Map();
 let workOrders = new Map();
 let messages = new Map();
+let meetings = new Map();
 let notifications = new Map();
 let auditEvents = new Map();
 let savedFilters = new Map();
@@ -124,6 +125,8 @@ const ROLE_DEFS = [
       "purchase_orders.approve",
       "messages.view",
       "messages.send",
+      "meetings.view",
+      "meetings.manage",
       "reports.view",
       "audit.view",
     ],
@@ -154,6 +157,8 @@ const ROLE_DEFS = [
       "purchase_orders.approve",
       "messages.view",
       "messages.send",
+      "meetings.view",
+      "meetings.manage",
       "reports.view",
     ],
   },
@@ -182,6 +187,8 @@ const ROLE_DEFS = [
       "purchase_orders.manage",
       "messages.view",
       "messages.send",
+      "meetings.view",
+      "meetings.manage",
       "reports.view",
     ],
   },
@@ -203,6 +210,7 @@ const ROLE_DEFS = [
       "suppliers.view",
       "purchase_orders.view",
       "messages.view",
+      "meetings.view",
       "reports.view",
     ],
   },
@@ -228,6 +236,8 @@ const ROLE_DEFS = [
       "purchase_orders.view",
       "purchase_orders.approve",
       "messages.view",
+      "meetings.view",
+      "meetings.manage",
       "reports.view",
       "audit.view",
     ],
@@ -254,6 +264,8 @@ const ROLE_DEFS = [
       "purchase_orders.view",
       "purchase_orders.approve",
       "messages.view",
+      "meetings.view",
+      "meetings.manage",
       "reports.view",
     ],
   },
@@ -275,6 +287,8 @@ const ROLE_DEFS = [
       "documents.view",
       "messages.view",
       "messages.send",
+      "meetings.view",
+      "meetings.manage",
       "reports.view",
     ],
   },
@@ -295,6 +309,8 @@ const ROLE_DEFS = [
       "documents.manage",
       "messages.view",
       "messages.send",
+      "meetings.view",
+      "meetings.manage",
       "reports.view",
     ],
   },
@@ -315,6 +331,8 @@ const ROLE_DEFS = [
       "documents.view",
       "messages.view",
       "messages.send",
+      "meetings.view",
+      "meetings.manage",
       "reports.view",
     ],
   },
@@ -338,6 +356,8 @@ const ROLE_DEFS = [
       "gl.view",
       "purchase_orders.view",
       "purchase_orders.approve",
+      "meetings.view",
+      "meetings.manage",
       "reports.view",
     ],
   },
@@ -351,6 +371,8 @@ const ROLE_DEFS = [
       "documents.view",
       "messages.view",
       "messages.send",
+      "meetings.view",
+      "meetings.manage",
       "reports.view",
     ],
   },
@@ -365,6 +387,8 @@ const ROLE_DEFS = [
       "documents.manage",
       "messages.view",
       "messages.send",
+      "meetings.view",
+      "meetings.manage",
     ],
   },
   {
@@ -376,6 +400,8 @@ const ROLE_DEFS = [
       "work_orders.view",
       "work_orders.manage",
       "parts.view",
+      "meetings.view",
+      "meetings.manage",
     ],
   },
   {
@@ -422,6 +448,8 @@ const ROLE_DEFS = [
       "purchase_orders.approve",
       "messages.view",
       "messages.send",
+      "meetings.view",
+      "meetings.manage",
       "reports.view",
     ],
   },
@@ -468,6 +496,7 @@ function reset() {
   purchaseOrders = new Map();
   workOrders = new Map();
   messages = new Map();
+  meetings = new Map();
   notifications = new Map([
     [
       900,
@@ -1055,6 +1084,114 @@ function seedDemo() {
         related_entity_id: 13,
         read_by: [],
         created_at: iso(-5),
+      },
+    ],
+    [
+      801,
+      {
+        id: 801,
+        company_id: 1,
+        branch_id: 2,
+        sender_user_id: 3,
+        sender_name: "Ama Osei (Operations Mgr)",
+        channel: "dispatch",
+        body: "Live meeting started: Daily Accra Dispatch & Fleet Handover Standup (Jitsi Meet).",
+        related_entity_type: "meeting",
+        related_entity_id: 850,
+        read_by: [],
+        created_at: iso(-0.2),
+      },
+    ],
+  ]);
+
+  meetings = new Map([
+    [
+      850,
+      {
+        id: 850,
+        company_id: 1,
+        branch_id: 2,
+        organizer_user_id: 3,
+        organizer_name: "Ama Osei (Operations Mgr)",
+        title: "Daily Accra Dispatch & Fleet Handover Standup",
+        agenda: "Review morning vehicle handovers, driver allocations, and Bay 2 HiAce release ETA.",
+        provider: "jitsi_embedded",
+        room_slug: "drivecore-1-accra-standup-850",
+        join_url: "https://meet.jit.si/drivecore-1-accra-standup-850",
+        starts_at: iso(-0.2),
+        ends_at: iso(0.3),
+        status: "live",
+        channel: "dispatch",
+        related_entity_type: "rental",
+        related_entity_id: 600,
+        minutes: null,
+        participants: [
+          { user_id: 1, name: "Kofi Yeboah (System Admin)", email: "sysadmin@drivecore.demo", rsvp_status: "accepted", responded_at: iso(-1) },
+          { user_id: 2, name: "Yaw Boateng (Fleet Driver)", email: "activedriver@drivecore.demo", rsvp_status: "accepted", responded_at: iso(-0.5) },
+          { user_id: 3, name: "Ama Osei (Operations Mgr)", email: "opsmanager@drivecore.demo", rsvp_status: "accepted", responded_at: iso(-1) },
+          { user_id: 9, name: "Kwabena Owusu (Maintenance Mgr)", email: "maintmanager@drivecore.demo", rsvp_status: "tentative", responded_at: iso(-0.8) },
+        ],
+        created_at: iso(-2),
+        updated_at: iso(-0.2),
+      },
+    ],
+    [
+      851,
+      {
+        id: 851,
+        company_id: 1,
+        branch_id: 2,
+        organizer_user_id: 10,
+        organizer_name: "Esi Koomson (Credit Control)",
+        title: "Executive Credit Review — Ashanti Infrastructure Consult",
+        agenda: "Review overdue INV-00242 (>90 days) and approve revised payment plan before lifting credit hold.",
+        provider: "teams",
+        room_slug: null,
+        join_url: "https://teams.microsoft.com/l/meetup-join/drivecore-credit-review-851",
+        starts_at: iso(4),
+        ends_at: iso(5),
+        status: "scheduled",
+        channel: "support",
+        related_entity_type: "customer",
+        related_entity_id: 12,
+        minutes: null,
+        participants: [
+          { user_id: 1, name: "Kofi Yeboah (System Admin)", email: "sysadmin@drivecore.demo", rsvp_status: "pending", responded_at: null },
+          { user_id: 4, name: "Efua Appiah (Finance Mgr)", email: "financemanager@drivecore.demo", rsvp_status: "accepted", responded_at: iso(-2) },
+          { user_id: 6, name: "Nana Akufo (CEO)", email: "ceo@drivecore.demo", rsvp_status: "accepted", responded_at: iso(-1.5) },
+          { user_id: 10, name: "Esi Koomson (Credit Control)", email: "creditcontrol@drivecore.demo", rsvp_status: "accepted", responded_at: iso(-3) },
+        ],
+        created_at: iso(-6),
+        updated_at: iso(-2),
+      },
+    ],
+    [
+      852,
+      {
+        id: 852,
+        company_id: 1,
+        branch_id: 2,
+        organizer_user_id: 9,
+        organizer_name: "Kwabena Owusu (Maintenance Mgr)",
+        title: "Weekly Workshop & Tyre Inventory Review",
+        agenda: "Inspect low-stock tyre positions and sign off PO-00221 for Michelin All-Terrain set.",
+        provider: "jitsi_embedded",
+        room_slug: "drivecore-1-workshop-review-852",
+        join_url: "https://meet.jit.si/drivecore-1-workshop-review-852",
+        starts_at: iso(-26),
+        ends_at: iso(-25),
+        status: "ended",
+        channel: "dispatch",
+        related_entity_type: "work_order",
+        related_entity_id: 240,
+        minutes: "Confirmed PO-00221 for 4x Michelin All-Terrain tyres. Lead Mechanic Kojo Tetteh to complete HiAce brake overhaul by tomorrow 14:00.",
+        participants: [
+          { user_id: 1, name: "Kofi Yeboah (System Admin)", email: "sysadmin@drivecore.demo", rsvp_status: "accepted", responded_at: iso(-28) },
+          { user_id: 5, name: "Kojo Tetteh (Lead Mechanic)", email: "mechanic@drivecore.demo", rsvp_status: "accepted", responded_at: iso(-27) },
+          { user_id: 9, name: "Kwabena Owusu (Maintenance Mgr)", email: "maintmanager@drivecore.demo", rsvp_status: "accepted", responded_at: iso(-28) },
+        ],
+        created_at: iso(-30),
+        updated_at: iso(-25),
       },
     ],
   ]);
@@ -5609,6 +5746,382 @@ export function startDemoApiServer({ port = 0, seed = false } = {}) {
       }
       if (!m.read_by.includes(user.id)) m.read_by.push(user.id);
       json(200, { data: { ok: true } });
+      return;
+    }
+  }
+
+  const meetingMatch = url.pathname.match(
+    /^\/api\/v1\/meetings(?:\/(\d+)(?:\/(rsvp|start|end|cancel))?)?$/,
+  );
+  if (meetingMatch) {
+    const meetingId = meetingMatch[1] ? Number(meetingMatch[1]) : null;
+    const action = meetingMatch[2] ?? null;
+    const isDriverOnly =
+      user.roles.includes("driver") &&
+      !user.is_platform_admin &&
+      !user.permissions.includes("meetings.view") &&
+      !user.permissions.includes("meetings.manage");
+    const isAdminUser =
+      user.is_platform_admin ||
+      user.roles.includes("system-administrator") ||
+      user.roles.includes("company-admin");
+    const canViewMeetings =
+      user.is_platform_admin ||
+      user.permissions.includes("meetings.view") ||
+      user.permissions.includes("meetings.manage") ||
+      user.permissions.includes("messages.view") ||
+      isDriverOnly;
+    const canManageMeetings =
+      !isDriverOnly &&
+      (user.is_platform_admin ||
+        user.permissions.includes("meetings.manage") ||
+        user.permissions.includes("messages.send"));
+
+    if (req.method === "GET" && !meetingId) {
+      if (!canViewMeetings) {
+        fail(403);
+        return;
+      }
+      const companyId = Number(url.searchParams.get("company_id"));
+      const branchId = url.searchParams.get("branch_id")
+        ? Number(url.searchParams.get("branch_id"))
+        : null;
+      const statusFilter = url.searchParams.get("status");
+      const scopeFilter = url.searchParams.get("scope") ?? "all";
+
+      const visible = [...meetings.values()]
+        .filter((m) => {
+          if (m.company_id !== companyId) return false;
+          if (branchId !== null && m.branch_id !== null && m.branch_id !== branchId)
+            return false;
+          if (isDriverOnly) {
+            const invited =
+              m.organizer_user_id === user.id ||
+              m.participants.some((p) => p.user_id === user.id);
+            if (!invited) return false;
+          }
+          return true;
+        })
+        .sort((a, b) => {
+          if (a.status === "live" && b.status !== "live") return -1;
+          if (b.status === "live" && a.status !== "live") return 1;
+          return new Date(b.starts_at).getTime() - new Date(a.starts_at).getTime();
+        });
+
+      const live_count = visible.filter((m) => m.status === "live").length;
+      const filtered = visible.filter((m) => {
+        if (statusFilter && m.status !== statusFilter) return false;
+        if (scopeFilter === "upcoming") {
+          return m.status === "live" || m.status === "scheduled";
+        }
+        if (scopeFilter === "past") {
+          return m.status === "ended";
+        }
+        return true;
+      });
+
+      json(200, {
+        data: filtered.slice(0, 25),
+        meta: {
+          current_page: 1,
+          last_page: 1,
+          per_page: 25,
+          total: filtered.length,
+          live_count,
+        },
+      });
+      return;
+    }
+
+    if (req.method === "POST" && !meetingId) {
+      if (!canManageMeetings) {
+        fail(403);
+        return;
+      }
+      const title = String(input.title ?? "").trim();
+      if (!title || title.length > 160) {
+        fail(422, { title: ["Meeting title must be between 1 and 160 characters."] });
+        return;
+      }
+      const provider = String(input.provider ?? "jitsi_embedded");
+      if (!["jitsi_embedded", "zoom", "teams", "google_meet"].includes(provider)) {
+        fail(422, { provider: ["Unsupported meeting provider."] });
+        return;
+      }
+      const companyId = Number(input.company_id);
+      const branchId = input.branch_id ? Number(input.branch_id) : null;
+      const durationMinutes = Math.min(
+        480,
+        Math.max(5, Number(input.duration_minutes ?? 30)),
+      );
+      const startNow = Boolean(input.start_now);
+      const startDate = startNow
+        ? new Date()
+        : new Date(String(input.starts_at ?? new Date().toISOString()));
+      if (Number.isNaN(startDate.getTime())) {
+        fail(422, { starts_at: ["Invalid start timestamp."] });
+        return;
+      }
+      const endDate = new Date(startDate.getTime() + durationMinutes * 60_000);
+
+      let roomSlug = null;
+      let joinUrl = "";
+      if (provider === "jitsi_embedded") {
+        roomSlug = `drivecore-${companyId}-${randomUUID().slice(0, 8)}`;
+        joinUrl = `https://meet.jit.si/${roomSlug}`;
+      } else {
+        const rawUrl = String(input.external_join_url ?? "").trim();
+        try {
+          const parsed = new URL(rawUrl);
+          if (parsed.protocol !== "https:") throw new Error("https required");
+          joinUrl = parsed.toString();
+        } catch {
+          fail(422, {
+            external_join_url: ["A valid https:// meeting URL is required."],
+          });
+          return;
+        }
+      }
+
+      const id = nextId++;
+      const nowIso = new Date().toISOString();
+      const requestedIds = Array.isArray(input.participant_user_ids)
+        ? input.participant_user_ids.map(Number).filter((n) => Number.isFinite(n))
+        : [];
+      const uniqueIds = new Set([user.id, ...requestedIds]);
+      const participants = [...uniqueIds].map((uid) => {
+        const found = managedUsers.get(uid);
+        const isOrganizer = uid === user.id;
+        return {
+          user_id: uid,
+          name: isOrganizer
+            ? user.name
+            : (found?.name ?? `Team Member #${uid}`),
+          email: isOrganizer
+            ? user.email
+            : (found?.email ?? `user${uid}@drivecore.demo`),
+          rsvp_status: isOrganizer ? "accepted" : "pending",
+          responded_at: isOrganizer ? nowIso : null,
+        };
+      });
+
+      const channel = input.post_to_channel
+        ? String(input.channel ?? "dispatch")
+        : null;
+      const created = {
+        id,
+        company_id: companyId,
+        branch_id: branchId,
+        organizer_user_id: user.id,
+        organizer_name: user.name,
+        title,
+        agenda: input.agenda ? String(input.agenda).trim() : null,
+        provider,
+        room_slug: roomSlug,
+        join_url: joinUrl,
+        starts_at: startDate.toISOString(),
+        ends_at: endDate.toISOString(),
+        status: startNow ? "live" : "scheduled",
+        channel,
+        related_entity_type: input.related_entity_type ?? null,
+        related_entity_id: input.related_entity_id
+          ? Number(input.related_entity_id)
+          : null,
+        minutes: null,
+        participants,
+        created_at: nowIso,
+        updated_at: nowIso,
+      };
+      meetings.set(id, created);
+
+      if (input.post_to_channel && channel) {
+        const msgId = nextId++;
+        messages.set(msgId, {
+          id: msgId,
+          company_id: companyId,
+          branch_id: branchId,
+          sender_user_id: user.id,
+          sender_name: user.name,
+          channel,
+          body: `${startNow ? "Live meeting started" : "Meeting scheduled"}: ${title}`,
+          related_entity_type: "meeting",
+          related_entity_id: id,
+          read_by: [user.id],
+          created_at: nowIso,
+        });
+      }
+
+      const notifId = nextId++;
+      notifications.set(notifId, {
+        id: notifId,
+        company_id: companyId,
+        branch_id: branchId,
+        required_permission: "meetings.view",
+        severity: "info",
+        title: startNow ? `Live meeting: ${title}` : `Meeting invite: ${title}`,
+        body: `${user.name} ${startNow ? "started" : "scheduled"} an internal virtual meeting.`,
+        href: null,
+        read_by: [user.id],
+        created_at: nowIso,
+      });
+
+      completedWrites++;
+      json(201, { data: created });
+      return;
+    }
+
+    const existing = meetingId ? meetings.get(meetingId) : null;
+    if (!existing) {
+      fail(404);
+      return;
+    }
+    if (
+      isDriverOnly &&
+      existing.organizer_user_id !== user.id &&
+      !existing.participants.some((p) => p.user_id === user.id)
+    ) {
+      fail(404);
+      return;
+    }
+
+    if (req.method === "GET" && !action) {
+      if (!canViewMeetings) {
+        fail(403);
+        return;
+      }
+      json(200, { data: existing });
+      return;
+    }
+
+    if (req.method === "POST" && action === "rsvp") {
+      if (!canViewMeetings) {
+        fail(403);
+        return;
+      }
+      const nextStatus = String(input.rsvp_status ?? "");
+      if (!["accepted", "tentative", "declined"].includes(nextStatus)) {
+        fail(422, { rsvp_status: ["Invalid RSVP status."] });
+        return;
+      }
+      const nowIso = new Date().toISOString();
+      const idx = existing.participants.findIndex((p) => p.user_id === user.id);
+      if (idx >= 0) {
+        existing.participants[idx] = {
+          ...existing.participants[idx],
+          rsvp_status: nextStatus,
+          responded_at: nowIso,
+        };
+      } else {
+        existing.participants.push({
+          user_id: user.id,
+          name: user.name,
+          email: user.email,
+          rsvp_status: nextStatus,
+          responded_at: nowIso,
+        });
+      }
+      existing.updated_at = nowIso;
+      completedWrites++;
+      json(200, { data: existing });
+      return;
+    }
+
+    const canOrganize = existing.organizer_user_id === user.id || isAdminUser;
+    if (!canOrganize) {
+      fail(403);
+      return;
+    }
+
+    if (req.method === "PATCH" && !action) {
+      const nowIso = new Date().toISOString();
+      if (typeof input.title === "string" && input.title.trim()) {
+        existing.title = input.title.trim().slice(0, 160);
+      }
+      if ("agenda" in input) {
+        existing.agenda = input.agenda ? String(input.agenda).trim() : null;
+      }
+      if ("minutes" in input) {
+        existing.minutes = input.minutes ? String(input.minutes).trim() : null;
+      }
+      if (typeof input.starts_at === "string") {
+        const startDate = new Date(input.starts_at);
+        if (!Number.isNaN(startDate.getTime())) {
+          const durationMinutes = Math.min(
+            480,
+            Math.max(5, Number(input.duration_minutes ?? 30)),
+          );
+          existing.starts_at = startDate.toISOString();
+          existing.ends_at = new Date(
+            startDate.getTime() + durationMinutes * 60_000,
+          ).toISOString();
+        }
+      }
+      if (
+        typeof input.provider === "string" &&
+        ["jitsi_embedded", "zoom", "teams", "google_meet"].includes(input.provider)
+      ) {
+        existing.provider = input.provider;
+        if (input.provider === "jitsi_embedded") {
+          existing.room_slug =
+            existing.room_slug ||
+            `drivecore-${existing.company_id}-${randomUUID().slice(0, 8)}`;
+          existing.join_url = `https://meet.jit.si/${existing.room_slug}`;
+        } else if (typeof input.external_join_url === "string") {
+          try {
+            const parsed = new URL(input.external_join_url.trim());
+            if (parsed.protocol !== "https:") throw new Error("https required");
+            existing.join_url = parsed.toString();
+            existing.room_slug = null;
+          } catch {
+            fail(422, {
+              external_join_url: ["A valid https:// meeting URL is required."],
+            });
+            return;
+          }
+        }
+      }
+      existing.updated_at = nowIso;
+      completedWrites++;
+      json(200, { data: existing });
+      return;
+    }
+
+    if (req.method === "POST" && action === "start") {
+      if (existing.status === "ended" || existing.status === "cancelled") {
+        fail(409);
+        return;
+      }
+      existing.status = "live";
+      existing.updated_at = new Date().toISOString();
+      completedWrites++;
+      json(200, { data: existing });
+      return;
+    }
+
+    if (req.method === "POST" && action === "end") {
+      if (existing.status === "cancelled") {
+        fail(409);
+        return;
+      }
+      existing.status = "ended";
+      if ("minutes" in input) {
+        existing.minutes = input.minutes ? String(input.minutes).trim() : null;
+      }
+      existing.updated_at = new Date().toISOString();
+      completedWrites++;
+      json(200, { data: existing });
+      return;
+    }
+
+    if (req.method === "POST" && action === "cancel") {
+      if (existing.status === "ended" || existing.status === "cancelled") {
+        fail(409);
+        return;
+      }
+      existing.status = "cancelled";
+      existing.updated_at = new Date().toISOString();
+      completedWrites++;
+      json(200, { data: existing });
       return;
     }
   }
