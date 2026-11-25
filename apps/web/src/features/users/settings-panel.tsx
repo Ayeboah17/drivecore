@@ -28,6 +28,7 @@ import { DriveCoreSelect } from "@/components/ui/drivecore-select";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ApprovalThresholdsCard } from "@/features/srs-parity/approval-thresholds-card";
+import { EmailSettingsCard } from "@/features/users/email-settings-card";
 
 function SettingsForm({
   initial,
@@ -384,6 +385,7 @@ export function FinancialSettingsPanel() {
         }}
       />
       <ApprovalThresholdsCard canEdit={canEdit} />
+      <EmailSettingsCard canEdit={canEdit} />
     </div>
   );
 }

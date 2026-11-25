@@ -975,3 +975,39 @@ test("M16.5.5 internal virtual meetings routes enforce allowlists", async () => 
     expect(res.status).toBe(200);
   }
 });
+
+test("M16.5.6 WebRTC signaling, user deletion, role permissions, and mail settings enforce allowlists", async () => {
+  for (const invalid of [
+    ["GET", "api/v1/meetings/5/rtc/signals"],
+    ["GET", "api/v1/meetings/5/rtc/signals?peer_id=bad!id"],
+    ["GET", "api/v1/meetings/5/rtc/signals?peer_id=peer_1234&after_id=-1"],
+    ["DELETE", "api/v1/users/5"],
+    ["DELETE", "api/v1/users/5?company_id=abc"],
+  ] as const) {
+    const [method, url] = invalid;
+    const [path] = url.split("?");
+    const res = await proxy(make(url, method), path, config, async () => {
+      throw new Error("Must not reach upstream");
+    });
+    expect(res.status).toBe(400);
+  }
+
+  for (const [method, url] of [
+    ["GET", "api/v1/meetings/5/rtc/signals?peer_id=peer_1234&after_id=0&audio_enabled=1&video_enabled=0"],
+    ["POST", "api/v1/meetings/5/rtc/join"],
+    ["POST", "api/v1/meetings/5/rtc/signals"],
+    ["POST", "api/v1/meetings/5/rtc/leave"],
+    ["DELETE", "api/v1/users/5?company_id=1"],
+    ["PATCH", "api/v1/roles/operations-manager"],
+    ["POST", "api/v1/roles/operations-manager/reset"],
+    ["GET", "api/v1/companies/1/mail-settings"],
+    ["PATCH", "api/v1/companies/1/mail-settings"],
+    ["POST", "api/v1/companies/1/mail-settings/test"],
+  ] as const) {
+    const [path] = url.split("?");
+    const res = await proxy(make(url, method), path, config, async () =>
+      Response.json({ data: {} }),
+    );
+    expect(res.status).toBe(200);
+  }
+});

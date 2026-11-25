@@ -34,7 +34,14 @@ import {
   type CreateUserValues,
   type UpdateUserValues,
 } from "./schemas";
-import { createUser, updateUser } from "./service";
+import {
+  createUser,
+  deleteUser,
+  resetRolePermissions,
+  updateRolePermissions,
+  updateUser,
+} from "./service";
+import { Checkbox } from "@/components/ui/checkbox";
 
 const ROLE_OPTIONS = assignableRoleNames.map((name) => ({
   value: name,
@@ -652,77 +659,481 @@ export function EditUserDialog({
   );
 }
 
+export function DeleteUserDialog({
+  target,
+  onClose,
+  onDeleted,
+}: {
+  target: ManagedUser | null;
+  onClose: () => void;
+  onDeleted: (deletedId: number) => void;
+}) {
+  const scope = useLiveContext();
+  const [confirmEmail, setConfirmEmail] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<unknown>(null);
+
+  const matches =
+    !!target &&
+    confirmEmail.trim().toLowerCase() === target.email.trim().toLowerCase();
+
+  async function handleConfirm(e: React.FormEvent) {
+    e.preventDefault();
+    if (!target || !matches || busy) return;
+    setBusy(true);
+    setError(null);
+    const ac = new AbortController();
+    try {
+      await deleteUser(target.id, scope.companyId, ac.signal);
+      setConfirmEmail("");
+      onDeleted(target.id);
+      onClose();
+    } catch (failure) {
+      setError(failure);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Dialog
+      open={!!target}
+      onOpenChange={(open) => {
+        if (!open && !busy) {
+          setConfirmEmail("");
+          setError(null);
+          onClose();
+        }
+      }}
+    >
+      <DialogContent
+        showCloseButton={!busy}
+        className="rounded-2xl p-card sm:max-w-md"
+      >
+        <DialogHeader>
+          <DialogTitle>Remove user — {target?.name}</DialogTitle>
+          <DialogDescription>
+            This immediately revokes active sessions and removes{" "}
+            <span className="font-semibold text-foreground">
+              {target?.email}
+            </span>{" "}
+            from this company. Historical audit logs, rentals, invoices, and
+            meetings remain intact.
+          </DialogDescription>
+        </DialogHeader>
+
+        <form
+          onSubmit={(e) => {
+            void handleConfirm(e);
+          }}
+          className="space-y-4"
+        >
+          <div className="space-y-1.5">
+            <label
+              htmlFor="delete-user-confirm-email"
+              className="text-xs font-medium text-foreground"
+            >
+              Type <span className="font-semibold">{target?.email}</span> to
+              confirm
+            </label>
+            <Input
+              id="delete-user-confirm-email"
+              autoComplete="off"
+              disabled={busy}
+              placeholder={target?.email ?? ""}
+              value={confirmEmail}
+              onChange={(e) => setConfirmEmail(e.target.value)}
+            />
+          </div>
+
+          {error ? (
+            <p
+              role="alert"
+              className="rounded-xl border border-danger bg-danger/10 p-3 text-xs text-danger-foreground"
+            >
+              {errorText(error)}
+            </p>
+          ) : null}
+
+          <div className="flex justify-end gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              disabled={busy}
+              onClick={() => {
+                setConfirmEmail("");
+                setError(null);
+                onClose();
+              }}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="submit"
+              variant="destructive"
+              disabled={busy || !matches}
+            >
+              {busy ? "Removing…" : "Delete user"}
+            </Button>
+          </div>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+const PERMISSION_GROUPS: { label: string; permissions: string[] }[] = [
+  {
+    label: "Company & Branches",
+    permissions: [
+      "companies.view",
+      "companies.manage",
+      "branches.view",
+      "branches.manage",
+    ],
+  },
+  {
+    label: "Fleet & Vehicles",
+    permissions: ["vehicles.view", "vehicles.manage"],
+  },
+  {
+    label: "Customers & CRM",
+    permissions: [
+      "customers.view",
+      "customers.manage",
+      "leads.view",
+      "leads.manage",
+    ],
+  },
+  {
+    label: "Quotations & Rentals",
+    permissions: [
+      "quotations.view",
+      "quotations.manage",
+      "quotations.approve_discount",
+      "reservations.view",
+      "reservations.manage",
+      "rentals.view",
+      "rentals.manage",
+      "documents.view",
+      "documents.manage",
+    ],
+  },
+  {
+    label: "Finance & Accounting",
+    permissions: [
+      "invoices.view",
+      "invoices.manage",
+      "payments.manage",
+      "expenses.view",
+      "expenses.manage",
+      "gl.view",
+    ],
+  },
+  {
+    label: "Maintenance, Inventory & Procurement",
+    permissions: [
+      "work_orders.view",
+      "work_orders.manage",
+      "parts.view",
+      "parts.manage",
+      "suppliers.view",
+      "suppliers.manage",
+      "purchase_orders.view",
+      "purchase_orders.manage",
+      "purchase_orders.approve",
+    ],
+  },
+  {
+    label: "Communications & Meetings",
+    permissions: [
+      "messages.view",
+      "messages.send",
+      "meetings.view",
+      "meetings.manage",
+    ],
+  },
+  {
+    label: "Reports, Audit & Administration",
+    permissions: [
+      "reports.view",
+      "audit.view",
+      "users.view",
+      "users.manage",
+      "roles.view",
+      "settings.manage",
+    ],
+  },
+];
+
+const LOCKOUT_PROTECTED_PERMISSIONS = new Set([
+  "users.manage",
+  "roles.view",
+  "settings.manage",
+]);
+
 export function RolesReferenceDialog({
   open,
   onOpenChange,
   roles,
   loading,
   error,
+  canEdit = false,
+  onUpdated,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   roles: RoleDefinition[] | undefined;
   loading: boolean;
   error: unknown;
+  canEdit?: boolean;
+  onUpdated?: () => void;
 }) {
+  const scope = useLiveContext();
+  const [selectedRoleName, setSelectedRoleName] = useState<string>("");
+  const [draftPerms, setDraftPerms] = useState<string[]>([]);
+  const [dirty, setDirty] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [resetting, setResetting] = useState(false);
+  const [feedback, setFeedback] = useState<string>("");
+  const [saveError, setSaveError] = useState<string>("");
+
+  const activeRole =
+    roles?.find((r) => r.name === selectedRoleName) ?? roles?.[0] ?? null;
+
+  function selectRole(role: RoleDefinition) {
+    setSelectedRoleName(role.name);
+    setDraftPerms([...role.permissions]);
+    setDirty(false);
+    setFeedback("");
+    setSaveError("");
+  }
+
+  const effectivePerms = dirty
+    ? draftPerms
+    : (activeRole?.permissions ?? []);
+
+  const isLockedAdminRole =
+    activeRole?.name === "system-administrator" ||
+    activeRole?.name === "company-admin";
+
+  function togglePerm(perm: string) {
+    if (!canEdit || !activeRole) return;
+    if (isLockedAdminRole && LOCKOUT_PROTECTED_PERMISSIONS.has(perm)) return;
+    const base = dirty ? draftPerms : [...activeRole.permissions];
+    const next = base.includes(perm)
+      ? base.filter((p) => p !== perm)
+      : [...base, perm];
+    setDraftPerms(next);
+    setDirty(true);
+    setFeedback("");
+    setSaveError("");
+  }
+
+  async function handleSave() {
+    if (!canEdit || !activeRole || saving) return;
+    setSaving(true);
+    setSaveError("");
+    setFeedback("");
+    const ac = new AbortController();
+    try {
+      const updated = await updateRolePermissions(
+        activeRole.name,
+        {
+          company_id: Number(scope.companyId),
+          permissions: effectivePerms,
+        },
+        ac.signal,
+      );
+      setDraftPerms([...updated.permissions]);
+      setDirty(false);
+      setFeedback(
+        `Saved ${updated.permissions.length} permissions for ${managedRoleLabels[activeRole.name]}.`,
+      );
+      onUpdated?.();
+    } catch (err) {
+      setSaveError(errorText(err));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleReset() {
+    if (!canEdit || !activeRole || resetting) return;
+    setResetting(true);
+    setSaveError("");
+    setFeedback("");
+    const ac = new AbortController();
+    try {
+      const updated = await resetRolePermissions(
+        activeRole.name,
+        Number(scope.companyId),
+        ac.signal,
+      );
+      setDraftPerms([...updated.permissions]);
+      setDirty(false);
+      setFeedback(
+        `Restored default SRS permissions for ${managedRoleLabels[activeRole.name]}.`,
+      );
+      onUpdated?.();
+    } catch (err) {
+      setSaveError(errorText(err));
+    } finally {
+      setResetting(false);
+    }
+  }
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto rounded-2xl p-card sm:max-w-xl">
-        <DialogHeader>
+      <DialogContent className="flex max-h-[88dvh] max-w-[calc(100%-1.5rem)] flex-col overflow-hidden rounded-2xl p-0 sm:max-w-3xl">
+        <DialogHeader className="border-b px-5 py-4 pr-12">
           <DialogTitle className="flex items-center gap-2">
             <ShieldCheck className="size-4 text-link" aria-hidden="true" />
-            Role permissions
+            {canEdit ? "Manage Role Permissions" : "Role Permissions"}
           </DialogTitle>
           <DialogDescription>
-            Authoritative permission matrix granted by Laravel for each
-            assignable role.
+            {canEdit
+              ? "Customize company-scoped permissions per role. Lockout-critical admin permissions remain protected."
+              : "Authoritative permission matrix granted for each assignable role."}
           </DialogDescription>
         </DialogHeader>
 
         {loading ? (
-          <p className="text-sm text-muted-foreground">Loading roles…</p>
+          <p className="p-5 text-sm text-muted-foreground">Loading roles…</p>
         ) : error ? (
-          <p role="alert" className="text-sm text-danger-foreground">
+          <p role="alert" className="p-5 text-sm text-danger-foreground">
             {errorText(error)}
           </p>
         ) : !roles?.length ? (
-          <p className="text-sm text-muted-foreground">
+          <p className="p-5 text-sm text-muted-foreground">
             No assignable roles returned.
           </p>
         ) : (
-          <div className="space-y-3">
-            {roles.map((role) => (
-              <article
-                key={role.name}
-                className="space-y-2 rounded-xl border bg-muted/20 p-3.5"
-              >
-                <div className="flex items-center justify-between gap-2">
-                  <h3 className="text-sm font-semibold">
-                    {managedRoleLabels[role.name]}
-                  </h3>
-                  <span className="font-mono text-xs text-muted-foreground">
-                    {role.name}
-                  </span>
-                </div>
-                <div className="flex flex-wrap gap-1.5">
-                  {role.permissions.length === 0 ? (
-                    <span className="text-xs text-muted-foreground">
-                      No explicit permissions
+          <div className="flex min-h-0 flex-1 flex-col md:flex-row">
+            <aside className="flex shrink-0 gap-1 overflow-x-auto border-b bg-muted/20 p-3 md:w-56 md:flex-col md:overflow-y-auto md:border-r md:border-b-0">
+              {roles.map((role) => {
+                const selected = activeRole?.name === role.name;
+                return (
+                  <button
+                    key={role.name}
+                    type="button"
+                    onClick={() => selectRole(role)}
+                    className={`flex shrink-0 items-center justify-between gap-2 rounded-xl px-3 py-2 text-left text-xs font-medium transition-colors ${
+                      selected
+                        ? "bg-surface font-semibold text-foreground shadow-xs ring-1 ring-border"
+                        : "text-muted-foreground hover:bg-muted/60 hover:text-foreground"
+                    }`}
+                  >
+                    <span className="truncate">
+                      {managedRoleLabels[role.name] ?? role.name}
                     </span>
-                  ) : (
-                    role.permissions.map((perm) => (
-                      <Badge
-                        key={perm}
-                        variant="outline"
-                        className="font-mono text-[11px]"
-                      >
-                        {perm}
-                      </Badge>
-                    ))
-                  )}
+                    <Badge variant="outline" className="text-[10px]">
+                      {role.permissions.length}
+                    </Badge>
+                  </button>
+                );
+              })}
+            </aside>
+
+            {activeRole ? (
+              <div className="flex min-h-0 flex-1 flex-col">
+                <div className="flex-1 space-y-4 overflow-y-auto p-4">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <h3 className="text-sm font-bold text-foreground">
+                        {managedRoleLabels[activeRole.name] ?? activeRole.name}
+                      </h3>
+                      <p className="text-xs text-muted-foreground">
+                        Slug: {activeRole.name} · {effectivePerms.length}{" "}
+                        enabled
+                      </p>
+                    </div>
+                  </div>
+
+                  {PERMISSION_GROUPS.map((group) => (
+                    <div
+                      key={group.label}
+                      className="space-y-2 rounded-xl border bg-surface p-3"
+                    >
+                      <h4 className="text-xs font-semibold text-foreground">
+                        {group.label}
+                      </h4>
+                      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                        {group.permissions.map((perm) => {
+                          const checked = effectivePerms.includes(perm);
+                          const locked =
+                            isLockedAdminRole &&
+                            LOCKOUT_PROTECTED_PERMISSIONS.has(perm);
+                          return (
+                            <label
+                              key={perm}
+                              className={`flex items-center gap-2 text-xs ${
+                                canEdit && !locked
+                                  ? "cursor-pointer text-foreground"
+                                  : "text-muted-foreground"
+                              }`}
+                            >
+                              <Checkbox
+                                checked={checked}
+                                disabled={!canEdit || locked}
+                                onCheckedChange={() => togglePerm(perm)}
+                              />
+                              <span className="truncate">{perm}</span>
+                              {locked ? (
+                                <span className="text-[10px] text-muted-foreground">
+                                  (locked)
+                                </span>
+                              ) : null}
+                            </label>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ))}
                 </div>
-              </article>
-            ))}
+
+                {canEdit ? (
+                  <div className="space-y-2 border-t bg-muted/20 px-4 py-3">
+                    {saveError ? (
+                      <p role="alert" className="text-xs text-danger-foreground">
+                        {saveError}
+                      </p>
+                    ) : null}
+                    {feedback ? (
+                      <p
+                        role="status"
+                        className="text-xs font-medium text-emerald-700 dark:text-emerald-300"
+                      >
+                        {feedback}
+                      </p>
+                    ) : null}
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        disabled={saving || resetting}
+                        onClick={() => {
+                          void handleReset();
+                        }}
+                      >
+                        {resetting ? "Resetting…" : "Reset to defaults"}
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        disabled={saving || resetting || !dirty}
+                        onClick={() => {
+                          void handleSave();
+                        }}
+                      >
+                        {saving ? "Saving…" : "Save permissions"}
+                      </Button>
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
           </div>
         )}
       </DialogContent>

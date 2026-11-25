@@ -49,6 +49,10 @@ let purchaseOrders = new Map();
 let workOrders = new Map();
 let messages = new Map();
 let meetings = new Map();
+let meetingRtcPeers = new Map();
+let meetingRtcSignals = new Map();
+let companyRolePermissions = new Map();
+let companyMailSettings = new Map();
 let notifications = new Map();
 let auditEvents = new Map();
 let savedFilters = new Map();
@@ -344,6 +348,7 @@ const ROLE_DEFS = [
       "customers.view",
       "vehicles.view",
       "quotations.view",
+      "quotations.manage",
       "quotations.approve_discount",
       "reservations.view",
       "rentals.view",
@@ -497,6 +502,10 @@ function reset() {
   workOrders = new Map();
   messages = new Map();
   meetings = new Map();
+  meetingRtcPeers = new Map();
+  meetingRtcSignals = new Map();
+  companyRolePermissions = new Map();
+  companyMailSettings = new Map();
   notifications = new Map([
     [
       900,
@@ -856,23 +865,23 @@ function seedDemo() {
 
   managedUsers = new Map([
     [1, { id: 1, name: "Kofi Yeboah (System Admin)", email: "sysadmin@drivecore.demo", is_active: true, is_platform_admin: false, roles: ["system-administrator"], memberships: [{ company_id: 1, branch_id: null }] }],
-    [2, { id: 2, name: "Yaw Boateng (Fleet Driver)", email: "activedriver@drivecore.demo", is_active: true, is_platform_admin: false, roles: ["driver"], memberships: [{ company_id: 1, branch_id: 2 }] }],
-    [3, { id: 3, name: "Ama Osei (Operations Mgr)", email: "opsmanager@drivecore.demo", is_active: true, is_platform_admin: false, roles: ["operations-manager"], memberships: [{ company_id: 1, branch_id: null }] }],
-    [4, { id: 4, name: "Efua Appiah (Finance Mgr)", email: "financemanager@drivecore.demo", is_active: true, is_platform_admin: false, roles: ["finance-manager"], memberships: [{ company_id: 1, branch_id: null }] }],
-    [5, { id: 5, name: "Kojo Tetteh (Lead Mechanic)", email: "mechanic@drivecore.demo", is_active: true, is_platform_admin: false, roles: ["mechanic-technician"], memberships: [{ company_id: 1, branch_id: 2 }] }],
-    [6, { id: 6, name: "Nana Akufo (CEO)", email: "ceo@drivecore.demo", is_active: true, is_platform_admin: false, roles: ["ceo"], memberships: [{ company_id: 1, branch_id: null }] }],
-    [7, { id: 7, name: "Abena Darko (Business Accounts)", email: "businessaccounts@drivecore.demo", is_active: true, is_platform_admin: false, roles: ["business-accounts-manager"], memberships: [{ company_id: 1, branch_id: null }] }],
-    [8, { id: 8, name: "Akua Sarpong (HR / Admin)", email: "hradmin@drivecore.demo", is_active: true, is_platform_admin: false, roles: ["hr-admin-manager"], memberships: [{ company_id: 1, branch_id: null }] }],
-    [9, { id: 9, name: "Kwabena Owusu (Maintenance Mgr)", email: "maintmanager@drivecore.demo", is_active: true, is_platform_admin: false, roles: ["maintenance-manager"], memberships: [{ company_id: 1, branch_id: null }] }],
-    [10, { id: 10, name: "Esi Koomson (Credit Control)", email: "creditcontrol@drivecore.demo", is_active: true, is_platform_admin: false, roles: ["credit-control-manager"], memberships: [{ company_id: 1, branch_id: null }] }],
+    [2, { id: 2, name: "Yaw Obeng (Fleet Driver)", email: "activedriver@drivecore.demo", is_active: true, is_platform_admin: false, roles: ["driver"], memberships: [{ company_id: 1, branch_id: 2 }] }],
+    [3, { id: 3, name: "Ama Yeboah (Operations Mgr)", email: "opsmanager@drivecore.demo", is_active: true, is_platform_admin: false, roles: ["operations-manager"], memberships: [{ company_id: 1, branch_id: null }] }],
+    [4, { id: 4, name: "Efua Obeng (Finance Mgr)", email: "financemanager@drivecore.demo", is_active: true, is_platform_admin: false, roles: ["finance-manager"], memberships: [{ company_id: 1, branch_id: null }] }],
+    [5, { id: 5, name: "Kojo Yeboah (Lead Mechanic)", email: "mechanic@drivecore.demo", is_active: true, is_platform_admin: false, roles: ["mechanic-technician"], memberships: [{ company_id: 1, branch_id: 2 }] }],
+    [6, { id: 6, name: "Nana Obeng (CEO)", email: "ceo@drivecore.demo", is_active: true, is_platform_admin: false, roles: ["ceo"], memberships: [{ company_id: 1, branch_id: null }] }],
+    [7, { id: 7, name: "Abena Yeboah (Business Accounts)", email: "businessaccounts@drivecore.demo", is_active: true, is_platform_admin: false, roles: ["business-accounts-manager"], memberships: [{ company_id: 1, branch_id: null }] }],
+    [8, { id: 8, name: "Akua Obeng (HR / Admin)", email: "hradmin@drivecore.demo", is_active: true, is_platform_admin: false, roles: ["hr-admin-manager"], memberships: [{ company_id: 1, branch_id: null }] }],
+    [9, { id: 9, name: "Kwabena Yeboah (Maintenance Mgr)", email: "maintmanager@drivecore.demo", is_active: true, is_platform_admin: false, roles: ["maintenance-manager"], memberships: [{ company_id: 1, branch_id: null }] }],
+    [10, { id: 10, name: "Esi Obeng (Credit Control)", email: "creditcontrol@drivecore.demo", is_active: true, is_platform_admin: false, roles: ["credit-control-manager"], memberships: [{ company_id: 1, branch_id: null }] }],
   ]);
 
   customers = new Map([
-    [10, { ...demoBase, id: 10, name: "GoldFields Mining Services Ltd", type: "corporate", email: "fleet@goldfields.demo", phone: "+233 30 274 1100", company_registration: "CS-2016-88412", tin: "C0019283741", contact_person_name: "Daniel Asante", contact_person_phone: "+233 24 411 2200", billing_address: "Plot 14 Liberation Rd, Airport City, Accra", credit_limit_minor: 5000000, payment_terms_days: 30 }],
-    [11, { ...demoBase, id: 11, name: "Atlantic Energy Ghana Ltd", type: "corporate", email: "procurement@atlanticenergy.demo", phone: "+233 30 278 4410", company_registration: "CS-2019-41029", tin: "C0044128910", contact_person_name: "Grace Owusu", contact_person_phone: "+233 20 882 9911", billing_address: "8 Ridge Towers, North Ridge, Accra", credit_limit_minor: 3500000, payment_terms_days: 30 }],
-    [12, { ...demoBase, id: 12, branch_id: 5, name: "Ashanti Infrastructure Consult", type: "corporate", email: "ops@ashanticonsult.demo", phone: "+233 32 204 5100", company_registration: "CS-2021-19044", tin: "C0098123114", contact_person_name: "Samuel Frimpong", contact_person_phone: "+233 24 900 3312", billing_address: "22 Harper Road, Adum, Kumasi", credit_limit_minor: 2000000, payment_terms_days: 15 }],
-    [13, { ...demoBase, id: 13, name: "Kwame Nkrumah-Yeboah", type: "individual", email: "kwame.yeboah@demo.gh", phone: "+233 24 555 0192", id_number: "GHA-719283741-2", driver_licence_number: "DL-ACC-2024-9910", driver_licence_expires_at: day(420), billing_address: "18 Cantonments Crescent, Accra" }],
-    [14, { ...demoBase, id: 14, name: "Abena Serwaa Boateng", type: "individual", email: "abena.boateng@demo.gh", phone: "+233 20 612 8840", id_number: "GHA-882910344-7", driver_licence_number: "DL-ACC-2025-4418", driver_licence_expires_at: day(20), billing_address: "42 East Legon Hills, Accra" }],
+    [10, { ...demoBase, id: 10, name: "GoldFields Mining Services Ltd", type: "corporate", email: "fleet@goldfields.demo", phone: "+233 30 274 1100", company_registration: "CS-2016-88412", tin: "C0019283741", contact_person_name: "Daniel Obeng", contact_person_phone: "+233 24 411 2200", billing_address: "Plot 14 Liberation Rd, Airport City, Accra", credit_limit_minor: 5000000, payment_terms_days: 30 }],
+    [11, { ...demoBase, id: 11, name: "Atlantic Energy Ghana Ltd", type: "corporate", email: "procurement@atlanticenergy.demo", phone: "+233 30 278 4410", company_registration: "CS-2019-41029", tin: "C0044128910", contact_person_name: "Grace Yeboah", contact_person_phone: "+233 20 882 9911", billing_address: "8 Ridge Towers, North Ridge, Accra", credit_limit_minor: 3500000, payment_terms_days: 30 }],
+    [12, { ...demoBase, id: 12, branch_id: 5, name: "Ashanti Infrastructure Consult", type: "corporate", email: "ops@ashanticonsult.demo", phone: "+233 32 204 5100", company_registration: "CS-2021-19044", tin: "C0098123114", contact_person_name: "Samuel Obeng", contact_person_phone: "+233 24 900 3312", billing_address: "22 Harper Road, Adum, Kumasi", credit_limit_minor: 2000000, payment_terms_days: 15 }],
+    [13, { ...demoBase, id: 13, name: "Kwame Yeboah", type: "individual", email: "kwame.yeboah@demo.gh", phone: "+233 24 555 0192", id_number: "GHA-719283741-2", driver_licence_number: "DL-ACC-2024-9910", driver_licence_expires_at: day(420), billing_address: "18 Cantonments Crescent, Accra" }],
+    [14, { ...demoBase, id: 14, name: "Abena Serwaa Obeng", type: "individual", email: "abena.obeng@demo.gh", phone: "+233 20 612 8840", id_number: "GHA-882910344-7", driver_licence_number: "DL-ACC-2025-4418", driver_licence_expires_at: day(20), billing_address: "42 East Legon Hills, Accra" }],
   ]);
 
   vehicles = new Map([
@@ -890,9 +899,9 @@ function seedDemo() {
   ]);
 
   leads = new Map([
-    [110, { id: 110, company_id: 1, branch_id: 2, contact_name: "Dr. Michael Addo", company_name: "West Africa Infrastructure Partners", email: "m.addo@waip.demo", phone: "+233 24 881 4400", source: "corporate_rfq", stage: "qualified", estimated_value_minor: 4200000, vehicle_requirements: "3x Land Cruiser Prado + 1x HiAce for 14-day project site tour", assigned_to_user_id: 7, assigned_to_name: "Abena Darko (Business Accounts)", customer_id: null, quotation_id: null, lost_reason: null, notes: "Requires mining-spec safety kit and vetted chauffeurs.", created_at: iso(-72), updated_at: iso(-10) }],
-    [111, { id: 111, company_id: 1, branch_id: 2, contact_name: "Sophia Yeboah", company_name: "Accra Diplomatic Summit Secretariat", email: "protocol@summit.demo", phone: "+233 20 912 3300", source: "referral", stage: "proposal_sent", estimated_value_minor: 6500000, vehicle_requirements: "2x Mercedes E-Class Executive + 2x Prado VIP", assigned_to_user_id: 7, assigned_to_name: "Abena Darko (Business Accounts)", customer_id: 11, quotation_id: 120, lost_reason: null, notes: "Proposal submitted; awaiting protocol director sign-off.", created_at: iso(-120), updated_at: iso(-6) }],
-    [112, { id: 112, company_id: 1, branch_id: 5, contact_name: "Isaac Ofori", company_name: "Kumasi AgroLogistics", email: "iofori@agrologistics.demo", phone: "+233 24 300 7721", source: "website", stage: "new", estimated_value_minor: 1800000, vehicle_requirements: "2x Hilux 4x4 for regional audit", assigned_to_user_id: 7, assigned_to_name: "Abena Darko (Business Accounts)", customer_id: null, quotation_id: null, lost_reason: null, notes: "Requested call back tomorrow morning.", created_at: iso(-18), updated_at: iso(-18) }],
+    [110, { id: 110, company_id: 1, branch_id: 2, contact_name: "Dr. Michael Obeng", company_name: "West Africa Infrastructure Partners", email: "m.obeng@waip.demo", phone: "+233 24 881 4400", source: "corporate_rfq", stage: "qualified", estimated_value_minor: 4200000, vehicle_requirements: "3x Land Cruiser Prado + 1x HiAce for 14-day project site tour", assigned_to_user_id: 7, assigned_to_name: "Abena Yeboah (Business Accounts)", customer_id: null, quotation_id: null, lost_reason: null, notes: "Requires mining-spec safety kit and vetted chauffeurs.", created_at: iso(-72), updated_at: iso(-10) }],
+    [111, { id: 111, company_id: 1, branch_id: 2, contact_name: "Sophia Yeboah", company_name: "Accra Diplomatic Summit Secretariat", email: "protocol@summit.demo", phone: "+233 20 912 3300", source: "referral", stage: "proposal_sent", estimated_value_minor: 6500000, vehicle_requirements: "2x Mercedes E-Class Executive + 2x Prado VIP", assigned_to_user_id: 7, assigned_to_name: "Abena Yeboah (Business Accounts)", customer_id: 11, quotation_id: 120, lost_reason: null, notes: "Proposal submitted; awaiting protocol director sign-off.", created_at: iso(-120), updated_at: iso(-6) }],
+    [112, { id: 112, company_id: 1, branch_id: 5, contact_name: "Isaac Obeng", company_name: "Kumasi AgroLogistics", email: "iobeng@agrologistics.demo", phone: "+233 24 300 7721", source: "website", stage: "new", estimated_value_minor: 1800000, vehicle_requirements: "2x Hilux 4x4 for regional audit", assigned_to_user_id: 7, assigned_to_name: "Abena Yeboah (Business Accounts)", customer_id: null, quotation_id: null, lost_reason: null, notes: "Requested call back tomorrow morning.", created_at: iso(-18), updated_at: iso(-18) }],
   ]);
 
   quotations = new Map([
@@ -913,7 +922,7 @@ function seedDemo() {
   ]);
 
   inspections = new Map([
-    [130, { id: 130, company_id: 1, branch_id: 2, rental_id: 600, vehicle_id: 11, type: "handover", odometer: 63800, fuel_level_pct: 100, exterior_ok: true, interior_ok: true, tyres_ok: true, spare_tyre_ok: true, tools_ok: true, accessories_ok: true, documents_ok: true, damage_notes: "No pre-existing dents.", customer_acknowledged_by: "Grace Owusu", customer_acknowledged: true, inspected_by: 3, inspected_by_name: "Ama Osei (Operations Mgr)", created_at: iso(-70) }],
+    [130, { id: 130, company_id: 1, branch_id: 2, rental_id: 600, vehicle_id: 11, type: "handover", odometer: 63800, fuel_level_pct: 100, exterior_ok: true, interior_ok: true, tyres_ok: true, spare_tyre_ok: true, tools_ok: true, accessories_ok: true, documents_ok: true, damage_notes: "No pre-existing dents.", customer_acknowledged_by: "Grace Yeboah", customer_acknowledged: true, inspected_by: 3, inspected_by_name: "Ama Yeboah (Operations Mgr)", created_at: iso(-70) }],
   ]);
 
   workOrders = new Map([
@@ -922,7 +931,7 @@ function seedDemo() {
   ]);
 
   incidents = new Map([
-    [150, { id: 150, company_id: 1, branch_id: 2, vehicle_id: 15, vehicle_registration: "GW-6090-23", rental_id: null, driver_name: "Yaw Boateng (Fleet Driver)", incident_type: "accident", severity: "moderate", occurred_at: day(-4), location: "Tema Motorway Km 11", description: "Rear-bumper impact in rain traffic; taillight assembly cracked.", insurance_claim_number: "CLM-ENT-2026-0842", estimated_cost_minor: 480000, work_order_id: null, status: "assessing", created_at: iso(-96) }],
+    [150, { id: 150, company_id: 1, branch_id: 2, vehicle_id: 15, vehicle_registration: "GW-6090-23", rental_id: null, driver_name: "Yaw Obeng (Fleet Driver)", incident_type: "accident", severity: "moderate", occurred_at: day(-4), location: "Tema Motorway Km 11", description: "Rear-bumper impact in rain traffic; taillight assembly cracked.", insurance_claim_number: "CLM-ENT-2026-0842", estimated_cost_minor: 480000, work_order_id: null, status: "assessing", created_at: iso(-96) }],
   ]);
 
   maintenanceSchedules = new Map([
@@ -936,9 +945,9 @@ function seedDemo() {
   ]);
 
   fuelTransactions = new Map([
-    [180, { id: 180, company_id: 1, branch_id: 2, vehicle_id: 10, vehicle_registration: "GW-4821-24", driver_user_id: 2, driver_name: "Yaw Boateng (Fleet Driver)", rental_id: null, expense_id: 260, fuel_date: day(-12), station: "Shell Airport Bypass", litres: 68, amount_minor: 98600, odometer: 27950, payment_method: "fuel_card", km_since_last: null, litres_per_100km: null, cost_per_km_minor: null, is_abnormal: false, created_at: iso(-288) }],
-    [181, { id: 181, company_id: 1, branch_id: 2, vehicle_id: 10, vehicle_registration: "GW-4821-24", driver_user_id: 2, driver_name: "Yaw Boateng (Fleet Driver)", rental_id: null, expense_id: 261, fuel_date: day(-3), station: "GOIL Spintex Rd", litres: 62, amount_minor: 89900, odometer: 28450, payment_method: "fuel_card", km_since_last: 500, litres_per_100km: 12.4, cost_per_km_minor: 180, is_abnormal: false, created_at: iso(-72) }],
-    [182, { id: 182, company_id: 1, branch_id: 2, vehicle_id: 11, vehicle_registration: "GE-9104-23", driver_user_id: 2, driver_name: "Yaw Boateng (Fleet Driver)", rental_id: 600, expense_id: 262, fuel_date: day(-1), station: "TotalEnergies Takoradi", litres: 78, amount_minor: 113100, odometer: 64210, payment_method: "fuel_card", km_since_last: 190, litres_per_100km: 41.05, cost_per_km_minor: 595, is_abnormal: true, created_at: iso(-20) }],
+    [180, { id: 180, company_id: 1, branch_id: 2, vehicle_id: 10, vehicle_registration: "GW-4821-24", driver_user_id: 2, driver_name: "Yaw Obeng (Fleet Driver)", rental_id: null, expense_id: 260, fuel_date: day(-12), station: "Shell Airport Bypass", litres: 68, amount_minor: 98600, odometer: 27950, payment_method: "fuel_card", km_since_last: null, litres_per_100km: null, cost_per_km_minor: null, is_abnormal: false, created_at: iso(-288) }],
+    [181, { id: 181, company_id: 1, branch_id: 2, vehicle_id: 10, vehicle_registration: "GW-4821-24", driver_user_id: 2, driver_name: "Yaw Obeng (Fleet Driver)", rental_id: null, expense_id: 261, fuel_date: day(-3), station: "GOIL Spintex Rd", litres: 62, amount_minor: 89900, odometer: 28450, payment_method: "fuel_card", km_since_last: 500, litres_per_100km: 12.4, cost_per_km_minor: 180, is_abnormal: false, created_at: iso(-72) }],
+    [182, { id: 182, company_id: 1, branch_id: 2, vehicle_id: 11, vehicle_registration: "GE-9104-23", driver_user_id: 2, driver_name: "Yaw Obeng (Fleet Driver)", rental_id: 600, expense_id: 262, fuel_date: day(-1), station: "TotalEnergies Takoradi", litres: 78, amount_minor: 113100, odometer: 64210, payment_method: "fuel_card", km_since_last: 190, litres_per_100km: 41.05, cost_per_km_minor: 595, is_abnormal: true, created_at: iso(-20) }],
   ]);
 
   parts = new Map([
@@ -958,8 +967,8 @@ function seedDemo() {
   ]);
 
   purchaseRequisitions = new Map([
-    [230, { id: 230, company_id: 1, branch_id: 2, requisition_number: "REQ-00230", department: "Workshop Maintenance", requester_id: 9, requester_name: "Kwabena Owusu (Maintenance Mgr)", approver_id: null, approver_name: null, supplier_id: 210, supplier_name: "AutoParts Ghana Ltd", needed_by: day(5), justification: "Replenish low-stock brake pads and diagnostic scanner cables.", status: "pending", estimated_total_minor: 540000, items: [{ description: "Heavy-Duty Ceramic Brake Pads (set)", quantity: 4, estimated_unit_minor: 135000 }], purchase_order_id: null, created_at: iso(-18) }],
-    [231, { id: 231, company_id: 1, branch_id: 2, requisition_number: "REQ-00231", department: "Fleet Operations", requester_id: 3, requester_name: "Ama Osei (Operations Mgr)", approver_id: 4, approver_name: "Efua Appiah (Finance Mgr)", supplier_id: 211, supplier_name: "Michelin West Africa Distributors", needed_by: day(10), justification: "Spare tyre allocation for Kumasi branch vehicles.", status: "approved", estimated_total_minor: 430000, items: [{ description: "Michelin LTX All-Terrain 265/65R17", quantity: 2, estimated_unit_minor: 215000 }], purchase_order_id: null, created_at: iso(-40) }],
+    [230, { id: 230, company_id: 1, branch_id: 2, requisition_number: "REQ-00230", department: "Workshop Maintenance", requester_id: 9, requester_name: "Kwabena Yeboah (Maintenance Mgr)", approver_id: null, approver_name: null, supplier_id: 210, supplier_name: "AutoParts Ghana Ltd", needed_by: day(5), justification: "Replenish low-stock brake pads and diagnostic scanner cables.", status: "pending", estimated_total_minor: 540000, items: [{ description: "Heavy-Duty Ceramic Brake Pads (set)", quantity: 4, estimated_unit_minor: 135000 }], purchase_order_id: null, created_at: iso(-18) }],
+    [231, { id: 231, company_id: 1, branch_id: 2, requisition_number: "REQ-00231", department: "Fleet Operations", requester_id: 3, requester_name: "Ama Yeboah (Operations Mgr)", approver_id: 4, approver_name: "Efua Obeng (Finance Mgr)", supplier_id: 211, supplier_name: "Michelin West Africa Distributors", needed_by: day(10), justification: "Spare tyre allocation for Kumasi branch vehicles.", status: "approved", estimated_total_minor: 430000, items: [{ description: "Michelin LTX All-Terrain 265/65R17", quantity: 2, estimated_unit_minor: 215000 }], purchase_order_id: null, created_at: iso(-40) }],
   ]);
 
   invoices = new Map([
@@ -999,7 +1008,7 @@ function seedDemo() {
   ]);
 
   bankTransactions = new Map([
-    [285, { id: 285, company_id: 1, bank_account_id: 280, transaction_date: day(-3), description: "Customer Transfer — Kwame Nkrumah-Yeboah (INV-00241)", reference: "STB-2026-88410", amount_minor: 897000, direction: "credit", status: "matched", matched_journal_entry_id: 300, reconciliation_id: null }],
+    [285, { id: 285, company_id: 1, bank_account_id: 280, transaction_date: day(-3), description: "Customer Transfer — Kwame Yeboah (INV-00241)", reference: "STB-2026-88410", amount_minor: 897000, direction: "credit", status: "matched", matched_journal_entry_id: 300, reconciliation_id: null }],
     [286, { id: 286, company_id: 1, bank_account_id: 280, transaction_date: day(-2), description: "Supplier Wire — AutoParts Ghana Ltd", reference: "WIRE-APG-4000", amount_minor: 400000, direction: "debit", status: "unmatched", matched_journal_entry_id: null, reconciliation_id: null }],
     [287, { id: 287, company_id: 1, bank_account_id: 280, transaction_date: day(-1), description: "Monthly Bank Maintenance Charge", reference: "STB-FEE-NOV", amount_minor: 15000, direction: "debit", status: "unmatched", matched_journal_entry_id: null, reconciliation_id: null }],
   ]);
@@ -1115,7 +1124,7 @@ function seedDemo() {
         organizer_name: "Ama Osei (Operations Mgr)",
         title: "Daily Accra Dispatch & Fleet Handover Standup",
         agenda: "Review morning vehicle handovers, driver allocations, and Bay 2 HiAce release ETA.",
-        provider: "jitsi_embedded",
+        provider: "webrtc_native",
         room_slug: "drivecore-1-accra-standup-850",
         join_url: "https://meet.jit.si/drivecore-1-accra-standup-850",
         starts_at: iso(-0.2),
@@ -1175,7 +1184,7 @@ function seedDemo() {
         organizer_name: "Kwabena Owusu (Maintenance Mgr)",
         title: "Weekly Workshop & Tyre Inventory Review",
         agenda: "Inspect low-stock tyre positions and sign off PO-00221 for Michelin All-Terrain set.",
-        provider: "jitsi_embedded",
+        provider: "webrtc_native",
         room_slug: "drivecore-1-workshop-review-852",
         join_url: "https://meet.jit.si/drivecore-1-workshop-review-852",
         starts_at: iso(-26),
@@ -2599,6 +2608,14 @@ export function startDemoApiServer({ port = 0, seed = false } = {}) {
     return companyId;
   };
 
+  const getCompanyRoles = (companyId) => {
+    const overrides = companyRolePermissions.get(companyId) ?? new Map();
+    return ROLE_DEFS.map((r) => ({
+      name: r.name,
+      permissions: overrides.has(r.name) ? [...overrides.get(r.name)] : [...r.permissions],
+    }));
+  };
+
   if (url.pathname === "/api/v1/roles" && req.method === "GET") {
     if (!user.is_platform_admin && !user.permissions.includes("users.view")) {
       fail(403);
@@ -2606,13 +2623,262 @@ export function startDemoApiServer({ port = 0, seed = false } = {}) {
     }
     const companyId = Number(url.searchParams.get("company_id"));
     if (!requireUserWorkspace(companyId)) return;
-    json(200, { data: ROLE_DEFS });
+    json(200, { data: getCompanyRoles(companyId) });
     return;
+  }
+
+  const roleEditMatch = url.pathname.match(/^\/api\/v1\/roles\/([a-z0-9-]{2,48})(?:\/(reset))?$/);
+  if (roleEditMatch) {
+    const roleName = roleEditMatch[1];
+    const isReset = roleEditMatch[2] === "reset";
+    const isAdminUser =
+      user.is_platform_admin ||
+      user.roles.includes("system-administrator") ||
+      user.roles.includes("company-admin");
+    if (!isAdminUser) {
+      fail(403);
+      return;
+    }
+    const baseRole = ROLE_DEFS.find((r) => r.name === roleName);
+    if (!baseRole) {
+      fail(404);
+      return;
+    }
+    const companyId = Number(input.company_id ?? 1);
+    if (!requireUserWorkspace(companyId)) return;
+
+    if (req.method === "PATCH" && !isReset) {
+      const nextPerms = Array.isArray(input.permissions)
+        ? [...new Set(input.permissions.map(String))]
+        : null;
+      if (!nextPerms) {
+        fail(422, { permissions: ["Permissions array is required."] });
+        return;
+      }
+      if (roleName === "system-administrator" || roleName === "company-admin") {
+        for (const reqPerm of ["users.manage", "roles.view", "settings.manage"]) {
+          if (!nextPerms.includes(reqPerm)) {
+            fail(422, {
+              permissions: [`Cannot remove lockout-critical permission ${reqPerm} from ${roleName}.`],
+            });
+            return;
+          }
+        }
+      }
+      let overrides = companyRolePermissions.get(companyId);
+      if (!overrides) {
+        overrides = new Map();
+        companyRolePermissions.set(companyId, overrides);
+      }
+      overrides.set(roleName, nextPerms);
+      const aid = nextId++;
+      auditEvents.set(aid, {
+        id: aid,
+        company_id: companyId,
+        actor_name: user.name,
+        action: "role.permissions_updated",
+        entity_type: "role",
+        entity_id: aid,
+        summary: `Updated permissions for role ${roleName} (${nextPerms.length} enabled).`,
+        created_at: new Date().toISOString(),
+      });
+      completedWrites++;
+      json(200, { data: { name: roleName, permissions: nextPerms } });
+      return;
+    }
+
+    if (req.method === "POST" && isReset) {
+      const overrides = companyRolePermissions.get(companyId);
+      if (overrides) overrides.delete(roleName);
+      completedWrites++;
+      json(200, { data: { name: roleName, permissions: [...baseRole.permissions] } });
+      return;
+    }
+  }
+
+  const mailSettingsMatch = url.pathname.match(
+    /^\/api\/v1\/companies\/(\d+)\/mail-settings(?:\/(test))?$/,
+  );
+  if (mailSettingsMatch) {
+    const companyId = Number(mailSettingsMatch[1]);
+    const isTest = mailSettingsMatch[2] === "test";
+    const canSettings =
+      user.is_platform_admin || user.permissions.includes("settings.manage");
+    if (!canSettings || !requireUserWorkspace(companyId)) {
+      if (!canSettings) fail(403);
+      return;
+    }
+    const existing = companyMailSettings.get(companyId) ?? {
+      company_id: companyId,
+      provider: "google_workspace",
+      host: "smtp.gmail.com",
+      port: 587,
+      encryption: "tls",
+      username: "",
+      _password: "",
+      from_name: companies.get(companyId)?.name ?? "DriveCore ERP",
+      from_address: "invitations@drivecore.demo",
+      is_enabled: false,
+      last_tested_at: null,
+      last_test_status: null,
+    };
+    const publicView = (rec) => ({
+      company_id: rec.company_id,
+      provider: rec.provider,
+      host: rec.host,
+      port: rec.port,
+      encryption: rec.encryption,
+      username: rec.username || null,
+      has_password: Boolean(rec._password),
+      from_name: rec.from_name,
+      from_address: rec.from_address,
+      is_enabled: rec.is_enabled,
+      last_tested_at: rec.last_tested_at,
+      last_test_status: rec.last_test_status,
+    });
+
+    if (req.method === "GET" && !isTest) {
+      json(200, { data: publicView(existing) });
+      return;
+    }
+    if (req.method === "PATCH" && !isTest) {
+      const host = String(input.host ?? "").trim();
+      const port = Number(input.port ?? 587);
+      const fromAddress = String(input.from_address ?? "").trim();
+      if (!host) {
+        fail(422, { host: ["SMTP host is required."] });
+        return;
+      }
+      if (!Number.isInteger(port) || port < 1 || port > 65535) {
+        fail(422, { port: ["SMTP port must be between 1 and 65535."] });
+        return;
+      }
+      if (!fromAddress.includes("@")) {
+        fail(422, { from_address: ["Enter a valid From email address."] });
+        return;
+      }
+      const next = {
+        ...existing,
+        provider: String(input.provider ?? existing.provider),
+        host,
+        port,
+        encryption: String(input.encryption ?? existing.encryption),
+        username: input.username !== undefined ? String(input.username ?? "") : existing.username,
+        _password:
+          typeof input.password === "string" && input.password.trim().length > 0
+            ? input.password.trim()
+            : existing._password,
+        from_name: String(input.from_name ?? existing.from_name).trim(),
+        from_address: fromAddress,
+        is_enabled: Boolean(input.is_enabled),
+      };
+      companyMailSettings.set(companyId, next);
+      completedWrites++;
+      json(200, { data: publicView(next) });
+      return;
+    }
+    if (req.method === "POST" && isTest) {
+      const toEmail = String(input.to_email ?? "").trim();
+      if (!toEmail || !toEmail.includes("@")) {
+        fail(422, { to_email: ["Enter a valid recipient email."] });
+        return;
+      }
+      const testedAt = new Date().toISOString();
+      const updated = {
+        ...existing,
+        last_tested_at: testedAt,
+        last_test_status: "passed",
+      };
+      companyMailSettings.set(companyId, updated);
+      completedWrites++;
+      json(200, {
+        data: {
+          ok: true,
+          message: `Test invitation email queued to ${toEmail} via ${updated.host}:${updated.port}.`,
+          tested_at: testedAt,
+        },
+      });
+      return;
+    }
   }
 
   const userMatch = url.pathname.match(/^\/api\/v1\/users(?:\/(\d+))?$/);
   if (userMatch) {
     const targetId = userMatch[1] ? Number(userMatch[1]) : null;
+    if (req.method === "DELETE" && targetId) {
+      if (!user.is_platform_admin && !user.permissions.includes("users.manage")) {
+        fail(403);
+        return;
+      }
+      const companyId = Number(url.searchParams.get("company_id"));
+      if (!requireUserWorkspace(companyId)) return;
+      if (targetId === user.id) {
+        fail(409, { user: ["You cannot delete your own account."] });
+        return;
+      }
+      const target = managedUsers.get(targetId);
+      if (!target || !target.memberships.some((m) => m.company_id === companyId)) {
+        fail(404);
+        return;
+      }
+      const isAdminActor =
+        user.is_platform_admin ||
+        user.roles.includes("system-administrator") ||
+        user.roles.includes("company-admin");
+      const privilegedSlugs = new Set([
+        "ceo",
+        "general-manager",
+        "finance-manager",
+        "credit-control-manager",
+        "system-administrator",
+        "company-admin",
+        "finance",
+      ]);
+      if (!isAdminActor && target.roles.some((r) => privilegedSlugs.has(r))) {
+        fail(403, { user: ["HR/Admin Managers cannot delete privileged roles."] });
+        return;
+      }
+      const targetIsAdmin = target.roles.some(
+        (r) => r === "system-administrator" || r === "company-admin",
+      );
+      if (targetIsAdmin) {
+        const remainingAdmins = [...managedUsers.values()].filter(
+          (u) =>
+            u.id !== targetId &&
+            u.is_active &&
+            u.memberships.some((m) => m.company_id === companyId) &&
+            u.roles.some(
+              (r) => r === "system-administrator" || r === "company-admin",
+            ),
+        );
+        if (remainingAdmins.length === 0) {
+          fail(409, {
+            user: ["Cannot delete the last active administrator for this company."],
+          });
+          return;
+        }
+      }
+      target.memberships = target.memberships.filter(
+        (m) => m.company_id !== companyId,
+      );
+      if (target.memberships.length === 0) {
+        managedUsers.delete(targetId);
+      }
+      const aid = nextId++;
+      auditEvents.set(aid, {
+        id: aid,
+        company_id: companyId,
+        actor_name: user.name,
+        action: "user.deleted",
+        entity_type: "user",
+        entity_id: targetId,
+        summary: `Removed user ${target.name} (${target.email}) from company #${companyId}.`,
+        created_at: new Date().toISOString(),
+      });
+      completedWrites++;
+      json(200, { data: { deleted: true, id: targetId } });
+      return;
+    }
     if (req.method === "GET" && !targetId) {
       if (!user.is_platform_admin && !user.permissions.includes("users.view")) {
         fail(403);
@@ -5750,6 +6016,133 @@ export function startDemoApiServer({ port = 0, seed = false } = {}) {
     }
   }
 
+  const meetingRtcMatch = url.pathname.match(
+    /^\/api\/v1\/meetings\/(\d+)\/rtc\/(join|signals|leave)$/,
+  );
+  if (meetingRtcMatch) {
+    const meetingId = Number(meetingRtcMatch[1]);
+    const rtcAction = meetingRtcMatch[2];
+    const meeting = meetings.get(meetingId);
+    if (!meeting) {
+      fail(404);
+      return;
+    }
+    const isDriverOnly =
+      user.roles.includes("driver") &&
+      !user.is_platform_admin &&
+      !user.permissions.includes("meetings.view") &&
+      !user.permissions.includes("meetings.manage");
+    if (
+      isDriverOnly &&
+      meeting.organizer_user_id !== user.id &&
+      !meeting.participants.some((p) => p.user_id === user.id)
+    ) {
+      fail(404);
+      return;
+    }
+
+    const prunePeers = (peersMap) => {
+      const cutoff = Date.now() - 20_000;
+      for (const [pid, p] of peersMap.entries()) {
+        if (new Date(p.last_seen_at).getTime() < cutoff) {
+          peersMap.delete(pid);
+        }
+      }
+    };
+
+    let peersMap = meetingRtcPeers.get(meetingId);
+    if (!peersMap) {
+      peersMap = new Map();
+      meetingRtcPeers.set(meetingId, peersMap);
+    }
+    let signalsArr = meetingRtcSignals.get(meetingId);
+    if (!signalsArr) {
+      signalsArr = [];
+      meetingRtcSignals.set(meetingId, signalsArr);
+    }
+    prunePeers(peersMap);
+
+    if (req.method === "POST" && rtcAction === "join") {
+      if (meeting.status === "ended" || meeting.status === "cancelled") {
+        fail(409);
+        return;
+      }
+      const peerId = `peer_${user.id}_${randomUUID().slice(0, 8)}`;
+      const nowIso = new Date().toISOString();
+      peersMap.set(peerId, {
+        peer_id: peerId,
+        user_id: user.id,
+        name: user.name,
+        audio_enabled: input.audio_enabled !== false,
+        video_enabled: input.video_enabled !== false,
+        screen_sharing: false,
+        last_seen_at: nowIso,
+      });
+      json(200, {
+        data: {
+          peer_id: peerId,
+          max_recommended_peers: 6,
+          ice_servers: [{ urls: ["stun:stun.l.google.com:19302"] }],
+          peers: [...peersMap.values()],
+        },
+      });
+      return;
+    }
+
+    if (req.method === "GET" && rtcAction === "signals") {
+      const peerId = url.searchParams.get("peer_id") ?? "";
+      const afterId = Number(url.searchParams.get("after_id") ?? "0");
+      const current = peersMap.get(peerId);
+      if (current && current.user_id === user.id) {
+        current.last_seen_at = new Date().toISOString();
+        if (url.searchParams.has("audio_enabled")) {
+          current.audio_enabled = url.searchParams.get("audio_enabled") === "1";
+        }
+        if (url.searchParams.has("video_enabled")) {
+          current.video_enabled = url.searchParams.get("video_enabled") === "1";
+        }
+        if (url.searchParams.has("screen_sharing")) {
+          current.screen_sharing = url.searchParams.get("screen_sharing") === "1";
+        }
+      }
+      const pending = signalsArr.filter(
+        (s) => s.to_peer_id === peerId && s.id > afterId,
+      );
+      json(200, {
+        data: {
+          peers: [...peersMap.values()],
+          signals: pending,
+        },
+      });
+      return;
+    }
+
+    if (req.method === "POST" && rtcAction === "signals") {
+      const sig = {
+        id: nextId++,
+        from_peer_id: String(input.from_peer_id ?? ""),
+        to_peer_id: String(input.to_peer_id ?? ""),
+        type: String(input.type ?? "ice"),
+        payload:
+          input.payload && typeof input.payload === "object"
+            ? input.payload
+            : {},
+        created_at: new Date().toISOString(),
+      };
+      signalsArr.push(sig);
+      if (signalsArr.length > 200) signalsArr.splice(0, signalsArr.length - 200);
+      json(201, { data: { id: sig.id, created_at: sig.created_at } });
+      return;
+    }
+
+    if (req.method === "POST" && rtcAction === "leave") {
+      const peerId = String(input.peer_id ?? "");
+      peersMap.delete(peerId);
+      json(200, { data: { ok: true } });
+      return;
+    }
+  }
+
   const meetingMatch = url.pathname.match(
     /^\/api\/v1\/meetings(?:\/(\d+)(?:\/(rsvp|start|end|cancel))?)?$/,
   );
@@ -5843,8 +6236,12 @@ export function startDemoApiServer({ port = 0, seed = false } = {}) {
         fail(422, { title: ["Meeting title must be between 1 and 160 characters."] });
         return;
       }
-      const provider = String(input.provider ?? "jitsi_embedded");
-      if (!["jitsi_embedded", "zoom", "teams", "google_meet"].includes(provider)) {
+      const provider = String(input.provider ?? "webrtc_native");
+      if (
+        !["webrtc_native", "jitsi_embedded", "zoom", "teams", "google_meet"].includes(
+          provider,
+        )
+      ) {
         fail(422, { provider: ["Unsupported meeting provider."] });
         return;
       }
@@ -5866,9 +6263,9 @@ export function startDemoApiServer({ port = 0, seed = false } = {}) {
 
       let roomSlug = null;
       let joinUrl = "";
-      if (provider === "jitsi_embedded") {
+      if (provider === "webrtc_native" || provider === "jitsi_embedded") {
         roomSlug = `drivecore-${companyId}-${randomUUID().slice(0, 8)}`;
-        joinUrl = `https://meet.jit.si/${roomSlug}`;
+        joinUrl = `https://drivecore.app/meetings/${roomSlug}`;
       } else {
         const rawUrl = String(input.external_join_url ?? "").trim();
         try {
@@ -6058,14 +6455,16 @@ export function startDemoApiServer({ port = 0, seed = false } = {}) {
       }
       if (
         typeof input.provider === "string" &&
-        ["jitsi_embedded", "zoom", "teams", "google_meet"].includes(input.provider)
+        ["webrtc_native", "jitsi_embedded", "zoom", "teams", "google_meet"].includes(
+          input.provider,
+        )
       ) {
         existing.provider = input.provider;
-        if (input.provider === "jitsi_embedded") {
+        if (input.provider === "webrtc_native" || input.provider === "jitsi_embedded") {
           existing.room_slug =
             existing.room_slug ||
             `drivecore-${existing.company_id}-${randomUUID().slice(0, 8)}`;
-          existing.join_url = `https://meet.jit.si/${existing.room_slug}`;
+          existing.join_url = `https://drivecore.app/meetings/${existing.room_slug}`;
         } else if (typeof input.external_join_url === "string") {
           try {
             const parsed = new URL(input.external_join_url.trim());

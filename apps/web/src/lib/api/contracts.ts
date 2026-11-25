@@ -220,6 +220,29 @@ export function canResetUserTwoFactor(user: User): boolean {
   return isSystemAdmin(user);
 }
 
+export function canManageRolePermissions(user: User): boolean {
+  return isSystemAdmin(user);
+}
+
+export function canDeleteUser(
+  actor: User,
+  target: { id: number; roles?: string[]; role?: string | null },
+  companyId: string,
+): boolean {
+  if (actor.id === target.id) return false;
+  if (!canManageUsers(actor, companyId)) return false;
+  if (isSystemAdmin(actor)) return true;
+  if (actor.roles.includes("hr-admin-manager")) {
+    const targetRoles = target.roles?.length
+      ? target.roles
+      : target.role
+        ? [target.role]
+        : [];
+    return targetRoles.every((r) => !isPrivilegedRole(r));
+  }
+  return false;
+}
+
 export const customerStatsRollupSchema = z.object({
   rental_count: nonNegInt,
   last_rental_at: z.string().nullable().optional().default(null),
@@ -2140,9 +2163,10 @@ export const approvalThresholdSchema = z.object({
 });
 export type ApprovalThreshold = z.infer<typeof approvalThresholdSchema>;
 
-// ---------- M16.5.5 Internal Virtual Meetings ----------
+// ---------- M16.5.5 / M16.5.6 Internal Virtual Meetings & WebRTC ----------
 
 export const meetingProviders = [
+  "webrtc_native",
   "jitsi_embedded",
   "zoom",
   "teams",
@@ -2150,12 +2174,105 @@ export const meetingProviders = [
 ] as const;
 export type MeetingProvider = (typeof meetingProviders)[number];
 
+export const selectableMeetingProviders = [
+  "webrtc_native",
+  "zoom",
+  "teams",
+  "google_meet",
+] as const;
+
 export const meetingProviderLabels: Record<MeetingProvider, string> = {
-  jitsi_embedded: "DriveCore Video (In-App)",
+  webrtc_native: "DriveCore Video (WebRTC)",
+  jitsi_embedded: "DriveCore Video (WebRTC)",
   zoom: "Zoom",
   teams: "Microsoft Teams",
   google_meet: "Google Meet",
 };
+
+export const rtcIceServerSchema = z.object({
+  urls: z.union([z.string(), z.array(z.string())]),
+  username: z.string().optional(),
+  credential: z.string().optional(),
+});
+export type RtcIceServer = z.infer<typeof rtcIceServerSchema>;
+
+export const rtcPeerSchema = z.object({
+  peer_id: z.string(),
+  user_id: numericId,
+  name: z.string(),
+  audio_enabled: z.boolean().optional().default(true),
+  video_enabled: z.boolean().optional().default(true),
+  screen_sharing: z.boolean().optional().default(false),
+  last_seen_at: z.string(),
+});
+export type RtcPeer = z.infer<typeof rtcPeerSchema>;
+
+export const rtcSignalSchema = z.object({
+  id: numericId,
+  from_peer_id: z.string(),
+  to_peer_id: z.string(),
+  type: z.enum(["offer", "answer", "ice"]),
+  payload: z.record(z.string(), z.unknown()),
+  created_at: z.string(),
+});
+export type RtcSignal = z.infer<typeof rtcSignalSchema>;
+
+export const rtcJoinResponseSchema = z.object({
+  peer_id: z.string(),
+  max_recommended_peers: z.number().int().positive().optional().default(6),
+  ice_servers: z.array(rtcIceServerSchema).optional().default([]),
+  peers: z.array(rtcPeerSchema).optional().default([]),
+});
+export type RtcJoinResponse = z.infer<typeof rtcJoinResponseSchema>;
+
+export const rtcSignalsResponseSchema = z.object({
+  peers: z.array(rtcPeerSchema).optional().default([]),
+  signals: z.array(rtcSignalSchema).optional().default([]),
+});
+export type RtcSignalsResponse = z.infer<typeof rtcSignalsResponseSchema>;
+
+// ---------- M16.5.6 Company Email / SMTP Settings ----------
+
+export const mailProviders = [
+  "google_workspace",
+  "microsoft_365",
+  "zoho",
+  "resend",
+  "sendgrid",
+  "postmark",
+  "custom_smtp",
+] as const;
+export type MailProvider = (typeof mailProviders)[number];
+
+export const mailEncryptions = ["tls", "ssl", "none"] as const;
+export type MailEncryption = (typeof mailEncryptions)[number];
+
+export const companyMailSettingsSchema = z.object({
+  company_id: numericId,
+  provider: z.enum(mailProviders).optional().default("google_workspace"),
+  host: z.string().optional().default(""),
+  port: z.number().int().min(1).max(65535).optional().default(587),
+  encryption: z.enum(mailEncryptions).optional().default("tls"),
+  username: z.string().nullable().optional().default(null),
+  has_password: z.boolean().optional().default(false),
+  from_name: z.string().optional().default(""),
+  from_address: z.string().optional().default(""),
+  is_enabled: z.boolean().optional().default(false),
+  last_tested_at: z.string().nullable().optional().default(null),
+  last_test_status: z
+    .enum(["passed", "failed"])
+    .nullable()
+    .optional()
+    .default(null),
+});
+export type CompanyMailSettings = z.infer<typeof companyMailSettingsSchema>;
+
+export const companyMailTestResultSchema = z.object({
+  ok: z.boolean(),
+  message: z.string(),
+  tested_at: z.string(),
+});
+export type CompanyMailTestResult = z.infer<typeof companyMailTestResultSchema>;
 
 export const meetingStatuses = [
   "scheduled",

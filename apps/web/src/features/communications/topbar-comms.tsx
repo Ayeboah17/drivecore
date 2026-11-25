@@ -16,6 +16,7 @@ import {
 } from "@/features/communications/service";
 import {
   getMeeting,
+  isInAppMeetingProvider,
   listMeetings,
   sanitizeExternalMeetingUrl,
 } from "@/features/communications/meetings-service";
@@ -318,7 +319,7 @@ export function LiveChatDrawer() {
     const ac = new AbortController();
     try {
       const meeting = await getMeeting(meetingId, ac.signal);
-      if (meeting.provider === "jitsi_embedded") {
+      if (isInAppMeetingProvider(meeting.provider)) {
         setActiveRoom(meeting);
       } else {
         const safe = sanitizeExternalMeetingUrl(meeting.join_url);

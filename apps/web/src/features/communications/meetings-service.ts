@@ -2,13 +2,21 @@ import { z } from "zod";
 import { ApiError, read, request } from "@/lib/api/client";
 import {
   meetingSchema,
+  rtcJoinResponseSchema,
+  rtcSignalsResponseSchema,
   type LiveMeeting,
   type MeetingProvider,
   type MeetingRelatedEntityType,
   type MeetingRsvpStatus,
   type MeetingStatus,
   type MessageChannel,
+  type RtcJoinResponse,
+  type RtcSignalsResponse,
 } from "@/lib/api/contracts";
+
+export function isInAppMeetingProvider(provider: MeetingProvider): boolean {
+  return provider === "webrtc_native" || provider === "jitsi_embedded";
+}
 
 const meetingPageMeta = z.object({
   current_page: z.number().int().positive(),
@@ -322,4 +330,76 @@ export async function cancelMeeting(
     throw new ApiError(502, "Unexpected cancel meeting response.");
   }
   return parsed.data.data;
+}
+
+export async function joinMeetingRtc(
+  meetingId: number,
+  body: { audio_enabled: boolean; video_enabled: boolean },
+  signal: AbortSignal,
+): Promise<RtcJoinResponse> {
+  const payload = await request(`api/v1/meetings/${meetingId}/rtc/join`, {
+    method: "POST",
+    body,
+    signal,
+  });
+  const parsed = z.object({ data: rtcJoinResponseSchema }).safeParse(payload);
+  if (!parsed.success) {
+    throw new ApiError(502, "Unexpected WebRTC join response.");
+  }
+  return parsed.data.data;
+}
+
+export async function pollMeetingRtcSignals(
+  meetingId: number,
+  params: {
+    peerId: string;
+    afterId: number;
+    audioEnabled: boolean;
+    videoEnabled: boolean;
+    screenSharing: boolean;
+  },
+  signal: AbortSignal,
+): Promise<RtcSignalsResponse> {
+  const query = new URLSearchParams({
+    peer_id: params.peerId,
+    after_id: String(params.afterId),
+    audio_enabled: params.audioEnabled ? "1" : "0",
+    video_enabled: params.videoEnabled ? "1" : "0",
+    screen_sharing: params.screenSharing ? "1" : "0",
+  });
+  const res = await read(
+    `api/v1/meetings/${meetingId}/rtc/signals?${query.toString()}`,
+    z.object({ data: rtcSignalsResponseSchema }),
+    signal,
+  );
+  return res.data;
+}
+
+export async function sendMeetingRtcSignal(
+  meetingId: number,
+  body: {
+    from_peer_id: string;
+    to_peer_id: string;
+    type: "offer" | "answer" | "ice";
+    payload: Record<string, unknown>;
+  },
+  signal: AbortSignal,
+): Promise<void> {
+  await request(`api/v1/meetings/${meetingId}/rtc/signals`, {
+    method: "POST",
+    body,
+    signal,
+  });
+}
+
+export async function leaveMeetingRtc(
+  meetingId: number,
+  peerId: string,
+  signal?: AbortSignal,
+): Promise<void> {
+  await request(`api/v1/meetings/${meetingId}/rtc/leave`, {
+    method: "POST",
+    body: { peer_id: peerId },
+    signal,
+  });
 }

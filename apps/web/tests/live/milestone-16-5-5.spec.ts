@@ -78,15 +78,18 @@ test.describe("Milestone 16.5.5 — Internal Virtual Meetings & Consistent Typog
     // Switch to Meetings tab
     await page.getByRole("tab", { name: /Meetings/i }).click();
 
-    // 1. Instant Meet now -> opens wide Jitsi modal with meet.jit.si iframe
+    // 1. Instant Meet now -> opens DriveCore WebRTC Pre-Join Lobby & joins native room (zero Jitsi iframe)
     await page.getByRole("button", { name: /Meet now/i }).click();
-    const roomFrame = page.locator('iframe[title*="Virtual meeting room"]');
-    await expect(roomFrame).toBeVisible();
-    await expect(roomFrame).toHaveAttribute("src", /https:\/\/meet\.jit\.si\/drivecore-1-/);
+    await expect(
+      page.getByRole("heading", { name: /Ready to join\?/i }),
+    ).toBeVisible();
+    await page.getByRole("button", { name: /Join DriveCore Room/i }).click();
+    await expect(page.getByTestId("webrtc-local-tile")).toBeVisible();
+    await expect(page.locator('iframe[src*="meet.jit.si"]')).toHaveCount(0);
 
     // Leave call
     await page.getByRole("button", { name: /Leave call/i }).click();
-    await expect(roomFrame).toBeHidden();
+    await expect(page.getByTestId("webrtc-local-tile")).toBeHidden();
 
     // Verify Chat tab has the clickable Join meeting card
     await page.getByRole("tab", { name: /Chat/i }).click();

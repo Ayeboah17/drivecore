@@ -1,11 +1,17 @@
 import { z } from "zod";
 import { ApiError, read, request } from "@/lib/api/client";
 import {
+  companyMailSettingsSchema,
+  companyMailTestResultSchema,
   managedUserSchema,
   normalizePage,
   pageSchema,
   roleDefinitionSchema,
   userSchema,
+  type CompanyMailSettings,
+  type CompanyMailTestResult,
+  type MailEncryption,
+  type MailProvider,
   type ManagedUser,
   type RoleDefinition,
 } from "@/lib/api/contracts";
@@ -140,4 +146,128 @@ export async function resetUserTwoFactor(
     signal,
   });
   return z.object({ data: managedUserSchema }).parse(payload).data;
+}
+
+export async function deleteUser(
+  userId: number,
+  companyId: string | number,
+  signal?: AbortSignal,
+): Promise<{ deleted: boolean; id: number }> {
+  const payload = await request(
+    `api/v1/users/${userId}?company_id=${encodeURIComponent(String(companyId))}`,
+    {
+      method: "DELETE",
+      signal,
+    },
+  );
+  const parsed = z
+    .object({ data: z.object({ deleted: z.boolean(), id: z.coerce.number().int() }) })
+    .safeParse(payload);
+  if (!parsed.success) {
+    return { deleted: true, id: userId };
+  }
+  return parsed.data.data;
+}
+
+export async function updateRolePermissions(
+  roleName: string,
+  body: { company_id: number; permissions: string[] },
+  signal?: AbortSignal,
+): Promise<RoleDefinition> {
+  const payload = await request(`api/v1/roles/${encodeURIComponent(roleName)}`, {
+    method: "PATCH",
+    body,
+    signal,
+  });
+  const parsed = z.object({ data: roleDefinitionSchema }).safeParse(payload);
+  if (!parsed.success) {
+    throw new ApiError(502, "Unexpected role permission update response.");
+  }
+  return parsed.data.data;
+}
+
+export async function resetRolePermissions(
+  roleName: string,
+  companyId: number,
+  signal?: AbortSignal,
+): Promise<RoleDefinition> {
+  const payload = await request(
+    `api/v1/roles/${encodeURIComponent(roleName)}/reset`,
+    {
+      method: "POST",
+      body: { company_id: companyId },
+      signal,
+    },
+  );
+  const parsed = z.object({ data: roleDefinitionSchema }).safeParse(payload);
+  if (!parsed.success) {
+    throw new ApiError(502, "Unexpected role permission reset response.");
+  }
+  return parsed.data.data;
+}
+
+export async function getCompanyMailSettings(
+  companyId: string,
+  signal: AbortSignal,
+): Promise<CompanyMailSettings> {
+  const payload = await read(
+    `api/v1/companies/${encodeURIComponent(companyId)}/mail-settings`,
+    z.object({ data: companyMailSettingsSchema }),
+    signal,
+  );
+  return payload.data;
+}
+
+export async function updateCompanyMailSettings(
+  companyId: string,
+  body: {
+    provider: MailProvider;
+    host: string;
+    port: number;
+    encryption: MailEncryption;
+    username: string | null;
+    password?: string;
+    from_name: string;
+    from_address: string;
+    is_enabled: boolean;
+  },
+  signal?: AbortSignal,
+): Promise<CompanyMailSettings> {
+  const payload = await request(
+    `api/v1/companies/${encodeURIComponent(companyId)}/mail-settings`,
+    {
+      method: "PATCH",
+      body,
+      signal,
+    },
+  );
+  const parsed = z
+    .object({ data: companyMailSettingsSchema })
+    .safeParse(payload);
+  if (!parsed.success) {
+    throw new ApiError(502, "Unexpected mail settings response.");
+  }
+  return parsed.data.data;
+}
+
+export async function testCompanyMailSettings(
+  companyId: string,
+  toEmail: string,
+  signal?: AbortSignal,
+): Promise<CompanyMailTestResult> {
+  const payload = await request(
+    `api/v1/companies/${encodeURIComponent(companyId)}/mail-settings/test`,
+    {
+      method: "POST",
+      body: { to_email: toEmail },
+      signal,
+    },
+  );
+  const parsed = z
+    .object({ data: companyMailTestResultSchema })
+    .safeParse(payload);
+  if (!parsed.success) {
+    throw new ApiError(502, "Unexpected test email response.");
+  }
+  return parsed.data.data;
 }

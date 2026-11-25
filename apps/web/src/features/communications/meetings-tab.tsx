@@ -26,6 +26,7 @@ import {
   createMeeting,
   downloadMeetingIcs,
   endMeeting,
+  isInAppMeetingProvider,
   listMeetings,
   relatedEntityHref,
   rsvpMeeting,
@@ -40,8 +41,8 @@ import {
   isDriverRole,
   isSystemAdmin,
   meetingProviderLabels,
-  meetingProviders,
   meetingRelatedEntityTypes,
+  selectableMeetingProviders,
   type LiveMeeting,
   type MeetingProvider,
   type MeetingRelatedEntityType,
@@ -173,7 +174,7 @@ export function MeetingsTab({
   const [agenda, setAgenda] = useState("");
   const [startsAtLocal, setStartsAtLocal] = useState(defaultStartLocal);
   const [durationMinutes, setDurationMinutes] = useState("30");
-  const [provider, setProvider] = useState<MeetingProvider>("jitsi_embedded");
+  const [provider, setProvider] = useState<MeetingProvider>("webrtc_native");
   const [externalUrl, setExternalUrl] = useState("");
   const [selectedUserIds, setSelectedUserIds] = useState<number[]>([]);
   const [relatedType, setRelatedType] = useState<"" | MeetingRelatedEntityType>(
@@ -258,7 +259,7 @@ export function MeetingsTab({
     setAgenda("");
     setStartsAtLocal(defaultStartLocal());
     setDurationMinutes("30");
-    setProvider("jitsi_embedded");
+    setProvider("webrtc_native");
     setExternalUrl("");
     setSelectedUserIds([]);
     setRelatedType("");
@@ -287,8 +288,12 @@ export function MeetingsTab({
         ? String(diffMin)
         : "30",
     );
-    setProvider(meeting.provider);
-    setExternalUrl(meeting.provider === "jitsi_embedded" ? "" : meeting.join_url);
+    setProvider(
+      isInAppMeetingProvider(meeting.provider)
+        ? "webrtc_native"
+        : meeting.provider,
+    );
+    setExternalUrl(isInAppMeetingProvider(meeting.provider) ? "" : meeting.join_url);
     setSelectedUserIds(meeting.participants.map((p) => p.user_id));
     setRelatedType(meeting.related_entity_type ?? "");
     setRelatedId(meeting.related_entity_id ? String(meeting.related_entity_id) : "");
@@ -313,7 +318,7 @@ export function MeetingsTab({
             minute: "2-digit",
           })})`,
           agenda: "Instant internal virtual meeting.",
-          provider: "jitsi_embedded",
+          provider: "webrtc_native",
           starts_at: new Date().toISOString(),
           duration_minutes: 30,
           start_now: true,
@@ -341,7 +346,7 @@ export function MeetingsTab({
     }
 
     let safeExternal: string | null = null;
-    if (provider !== "jitsi_embedded") {
+    if (!isInAppMeetingProvider(provider)) {
       safeExternal = sanitizeExternalMeetingUrl(externalUrl);
       if (!safeExternal) {
         setFormError(
@@ -453,7 +458,7 @@ export function MeetingsTab({
   }
 
   function handleJoin(meeting: LiveMeeting) {
-    if (meeting.provider === "jitsi_embedded") {
+    if (isInAppMeetingProvider(meeting.provider)) {
       onJoinInApp(meeting);
       return;
     }
@@ -665,7 +670,7 @@ export function MeetingsTab({
                       onClick={() => handleJoin(meeting)}
                       className="h-7 px-2.5 text-xs"
                     >
-                      {meeting.provider === "jitsi_embedded" ? (
+                      {isInAppMeetingProvider(meeting.provider) ? (
                         <Video className="mr-1 size-3" aria-hidden="true" />
                       ) : (
                         <ExternalLink className="mr-1 size-3" aria-hidden="true" />
@@ -834,8 +839,8 @@ export function MeetingsTab({
               {editing ? "Edit Meeting" : "Schedule Internal Meeting"}
             </DialogTitle>
             <DialogDescription>
-              Host an instant in-app Jitsi Meet room or link an external Zoom,
-              Microsoft Teams, or Google Meet session.
+              Host an instant in-app DriveCore WebRTC room or link an external
+              Zoom, Microsoft Teams, or Google Meet session.
             </DialogDescription>
           </DialogHeader>
 
@@ -896,14 +901,14 @@ export function MeetingsTab({
                 ariaLabel="Meeting provider"
                 value={provider}
                 onValueChange={(v) => setProvider(v as MeetingProvider)}
-                options={meetingProviders.map((p) => ({
+                options={selectableMeetingProviders.map((p) => ({
                   value: p,
                   label: meetingProviderLabels[p],
                 }))}
               />
             </div>
 
-            {provider !== "jitsi_embedded" ? (
+            {!isInAppMeetingProvider(provider) ? (
               <div className="space-y-1.5">
                 <Label htmlFor="meeting-external-url">
                   {meetingProviderLabels[provider]} Join URL (HTTPS)

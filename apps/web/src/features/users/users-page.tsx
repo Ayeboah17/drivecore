@@ -11,7 +11,9 @@ import { canCreateBranch } from "@/features/setup/contracts";
 import {
   assignableRoleNames,
   canAccessUserAdmin,
+  canDeleteUser,
   canManageCompanySettings,
+  canManageRolePermissions,
   canManageUsers,
   canResetUserTwoFactor,
   managedRoleLabels,
@@ -39,6 +41,7 @@ import { Button, buttonVariants } from "@/components/ui/button";
 import { DriveCoreSelect } from "@/components/ui/drivecore-select";
 import {
   CreateUserDialog,
+  DeleteUserDialog,
   EditUserDialog,
   RolesReferenceDialog,
 } from "./dialogs";
@@ -78,10 +81,12 @@ export function UsersAdminPage() {
   const [createOpen, setCreateOpen] = useState(false);
   const [rolesOpen, setRolesOpen] = useState(false);
   const [editing, setEditing] = useState<ManagedUser | null>(null);
+  const [deleting, setDeleting] = useState<ManagedUser | null>(null);
   const [notice, setNotice] = useState("");
 
   const allowed = !!user && canAccessUserAdmin(user, scope.companyId);
   const canManage = !!user && canManageUsers(user, scope.companyId);
+  const canEditRoles = !!user && canManageRolePermissions(user);
   const canReset2fa = !!user && canResetUserTwoFactor(user);
   const [resetting2faId, setResetting2faId] = useState<number | null>(null);
   const canManageBranches = !!user && canCreateBranch(user, scope.companyId);
@@ -611,6 +616,18 @@ export function UsersAdminPage() {
                               >
                                 Edit access
                               </Button>
+                              {user &&
+                              canDeleteUser(user, row, scope.companyId) ? (
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  variant="ghost"
+                                  onClick={() => setDeleting(row)}
+                                  className="text-destructive hover:bg-destructive/10 hover:text-destructive"
+                                >
+                                  Delete
+                                </Button>
+                              ) : null}
                             </div>
                           )
                         ) : (
@@ -657,12 +674,27 @@ export function UsersAdminPage() {
         }}
       />
 
+      <DeleteUserDialog
+        target={deleting}
+        onClose={() => setDeleting(null)}
+        onDeleted={() => {
+          setNotice("User removed from company and sessions revoked.");
+          void refreshUsers();
+        }}
+      />
+
       <RolesReferenceDialog
         open={rolesOpen}
         onOpenChange={setRolesOpen}
         roles={rolesQuery.data}
         loading={rolesQuery.isPending}
         error={rolesQuery.error}
+        canEdit={canEditRoles}
+        onUpdated={() => {
+          void client.invalidateQueries({
+            queryKey: [...scope.key, "roles"],
+          });
+        }}
       />
     </ViewFadeIn>
   );

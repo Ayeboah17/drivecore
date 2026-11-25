@@ -39,18 +39,18 @@ function failure(status: number, message: string) {
 }
 export function allowedPath(method: string, path: string) {
   if (method === "GET")
-    return /^(sanctum\/csrf-cookie|api\/v1\/(health|auth\/me|companies|companies\/[1-9]\d*\/(settings|approval-thresholds)|branches|customers|customers\/[1-9]\d*|customers\/[1-9]\d*\/(summary|statement)|vehicles|vehicles\/[1-9]\d*|vehicles\/[1-9]\d*\/(summary|history)|leads|quotations|quotations\/[1-9]\d*|reservations|reservations\/[1-9]\d*|rentals|rentals\/[1-9]\d*|rate-cards|inspections|invoices|invoices\/ageing|invoices\/[1-9]\d*|credit-notes|payments|refunds|expenses|gl\/accounts|gl\/journal-entries|ap\/(invoices|ageing)|bank-accounts|bank-accounts\/[1-9]\d*\/transactions|fixed-assets|credit\/(accounts|collections)|approvals|compliance\/expiries|work-orders|work-orders\/[1-9]\d*|incidents|maintenance-schedules|vehicle-components|fuel-transactions|parts|stock-movements|suppliers|suppliers\/[1-9]\d*\/statement|purchase-requisitions|purchase-orders|purchase-orders\/[1-9]\d*|dashboard\/summary|messages|meetings|meetings\/[1-9]\d*|notifications|reports\/(financial|fleet|statements\/(pnl|balance-sheet|cash-flow|vat-return))|stats\/(customers|vehicles|branches)|saved-filters|audit-events|(quotations|reservations|rentals|invoices)\/[1-9]\d*\/pdf|documents|documents\/[1-9]\d*|users|roles|invitations|invitations\/preview))$/.test(
+    return /^(sanctum\/csrf-cookie|api\/v1\/(health|auth\/me|companies|companies\/[1-9]\d*\/(settings|approval-thresholds|mail-settings)|branches|customers|customers\/[1-9]\d*|customers\/[1-9]\d*\/(summary|statement)|vehicles|vehicles\/[1-9]\d*|vehicles\/[1-9]\d*\/(summary|history)|leads|quotations|quotations\/[1-9]\d*|reservations|reservations\/[1-9]\d*|rentals|rentals\/[1-9]\d*|rate-cards|inspections|invoices|invoices\/ageing|invoices\/[1-9]\d*|credit-notes|payments|refunds|expenses|gl\/accounts|gl\/journal-entries|ap\/(invoices|ageing)|bank-accounts|bank-accounts\/[1-9]\d*\/transactions|fixed-assets|credit\/(accounts|collections)|approvals|compliance\/expiries|work-orders|work-orders\/[1-9]\d*|incidents|maintenance-schedules|vehicle-components|fuel-transactions|parts|stock-movements|suppliers|suppliers\/[1-9]\d*\/statement|purchase-requisitions|purchase-orders|purchase-orders\/[1-9]\d*|dashboard\/summary|messages|meetings|meetings\/[1-9]\d*|meetings\/[1-9]\d*\/rtc\/signals|notifications|reports\/(financial|fleet|statements\/(pnl|balance-sheet|cash-flow|vat-return))|stats\/(customers|vehicles|branches)|saved-filters|audit-events|(quotations|reservations|rentals|invoices)\/[1-9]\d*\/pdf|documents|documents\/[1-9]\d*|users|roles|invitations|invitations\/preview))$/.test(
       path,
     );
   if (method === "POST")
-    return /^api\/v1\/(auth\/(login|logout|forgot-password|reset-password|change-password|two-factor\/(setup|confirm|disable|recovery-codes|challenge))|companies|branches|customers|vehicles|leads|leads\/[1-9]\d*\/convert|quotations|quotations\/[1-9]\d*\/(approve-discount|reject-discount|accept|cancel|convert)|reservations|reservations\/[1-9]\d*\/cancel|rentals|rentals\/[1-9]\d*\/(handover|return|extend|amend|assign-driver)|rate-cards|invoices|invoices\/[1-9]\d*\/(issue|void|payments|refunds|credit-notes)|expenses|ap\/invoices|ap\/invoices\/[1-9]\d*\/payments|bank-accounts|bank-accounts\/[1-9]\d*\/(transactions|reconciliations)|bank-transactions\/[1-9]\d*\/(match|unmatch)|fixed-assets|fixed-assets\/depreciate|fixed-assets\/[1-9]\d*\/(request-disposal|dispose)|credit\/collections|approvals|approvals\/[1-9]\d*\/(approve|reject)|work-orders|work-orders\/[1-9]\d*\/(start|consume-parts|complete|cancel)|incidents|incidents\/[1-9]\d*\/create-work-order|maintenance-schedules|vehicle-components|fuel-transactions|parts|parts\/[1-9]\d*\/adjust|suppliers|purchase-requisitions|purchase-requisitions\/[1-9]\d*\/(approve|reject|convert-to-po)|purchase-orders|purchase-orders\/[1-9]\d*\/(submit|approve|receive|cancel)|messages|messages\/[1-9]\d*\/read|meetings|meetings\/[1-9]\d*\/(rsvp|start|end|cancel)|notifications\/([1-9]\d*\/read|read-all)|saved-filters|invitations|invitations\/accept|invitations\/[1-9]\d*\/(resend|revoke)|documents|users|users\/[1-9]\d*\/reset-two-factor)$/.test(
+    return /^api\/v1\/(auth\/(login|logout|forgot-password|reset-password|change-password|two-factor\/(setup|confirm|disable|recovery-codes|challenge))|companies|companies\/[1-9]\d*\/mail-settings\/test|branches|customers|vehicles|leads|leads\/[1-9]\d*\/convert|quotations|quotations\/[1-9]\d*\/(approve-discount|reject-discount|accept|cancel|convert)|reservations|reservations\/[1-9]\d*\/cancel|rentals|rentals\/[1-9]\d*\/(handover|return|extend|amend|assign-driver)|rate-cards|invoices|invoices\/[1-9]\d*\/(issue|void|payments|refunds|credit-notes)|expenses|ap\/invoices|ap\/invoices\/[1-9]\d*\/payments|bank-accounts|bank-accounts\/[1-9]\d*\/(transactions|reconciliations)|bank-transactions\/[1-9]\d*\/(match|unmatch)|fixed-assets|fixed-assets\/depreciate|fixed-assets\/[1-9]\d*\/(request-disposal|dispose)|credit\/collections|approvals|approvals\/[1-9]\d*\/(approve|reject)|work-orders|work-orders\/[1-9]\d*\/(start|consume-parts|complete|cancel)|incidents|incidents\/[1-9]\d*\/create-work-order|maintenance-schedules|vehicle-components|fuel-transactions|parts|parts\/[1-9]\d*\/adjust|suppliers|purchase-requisitions|purchase-requisitions\/[1-9]\d*\/(approve|reject|convert-to-po)|purchase-orders|purchase-orders\/[1-9]\d*\/(submit|approve|receive|cancel)|messages|messages\/[1-9]\d*\/read|meetings|meetings\/[1-9]\d*\/(rsvp|start|end|cancel|rtc\/(join|signals|leave))|notifications\/([1-9]\d*\/read|read-all)|saved-filters|invitations|invitations\/accept|invitations\/[1-9]\d*\/(resend|revoke)|documents|users|users\/[1-9]\d*\/reset-two-factor|roles\/[a-z0-9-]{2,48}\/reset)$/.test(
       path,
     );
   if (method === "DELETE")
-    return /^api\/v1\/saved-filters\/[1-9]\d*$/.test(path);
+    return /^api\/v1\/(saved-filters|users)\/[1-9]\d*$/.test(path);
   return (
     method === "PATCH" &&
-    /^api\/v1\/(auth\/profile|(customers|vehicles|leads|incidents|meetings|users|invoices|parts|suppliers|purchase-orders|rate-cards|maintenance-schedules|vehicle-components)\/[1-9]\d*|credit\/(accounts|collections)\/[1-9]\d*|companies\/[1-9]\d*\/(settings|approval-thresholds))$/.test(
+    /^api\/v1\/(auth\/profile|(customers|vehicles|leads|incidents|meetings|users|invoices|parts|suppliers|purchase-orders|rate-cards|maintenance-schedules|vehicle-components)\/[1-9]\d*|credit\/(accounts|collections)\/[1-9]\d*|companies\/[1-9]\d*\/(settings|approval-thresholds|mail-settings)|roles\/[a-z0-9-]{2,48})$/.test(
       path,
     )
   );
@@ -69,10 +69,15 @@ export function allowedQuery(
   params: URLSearchParams,
 ): boolean {
   const keys = [...params.keys()];
+  if (method === "DELETE" && /^api\/v1\/users\/[1-9]\d*$/.test(path)) {
+    if (keys.length !== 1 || keys[0] !== "company_id") return false;
+    const companyId = params.get("company_id");
+    return Boolean(companyId && posInt(companyId));
+  }
   if (keys.length === 0) {
     return (
       method !== "GET" ||
-      !/^api\/v1\/(customers|vehicles|leads|quotations|reservations|rentals|rate-cards|inspections|invoices|invoices\/ageing|credit-notes|payments|refunds|expenses|gl\/accounts|gl\/journal-entries|ap\/(invoices|ageing)|bank-accounts|fixed-assets|credit\/(accounts|collections)|approvals|compliance\/expiries|work-orders|incidents|maintenance-schedules|vehicle-components|fuel-transactions|parts|stock-movements|suppliers|purchase-requisitions|purchase-orders|dashboard\/summary|messages|meetings|notifications|reports\/(financial|fleet|statements\/(pnl|balance-sheet|cash-flow|vat-return))|stats\/(customers|vehicles|branches)|saved-filters|invitations|invitations\/preview|audit-events|documents|users|roles)$/.test(
+      !/^api\/v1\/(customers|vehicles|leads|quotations|reservations|rentals|rate-cards|inspections|invoices|invoices\/ageing|credit-notes|payments|refunds|expenses|gl\/accounts|gl\/journal-entries|ap\/(invoices|ageing)|bank-accounts|fixed-assets|credit\/(accounts|collections)|approvals|compliance\/expiries|work-orders|incidents|maintenance-schedules|vehicle-components|fuel-transactions|parts|stock-movements|suppliers|purchase-requisitions|purchase-orders|dashboard\/summary|messages|meetings|meetings\/[1-9]\d*\/rtc\/signals|notifications|reports\/(financial|fleet|statements\/(pnl|balance-sheet|cash-flow|vat-return))|stats\/(customers|vehicles|branches)|saved-filters|invitations|invitations\/preview|audit-events|documents|users|roles)$/.test(
         path,
       )
     );
@@ -633,6 +638,29 @@ export function allowedQuery(
       return false;
     if (scopeParam !== null && !["upcoming", "past", "all"].includes(scopeParam))
       return false;
+    return true;
+  }
+  if (/^api\/v1\/meetings\/[1-9]\d*\/rtc\/signals$/.test(path)) {
+    for (const key of uniqueKeys) {
+      if (
+        ![
+          "peer_id",
+          "after_id",
+          "audio_enabled",
+          "video_enabled",
+          "screen_sharing",
+        ].includes(key)
+      )
+        return false;
+    }
+    const peerId = params.get("peer_id");
+    if (!peerId || !/^[a-zA-Z0-9_-]{4,64}$/.test(peerId)) return false;
+    const afterId = params.get("after_id");
+    if (afterId !== null && !nonNegIntStr(afterId)) return false;
+    for (const flag of ["audio_enabled", "video_enabled", "screen_sharing"]) {
+      const val = params.get(flag);
+      if (val !== null && val !== "0" && val !== "1") return false;
+    }
     return true;
   }
   if (path === "api/v1/notifications") {
